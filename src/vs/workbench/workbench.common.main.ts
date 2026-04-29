@@ -408,6 +408,8 @@ import './contrib/editSessions/browser/editSessions.contribution.js';
 
 // Remote Coding Agents
 import './contrib/remoteCodingAgents/browser/remoteCodingAgents.contribution.js';
+import './contrib/custom/browser/modeShell.contribution.js';
+import './contrib/custom/browser/defaultProjectBootstrap.contribution.js';
 
 // Code Actions
 import './contrib/codeActions/browser/codeActions.contribution.js';

@@ -34,7 +34,6 @@ export interface IEditorTitleControlDimensions {
 }
 
 export class EditorTitleControl extends Themable {
-
 	private editorTabsControl: IEditorTabsControl;
 	private readonly editorTabsControlDisposable = this._register(new DisposableStore());
 
@@ -199,7 +198,6 @@ export class EditorTitleControl extends Themable {
 	}
 
 	layout(dimensions: IEditorTitleControlDimensions): Dimension {
-
 		// Layout tabs control
 		const tabsControlDimension = this.editorTabsControl.layout(dimensions);
 
