@@ -154,6 +154,9 @@ export function defaultBrowserWindowOptions(accessor: ServicesAccessor, windowSt
 			// Refs https://github.com/microsoft/vscode/issues/140098
 			enableBlinkFeatures: 'HighlightAPI',
 			sandbox: true,
+			// Custom fork: allow <webview> embedding for UI mode surface.
+			// Note: this has security implications; keep usage constrained to trusted URLs (e.g. localhost dev servers).
+			webviewTag: true,
 			// TODO(deepak1556): Should be removed once migration is complete
 			// https://github.com/microsoft/vscode/issues/239228
 			enableDeprecatedPaste: true,

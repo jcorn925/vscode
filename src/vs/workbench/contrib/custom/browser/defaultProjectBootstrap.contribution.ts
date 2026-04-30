@@ -16,7 +16,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 	properties: {
 		'custom.defaultProject.repoUrl': {
 			type: 'string',
-			default: 'https://github.com/jcorn925/cracked.git',
+			default: 'https://github.com/vitejs/vite.git',
 			description: localize('custom.defaultProject.repoUrl', "Git repo URL to clone when creating the default project."),
 			scope: ConfigurationScope.APPLICATION
 		},

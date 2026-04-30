@@ -1707,13 +1707,31 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 
 			size(this.mainContainer, this._mainContainerDimension.width, this._mainContainerDimension.height);
 
-			// Layout the grid widget
-			this.workbenchGrid.layout(this._mainContainerDimension.width, this._mainContainerDimension.height);
+			// Layout the grid widget (see `getCustomModeShellInsets` — custom mode shell is out-of-flow CSS)
+			const { top: customShellTop, bottom: customShellBottom } = this.getCustomModeShellInsets();
+			const gridHeight = Math.max(0, this._mainContainerDimension.height - customShellTop - customShellBottom);
+			this.workbenchGrid.layout(this._mainContainerDimension.width, gridHeight);
 			this.initialized = true;
 
 			// Emit as event
 			this.handleContainerDidLayout(this.mainContainer, this._mainContainerDimension);
 		}
+	}
+
+	/**
+	 * Custom fork: `ModeShellContribution` sets `--custom-mode-shell-height` /
+	 * `--custom-mode-shell-bottom-inset` on the workbench when a top strip or
+	 * similar out-of-flow chrome is used. The grid element is inset in CSS, but
+	 * `SerializableGrid#layout` must use the same reduced height or parts clip.
+	 */
+	private getCustomModeShellInsets(): { top: number; bottom: number } {
+		if (!this.mainContainer.classList.contains('custom-mode-shell-enabled')) {
+			return { top: 0, bottom: 0 };
+		}
+		const style = getWindow(this.mainContainer).getComputedStyle(this.mainContainer);
+		const top = parseFloat(style.getPropertyValue('--custom-mode-shell-height')) || 0;
+		const bottom = parseFloat(style.getPropertyValue('--custom-mode-shell-bottom-inset')) || 0;
+		return { top, bottom };
 	}
 
 	isMainEditorLayoutCentered(): boolean {

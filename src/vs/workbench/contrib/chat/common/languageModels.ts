@@ -1040,9 +1040,11 @@ export class LanguageModelsService implements ILanguageModelsService {
 
 		this._providers.set(vendor, provider);
 
-		if (this._hasStoredModelForVendor(vendor)) {
-			this._resolveAllLanguageModels(vendor, true);
-		}
+		// Always populate the model cache when a provider appears. Previously we only
+		// resolved when the user had a stored picker preference for this vendor, which
+		// left lookupLanguageModel/sendChatRequest blind until selectLanguageModels or
+		// onDidChange ran (e.g. workbench-registered providers like Custom AI).
+		this._resolveAllLanguageModels(vendor, true);
 
 		const modelChangeListener = provider.onDidChange(() => {
 			this._resolveAllLanguageModels(vendor, true);

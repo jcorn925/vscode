@@ -14,6 +14,20 @@ import { IFileService } from '../../vs/platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../vs/platform/workspace/common/workspace.js';
 import { ITerminalService } from '../../vs/workbench/contrib/terminal/browser/terminal.js';
 
+export type DevServerPackageManager = 'npm' | 'yarn' | 'pnpm';
+
+export interface DevServerSuggestedCommands {
+	readonly workspaceFolder: URI;
+	readonly packageManager: DevServerPackageManager;
+	readonly installCommand: string;
+	readonly primaryScript: string | undefined;
+	readonly primaryRunCommand: string | undefined;
+	readonly combinedCommandLine: string | undefined;
+	readonly inferredUrl: string | undefined;
+	readonly listedScripts: readonly { readonly name: string; readonly runCommand: string }[];
+	readonly hasNodeModules: boolean;
+}
+
 export interface IDevServerService {
 	readonly _serviceBrand: undefined;
 	readonly onDidChangeActiveUrl: Event<string | undefined>;
@@ -22,11 +36,13 @@ export interface IDevServerService {
 	getActiveUrl(): string | undefined;
 	getState(): DevServerState;
 	ensureRunning(): Promise<string | undefined>;
+	getSuggestedStartCommands(): Promise<DevServerSuggestedCommands | undefined>;
 }
 
 export const IDevServerService = createDecorator<IDevServerService>('devServerService');
 
 type PackageJson = {
+	packageManager?: string;
 	scripts?: Record<string, string>;
 	dependencies?: Record<string, string>;
 	devDependencies?: Record<string, string>;
@@ -89,6 +105,41 @@ export class DevServerService extends Disposable implements IDevServerService {
 		};
 	}
 
+	async getSuggestedStartCommands(): Promise<DevServerSuggestedCommands | undefined> {
+		const workspaceFolder = this.getPrimaryWorkspaceFolder();
+		if (!workspaceFolder) {
+			return undefined;
+		}
+
+		const detected = await this.detectPackageJson(workspaceFolder);
+		if (!detected) {
+			return undefined;
+		}
+
+		const { folder, packageJson } = detected;
+		const packageManager = await this.detectPackageManager(folder, packageJson);
+		const primaryScript = this.pickStartScript(packageJson);
+		const installCommand = this.formatInstallCommand(packageManager);
+		const primaryRunCommand = primaryScript ? this.formatRunCommand(packageManager, primaryScript) : undefined;
+		const hasNodeModules = await this.fileService.exists(joinPath(folder, 'node_modules'));
+		const combinedCommandLine = primaryRunCommand
+			? (hasNodeModules ? primaryRunCommand : `${installCommand} && ${primaryRunCommand}`)
+			: undefined;
+		const inferredUrl = primaryScript ? this.inferDevUrl(packageJson, primaryScript) : undefined;
+
+		return {
+			workspaceFolder: folder,
+			packageManager,
+			installCommand,
+			primaryScript,
+			primaryRunCommand,
+			combinedCommandLine,
+			inferredUrl,
+			listedScripts: this.listStartLikeScripts(packageJson, packageManager),
+			hasNodeModules
+		};
+	}
+
 	async ensureRunning(): Promise<string | undefined> {
 		const workspaceFolder = this.getPrimaryWorkspaceFolder();
 		if (!workspaceFolder) {
@@ -134,8 +185,10 @@ export class DevServerService extends Disposable implements IDevServerService {
 		// Parse output to learn the actual URL/port once the dev server prints it.
 		this._register(instance.onData(data => this.tryExtractUrlFromTerminalData(data)));
 
-		const startCommand = this.toNpmCommand(startScript);
-		const fullCommand = needsInstall ? `npm install && ${startCommand}` : startCommand;
+		const packageManager = await this.detectPackageManager(folder, packageJson);
+		const startCommand = this.formatRunCommand(packageManager, startScript);
+		const installCommand = this.formatInstallCommand(packageManager);
+		const fullCommand = needsInstall ? `${installCommand} && ${startCommand}` : startCommand;
 		this.command = fullCommand;
 		this.setPhase(needsInstall ? 'installing' : 'starting');
 
@@ -277,9 +330,62 @@ export class DevServerService extends Disposable implements IDevServerService {
 		return undefined;
 	}
 
-	private toNpmCommand(script: string): string {
-		// "npm start" is slightly nicer but "npm run start" is equivalent; keep simple.
+	private async detectPackageManager(folder: URI, packageJson: PackageJson): Promise<DevServerPackageManager> {
+		const field = packageJson.packageManager;
+		if (typeof field === 'string') {
+			const lower = field.toLowerCase();
+			if (lower.startsWith('yarn')) {
+				return 'yarn';
+			}
+			if (lower.startsWith('pnpm')) {
+				return 'pnpm';
+			}
+		}
+		if (await this.fileService.exists(joinPath(folder, 'pnpm-lock.yaml'))) {
+			return 'pnpm';
+		}
+		if (await this.fileService.exists(joinPath(folder, 'yarn.lock'))) {
+			return 'yarn';
+		}
+		return 'npm';
+	}
+
+	private formatInstallCommand(pm: DevServerPackageManager): string {
+		if (pm === 'yarn') {
+			return 'yarn install';
+		}
+		if (pm === 'pnpm') {
+			return 'pnpm install';
+		}
+		return 'npm install';
+	}
+
+	private formatRunCommand(pm: DevServerPackageManager, script: string): string {
+		if (pm === 'yarn') {
+			return script === 'start' ? 'yarn start' : `yarn ${script}`;
+		}
+		if (pm === 'pnpm') {
+			return script === 'start' ? 'pnpm start' : `pnpm run ${script}`;
+		}
 		return script === 'start' ? 'npm start' : `npm run ${script}`;
+	}
+
+	private listStartLikeScripts(packageJson: PackageJson, pm: DevServerPackageManager): { name: string; runCommand: string }[] {
+		const scripts = packageJson.scripts ?? {};
+		const priority = ['dev', 'web', 'start', 'serve', 'develop', 'preview'];
+		const result: { name: string; runCommand: string }[] = [];
+		for (const name of priority) {
+			if (scripts[name]) {
+				result.push({ name, runCommand: this.formatRunCommand(pm, name) });
+			}
+		}
+		if (result.length === 0) {
+			const keys = Object.keys(scripts);
+			for (const name of keys.slice(0, 8)) {
+				result.push({ name, runCommand: this.formatRunCommand(pm, name) });
+			}
+		}
+		return result;
 	}
 
 	private setPhase(phase: DevServerPhase, error?: string): void {

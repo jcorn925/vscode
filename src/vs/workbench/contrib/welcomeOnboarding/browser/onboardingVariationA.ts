@@ -10,7 +10,6 @@ import { isCancellationError } from '../../../../base/common/errors.js';
 import { StopWatch } from '../../../../base/common/stopwatch.js';
 import { URI } from '../../../../base/common/uri.js';
 import { isWindows, isMacintosh, isLinux } from '../../../../base/common/platform.js';
-import { assertDefined } from '../../../../base/common/types.js';
 import { FileAccess } from '../../../../base/common/network.js';
 import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
@@ -70,8 +69,50 @@ type OnboardingActionEvent = {
 	argument: string | undefined;
 };
 
-assertDefined(product.defaultChatAgent, 'Onboarding requires a default chat agent product configuration.');
-const defaultChat = product.defaultChatAgent;
+/**
+ * Onboarding Variation A expects a "default chat agent" in product configuration.
+ * Forks can run without one (e.g. when not bundling Copilot), so fall back to a
+ * harmless placeholder to avoid crashing the workbench at module load time.
+ */
+const defaultChat = product.defaultChatAgent ?? {
+	extensionId: 'Continue.continue',
+	chatExtensionId: 'Continue.continue',
+	chatExtensionOutputId: 'Continue.continue.log',
+	chatExtensionOutputExtensionStateCommand: '',
+	documentationUrl: 'https://continue.dev',
+	termsStatementUrl: 'https://continue.dev',
+	privacyStatementUrl: 'https://continue.dev',
+	skusDocumentationUrl: 'https://continue.dev',
+	publicCodeMatchesUrl: 'https://continue.dev',
+	manageSettingsUrl: 'https://continue.dev',
+	managePlanUrl: 'https://continue.dev',
+	manageAdditionalSpendUrl: 'https://continue.dev',
+	upgradePlanUrl: 'https://continue.dev',
+	signUpUrl: 'https://continue.dev',
+	provider: {
+		default: { id: 'continue', name: 'Continue' },
+		enterprise: { id: 'continue-enterprise', name: 'Continue' },
+		google: { id: 'continue-google', name: 'Continue' },
+		apple: { id: 'continue-apple', name: 'Continue' }
+	},
+	providerExtensionId: 'vscode.github-authentication',
+	providerUriSetting: 'github-enterprise.uri',
+	providerScopes: [],
+	entitlementUrl: '',
+	entitlementSignupLimitedUrl: '',
+	chatQuotaExceededContext: '',
+	completionsQuotaExceededContext: '',
+	walkthroughCommand: '',
+	completionsMenuCommand: '',
+	chatRefreshTokenCommand: '',
+	generateCommitMessageCommand: '',
+	resolveMergeConflictsCommand: '',
+	completionsAdvancedSetting: '',
+	completionsEnablementSetting: '',
+	nextEditSuggestionsSetting: '',
+	tokenEntitlementUrl: '',
+	mcpRegistryDataUrl: ''
+};
 
 /**
  * Variation A — Classic Wizard Modal

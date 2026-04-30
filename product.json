@@ -95,13 +95,44 @@
 			}
 		}
 	],
+	"defaultChatAgent": {
+		"extensionId": "Continue.continue",
+		"chatExtensionId": "Continue.continue",
+		"chatExtensionOutputId": "Continue.continue.log",
+		"chatExtensionOutputExtensionStateCommand": "",
+		"documentationUrl": "https://continue.dev",
+		"termsStatementUrl": "https://continue.dev",
+		"privacyStatementUrl": "https://continue.dev",
+		"skusDocumentationUrl": "https://continue.dev",
+		"publicCodeMatchesUrl": "https://continue.dev",
+		"manageSettingsUrl": "https://continue.dev",
+		"managePlanUrl": "https://continue.dev",
+		"manageAdditionalSpendUrl": "https://continue.dev",
+		"upgradePlanUrl": "https://continue.dev",
+		"signUpUrl": "https://continue.dev",
+		"provider": {
+			"default": {
+				"id": "continue",
+				"name": "Continue"
+			},
+			"enterprise": {
+				"id": "continue-enterprise",
+				"name": "Continue"
+			},
+			"google": {
+				"id": "continue-google",
+				"name": "Continue"
+			},
+			"apple": {
+				"id": "continue-apple",
+				"name": "Continue"
+			}
+		},
+		"providerExtensionId": "vscode.github-authentication",
+		"providerUriSetting": "github-enterprise.uri",
+		"providerScopes": []
+	},
 	"trustedExtensionAuthAccess": {
-		"github": [
-			"GitHub.copilot-chat"
-		],
-		"github-enterprise": [
-			"GitHub.copilot-chat"
-		]
 	},
 	"onboardingKeymaps": [
 		{
@@ -178,7 +209,5 @@
 			"type": "light"
 		}
 	],
-	"builtInExtensionsEnabledWithAutoUpdates": [
-		"GitHub.copilot-chat"
-	]
+	"builtInExtensionsEnabledWithAutoUpdates": []
 }
