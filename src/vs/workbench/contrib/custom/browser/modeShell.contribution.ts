@@ -267,6 +267,11 @@ class ModeShellContribution extends Disposable {
 				opacity: 1;
 			}
 
+			/* When the app is reachable, hide Setup (but keep Debug available). */
+			.monaco-workbench.custom-mode-app-reachable .custom-mode-ui-container .custom-mode-setup {
+				display: none;
+			}
+
 			.monaco-workbench .custom-mode-process-container.visible {
 				align-items: stretch;
 				justify-content: flex-start;
@@ -276,6 +281,7 @@ class ModeShellContribution extends Disposable {
 				position: absolute;
 				left: 16px;
 				bottom: 16px;
+				z-index: 2300;
 				max-width: min(720px, calc(100% - 32px));
 				max-height: 35%;
 				overflow: auto;
@@ -363,19 +369,17 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-urlPill {
-				position: absolute;
-				top: 12px;
-				right: 12px;
-				z-index: 2200;
+				/* Inline chip in the top mode bar (inserted before the UI tab). */
 				display: none;
-				max-width: min(520px, calc(100% - 24px));
-				padding: 6px 10px;
+				max-width: min(420px, calc(100% - 24px));
+				height: 22px;
+				padding: 0 10px;
 				border-radius: 999px;
 				background-color: var(--vscode-editorWidget-background);
 				border: 1px solid var(--vscode-editorWidget-border);
 				color: var(--vscode-descriptionForeground);
 				font-size: 11px;
-				line-height: 1.3;
+				line-height: 22px;
 				white-space: nowrap;
 				overflow: hidden;
 				text-overflow: ellipsis;
@@ -565,7 +569,6 @@ class ModeShellContribution extends Disposable {
 
 		this.uiContainer.appendChild(this.uiCallout);
 		this.uiContainer.appendChild(this.uiSetup);
-		this.uiContainer.appendChild(this.uiUrlPill);
 		this.uiDebugText = $('div');
 		this.uiRuntimeText = $('div');
 		this.uiDevtoolsButton = $('button.custom-mode-devserver-debug-button', { type: 'button' }, localize('customMode.openUiDevtools', 'Open UI DevTools')) as HTMLButtonElement;
@@ -587,6 +590,13 @@ class ModeShellContribution extends Disposable {
 		);
 		this.uiContainer.appendChild(this.uiDebug);
 		this.uiContainer.appendChild(this.uiBrowser);
+
+		// Show the active URL in the top mode bar, right before the "UI" tab.
+		const uiTab = this.topModeButtons.get('UI');
+		if (uiTab) {
+			this.modeTopBar.insertBefore(this.uiUrlPill, uiTab);
+			this._register(toDisposable(() => this.uiUrlPill.remove()));
+		}
 
 		this.processContainer = $('div.custom-mode-process-container');
 		this.processCallout = this.createDefaultProjectCallout(localize('customMode.processCalloutTitle', 'No project open'), localize('customMode.processCalloutSubtitle', 'Create and open the default project to start coding.'), () => this.defaultProjectService.createAndOpenDefaultProject());
@@ -610,9 +620,14 @@ class ModeShellContribution extends Disposable {
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.updateProjectState()));
 		this._register(this.devServerService.onDidChangeActiveUrl(url => {
 			if (url && this.uiBrowser.src !== url) {
-				this.uiBrowser.src = url;
-				// Webview sometimes ignores property-only updates; set attribute too.
-				(this.uiBrowser as unknown as HTMLElement).setAttribute('src', url);
+				// IMPORTANT: Don't set both property + attribute on <webview>.
+				// Doing so can cause a navigation to be canceled by a subsequent
+				// navigation, which shows up as ERR_ABORTED (-3).
+				if (isWeb) {
+					this.uiBrowser.src = url;
+				} else {
+					(this.uiBrowser as unknown as HTMLElement).setAttribute('src', url);
+				}
 			}
 			this.updateUiUrlPill(url);
 		}));
@@ -642,6 +657,7 @@ class ModeShellContribution extends Disposable {
 		if (!isWeb && this.isWebviewElement(this.uiBrowser)) {
 			const webview = this.uiBrowser as unknown as {
 				addEventListener: (type: string, listener: (e: any) => void) => void;
+				executeJavaScript?: (code: string, userGesture?: boolean) => Promise<unknown>;
 			};
 
 			const log = (type: string, detail?: string) => this.pushUiRuntimeLog(`[webview:${type}]${detail ? ` ${detail}` : ''}`);
@@ -649,7 +665,15 @@ class ModeShellContribution extends Disposable {
 			webview.addEventListener('did-start-loading', () => log('did-start-loading'));
 			webview.addEventListener('did-stop-loading', () => log('did-stop-loading'));
 			webview.addEventListener('did-finish-load', () => log('did-finish-load'));
-			webview.addEventListener('dom-ready', () => log('dom-ready'));
+			webview.addEventListener('dom-ready', async () => {
+				log('dom-ready');
+				try {
+					await webview.executeJavaScript?.(this.uiClickOverlayScript);
+					log('inject-click-overlay');
+				} catch (e: any) {
+					log('inject-failed', String(e?.message ?? e));
+				}
+			});
 			webview.addEventListener('did-navigate', (e: any) => log('did-navigate', e?.url ? String(e.url) : undefined));
 			webview.addEventListener('did-navigate-in-page', (e: any) => log('did-navigate-in-page', e?.url ? String(e.url) : undefined));
 
@@ -658,12 +682,29 @@ class ModeShellContribution extends Disposable {
 				const level = e?.level ?? '';
 				const line = e?.line ? `:${e.line}` : '';
 				const source = e?.sourceId ? ` (${e.sourceId}${line})` : '';
+				// Parse click overlay marker emitted from inside <webview>.
+				if (typeof msg === 'string' && msg.startsWith('__VSCODE_UI_CLICK__')) {
+					try {
+						const json = msg.slice('__VSCODE_UI_CLICK__'.length);
+						const data = JSON.parse(json) as UiClickOverlayMessage;
+						this.onEmbeddedUiMessage(new MessageEvent('message', { data } as any));
+						return;
+					} catch {
+						// fall through and log raw
+					}
+				}
+
 				this.pushUiRuntimeLog(`[console${level ? `:${level}` : ''}] ${msg}${source}`);
 			}));
 
 			this._register(addDisposableListener(this.uiBrowser as unknown as HTMLElement, 'did-fail-load', (e: any) => {
 				const url = e?.validatedURL ?? '';
 				const desc = e?.errorDescription ?? e?.errorCode ?? 'load failed';
+				// ERR_ABORTED (-3) is emitted when a navigation is intentionally interrupted
+				// (e.g. subsequent src update). Don't treat it as a real error.
+				if (e?.errorCode === -3 || String(desc).includes('ERR_ABORTED')) {
+					return;
+				}
 				this.pushUiRuntimeLog(`[load-failed] ${desc}${url ? ` (${url})` : ''}`);
 			}));
 
@@ -676,6 +717,9 @@ class ModeShellContribution extends Disposable {
 			webview.addEventListener('did-fail-load', (e: any) => {
 				const url = e?.validatedURL ?? '';
 				const desc = e?.errorDescription ?? e?.errorCode ?? 'load failed';
+				if (e?.errorCode === -3 || String(desc).includes('ERR_ABORTED')) {
+					return;
+				}
 				this.pushUiRuntimeLog(`[load-failed] ${desc}${url ? ` (${url})` : ''}`);
 			});
 		}
@@ -889,16 +933,22 @@ class ModeShellContribution extends Disposable {
 		const raw = (this.uiLoadUrlInput.value ?? '').trim();
 		if (!raw) {
 			const fallback = 'https://example.com';
-			this.uiBrowser.src = fallback;
-			(this.uiBrowser as unknown as HTMLElement).setAttribute('src', fallback);
+			if (isWeb) {
+				this.uiBrowser.src = fallback;
+			} else {
+				(this.uiBrowser as unknown as HTMLElement).setAttribute('src', fallback);
+			}
 			this.pushUiRuntimeLog('[ui-load] https://example.com');
 			return;
 		}
 
 		// Best-effort normalization: if user types "localhost:3000", add scheme.
 		const url = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw) ? raw : `https://${raw}`;
-		this.uiBrowser.src = url;
-		(this.uiBrowser as unknown as HTMLElement).setAttribute('src', url);
+		if (isWeb) {
+			this.uiBrowser.src = url;
+		} else {
+			(this.uiBrowser as unknown as HTMLElement).setAttribute('src', url);
+		}
 		this.pushUiRuntimeLog(`[ui-load] ${url}`);
 	}
 

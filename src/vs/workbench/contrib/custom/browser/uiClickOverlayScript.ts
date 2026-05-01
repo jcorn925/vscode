@@ -29,89 +29,120 @@ export type UiClickOverlayMessage = {
 export function createUiClickOverlayScript(): string {
 	// Keep as a single string so it can be injected via <script> or executeJavaScript.
 	return String.raw`(() => {
-  const MAX_TEXT = 80;
+const MAX_TEXT = 80;
 
-  function safeString(v) {
-    return typeof v === 'string' ? v : undefined;
-  }
+try {
+	// Avoid double-injecting.
+	if (window.__vscodeClickOverlayInjected) {
+		return;
+	}
+	window.__vscodeClickOverlayInjected = true;
+} catch {
+	// ignore
+}
 
-  function truncate(s) {
-    if (!s) { return undefined; }
-    const t = s.trim().replace(/\s+/g, ' ');
-    return t.length > MAX_TEXT ? t.slice(0, MAX_TEXT) : t;
-  }
+function safeString(v) {
+	return typeof v === 'string' ? v : undefined;
+}
 
-  function pickSource(el) {
-    if (!el) { return undefined; }
-    if (el.dataset && typeof el.dataset.source === 'string' && el.dataset.source) {
-      return el.dataset.source;
-    }
-    const attr = el.getAttribute && (el.getAttribute('data-source') || el.getAttribute('data-testid') || el.getAttribute('data-test-id'));
-    if (attr) { return attr; }
-    return undefined;
-  }
+function truncate(s) {
+	if (!s) { return undefined; }
+	const t = s.trim().replace(/\s+/g, ' ');
+	return t.length > MAX_TEXT ? t.slice(0, MAX_TEXT) : t;
+}
 
-  function cssPath(el) {
-    try {
-      const parts = [];
-      let cur = el;
-      for (let i = 0; cur && i < 6; i++) {
-        const tag = (cur.tagName || '').toLowerCase();
-        if (!tag) { break; }
-        let part = tag;
-        if (cur.id) {
-          part += '#' + cur.id;
-          parts.unshift(part);
-          break;
-        }
-        const cls = typeof cur.className === 'string' ? cur.className.split(/\s+/).filter(Boolean).slice(0, 2) : [];
-        if (cls.length) {
-          part += '.' + cls.join('.');
-        }
-        parts.unshift(part);
-        cur = cur.parentElement;
-      }
-      return parts.join(' > ') || undefined;
-    } catch {
-      return undefined;
-    }
-  }
+function pickSource(el) {
+	if (!el) { return undefined; }
+	if (el.dataset && typeof el.dataset.source === 'string' && el.dataset.source) {
+		return el.dataset.source;
+	}
+	const attr = el.getAttribute && (el.getAttribute('data-source') || el.getAttribute('data-testid') || el.getAttribute('data-test-id'));
+	if (attr) { return attr; }
+	return undefined;
+}
 
-  function extractTarget(e) {
-    const el = e.target && (e.target.nodeType === 1 ? e.target : e.target.parentElement);
-    if (!el) { return undefined; }
+function cssPath(el) {
+	try {
+		const parts = [];
+		let cur = el;
+		for (let i = 0; cur && i < 6; i++) {
+			const tag = (cur.tagName || '').toLowerCase();
+			if (!tag) { break; }
+			let part = tag;
+			if (cur.id) {
+				part += '#' + cur.id;
+				parts.unshift(part);
+				break;
+			}
+			const cls = typeof cur.className === 'string' ? cur.className.split(/\s+/).filter(Boolean).slice(0, 2) : [];
+			if (cls.length) {
+				part += '.' + cls.join('.');
+			}
+			parts.unshift(part);
+			cur = cur.parentElement;
+		}
+		return parts.join(' > ') || undefined;
+	} catch {
+		return undefined;
+	}
+}
 
-    const tag = safeString(el.tagName)?.toLowerCase() ?? 'unknown';
-    const role = safeString(el.getAttribute && el.getAttribute('role')) || undefined;
-    const name = safeString(el.getAttribute && el.getAttribute('name')) || undefined;
-    const ariaLabel = safeString(el.getAttribute && el.getAttribute('aria-label')) || undefined;
-    const id = safeString(el.id) || undefined;
-    const className = safeString(typeof el.className === 'string' ? el.className : undefined) || undefined;
-    const text = truncate(el.innerText || el.textContent || '');
+function extractTarget(e) {
+	const el = e.target && (e.target.nodeType === 1 ? e.target : e.target.parentElement);
+	if (!el) { return undefined; }
 
-    return { el, meta: { tag, role, name, ariaLabel, id, className, text } };
-  }
+	const tag = safeString(el.tagName)?.toLowerCase() ?? 'unknown';
+	const role = safeString(el.getAttribute && el.getAttribute('role')) || undefined;
+	const name = safeString(el.getAttribute && el.getAttribute('name')) || undefined;
+	const ariaLabel = safeString(el.getAttribute && el.getAttribute('aria-label')) || undefined;
+	const id = safeString(el.id) || undefined;
+	const className = safeString(typeof el.className === 'string' ? el.className : undefined) || undefined;
+	const text = truncate(el.innerText || el.textContent || '');
 
-  function onClick(ev) {
-    const extracted = extractTarget(ev);
-    if (!extracted) { return; }
-    const { el, meta } = extracted;
+	return { el, meta: { tag, role, name, ariaLabel, id, className, text } };
+}
 
-    const payload = {
-      type: 'vscode-ui-click',
-      timestamp: Date.now(),
-      href: String(location.href),
-      target: meta,
-      source: pickSource(el),
-      path: cssPath(el)
-    };
+function sendToHost(payload) {
+	// Preferred: iframe contexts can talk to their parent.
+	// In <webview>, window.parent may exist but does not bridge to the host, so only
+	// use postMessage when we're actually framed.
+	try {
+		if (window.parent && window.parent !== window) {
+			window.parent.postMessage(payload, '*');
+			return;
+		}
+	} catch {
+		// ignore
+	}
 
-    // Send to host. In iframe contexts, parent should receive this.
-    try { window.parent?.postMessage(payload, '*'); } catch {}
-  }
+	// Fallback: desktop <webview> has no parent postMessage bridge by default.
+	// Emit a console marker that the host can parse from 'console-message' events.
+	try {
+		console.log('__VSCODE_UI_CLICK__' + JSON.stringify(payload));
+	} catch {
+		// ignore
+	}
+}
 
-  // Capture phase so we see events before apps stopPropagation().
-  window.addEventListener('click', onClick, true);
+function onClick(ev) {
+	const extracted = extractTarget(ev);
+	if (!extracted) { return; }
+	const { el, meta } = extracted;
+
+	const payload = {
+		type: 'vscode-ui-click',
+		timestamp: Date.now(),
+		href: String(location.href),
+		target: meta,
+		source: pickSource(el),
+		path: cssPath(el)
+	};
+
+	sendToHost(payload);
+}
+
+// Capture phase so we see events before apps stopPropagation().
+window.addEventListener('click', onClick, true);
 })();`;
 }
 
