@@ -1,0 +1,10 @@
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/swc_visit-8ba3c3b85f9764d0.d: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/mod.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/map.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/move_map.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libswc_visit-8ba3c3b85f9764d0.rlib: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/mod.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/map.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/move_map.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libswc_visit-8ba3c3b85f9764d0.rmeta: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/mod.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/map.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/move_map.rs
+
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/lib.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/mod.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/map.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_visit-2.0.1/src/util/move_map.rs:

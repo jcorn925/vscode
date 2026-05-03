@@ -43,6 +43,7 @@
     "kill-watch-copilotd": "deemon --kill npm run watch-copilot",
     "precommit": "node --experimental-strip-types build/hygiene.ts",
     "gulp": "node --max-old-space-size=8192 ./node_modules/gulp/bin/gulp.js",
+    "darwin-dmg": "node -e \"if (process.platform !== 'darwin') { console.error('darwin-dmg is only supported on macOS.'); process.exit(1); }\" && bash scripts/create-dmg.sh",
     "electron": "node build/lib/electron.ts",
     "7z": "7z",
     "update-grammars": "node build/npm/update-all-grammars.ts",

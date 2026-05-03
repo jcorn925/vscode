@@ -503,7 +503,7 @@ export class ChatService extends Disposable implements IChatService {
 		return this._sessionModels.getReferenceDebugSnapshot();
 	}
 
-	private async acquireOrRestoreLocalSession(sessionResource: URI, debugOwner?: string): Promise<IChatModelReference | undefined> {
+	private async acquireOrRestoreLocalSession(sessionResource: URI, location: ChatAgentLocation, debugOwner?: string): Promise<IChatModelReference | undefined> {
 		this.trace('acquireOrRestoreSession', `${sessionResource}`);
 		const existingRef = this.acquireExistingSession(sessionResource, debugOwner);
 		if (existingRef) {
@@ -522,7 +522,18 @@ export class ChatService extends Disposable implements IChatService {
 		}
 
 		if (!sessionData) {
-			return undefined;
+			// No snapshot on disk yet (e.g. `startNewLocalSession` was disposed before the first async persist).
+			// Still bind this `vscode-local-chat-session:` URI so embedded UIs can acquire a live model.
+			const localSessionId = LocalChatSessionUri.parseLocalSessionId(sessionResource);
+			if (!localSessionId) {
+				return undefined;
+			}
+			return this._sessionModels.acquireOrCreate({
+				initialData: undefined,
+				location,
+				sessionResource,
+				canUseTools: true,
+			}, debugOwner ?? 'ChatService#acquireOrRestoreLocalSession(empty)');
 		}
 
 		const sessionRef = this._sessionModels.acquireOrCreate({
@@ -560,7 +571,7 @@ export class ChatService extends Disposable implements IChatService {
 
 	async acquireOrLoadSession(sessionResource: URI, location: ChatAgentLocation, token: CancellationToken, debugOwner?: string): Promise<IChatModelReference | undefined> {
 		if (sessionResource.scheme === Schemas.vscodeLocalChatSession) {
-			return this.acquireOrRestoreLocalSession(sessionResource, debugOwner);
+			return this.acquireOrRestoreLocalSession(sessionResource, location, debugOwner);
 		} else {
 			return this.loadRemoteSession(sessionResource, location, token, debugOwner);
 		}

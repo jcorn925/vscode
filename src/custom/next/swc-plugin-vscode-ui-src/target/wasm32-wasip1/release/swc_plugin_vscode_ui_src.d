@@ -1,0 +1,1 @@
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/swc_plugin_vscode_ui_src.wasm: /Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/src/lib.rs

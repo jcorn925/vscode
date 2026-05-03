@@ -1,0 +1,14 @@
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/swc_core-25a711d356966ca3.d: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/plugin.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/__diagnostics.rs /Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/build/swc_core-45e84e0b90573b36/out/core_pkg_version.txt
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libswc_core-25a711d356966ca3.rlib: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/plugin.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/__diagnostics.rs /Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/build/swc_core-45e84e0b90573b36/out/core_pkg_version.txt
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libswc_core-25a711d356966ca3.rmeta: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/plugin.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/__diagnostics.rs /Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/build/swc_core-45e84e0b90573b36/out/core_pkg_version.txt
+
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/lib.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/plugin.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_core-65.0.1/src/__diagnostics.rs:
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/build/swc_core-45e84e0b90573b36/out/core_pkg_version.txt:
+
+# env-dep:OUT_DIR=/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/build/swc_core-45e84e0b90573b36/out
+# env-dep:VERGEN_BUILD_SEMVER
+# env-dep:VERGEN_CARGO_FEATURES=common_plugin_transform,ecma_ast,ecma_plugin_transform,ecma_visit,swc_atoms,swc_common,swc_ecma_ast,swc_ecma_transforms_base,swc_ecma_transforms_testing,swc_ecma_visit,swc_plugin,swc_plugin_macro,swc_plugin_proxy,transform_common,__common,__common_plugin_transform,__ecma,__ecma_plugin_transform,__plugin_transform_schema_v1,__testing_transform,__visit

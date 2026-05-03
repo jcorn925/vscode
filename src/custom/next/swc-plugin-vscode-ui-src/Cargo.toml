@@ -1,0 +1,23 @@
+ [package]
+ name = "swc_plugin_vscode_ui_src"
+ version = "0.1.0"
+ edition = "2021"
+ publish = false
+
+ [lib]
+ crate-type = ["cdylib"]
+
+ [dependencies]
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+swc_core = { version = "65.0.1", default-features = false, features = [
+  "ecma_ast",
+  "ecma_visit",
+  "ecma_plugin_transform",
+ ] }
+
+[profile.release]
+# SWC wasm plugins have had issues when LTO is enabled, especially when calling
+# `get_transform_plugin_config()` (see swc-project/swc issues). Keep it off.
+lto = false
+

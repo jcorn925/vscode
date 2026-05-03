@@ -1,0 +1,10 @@
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/getrandom-3932dd7589131fc0.d: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/error.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/wasi.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libgetrandom-3932dd7589131fc0.rlib: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/error.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/wasi.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libgetrandom-3932dd7589131fc0.rmeta: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/error.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/wasi.rs
+
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/lib.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/error.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/wasi.rs:

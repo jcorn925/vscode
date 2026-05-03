@@ -1,0 +1,10 @@
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/hstr-185f34d6b71b9433.d: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/dynamic.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/global_store.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/tagged_value.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libhstr-185f34d6b71b9433.rlib: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/dynamic.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/global_store.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/tagged_value.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libhstr-185f34d6b71b9433.rmeta: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/dynamic.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/global_store.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/tagged_value.rs
+
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/lib.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/dynamic.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/global_store.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hstr-0.2.17/src/tagged_value.rs:

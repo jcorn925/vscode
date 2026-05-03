@@ -1,0 +1,10 @@
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/castaway-cb35585f66614b7d.d: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/internal.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/lifetime_free.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/utils.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libcastaway-cb35585f66614b7d.rlib: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/internal.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/lifetime_free.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/utils.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libcastaway-cb35585f66614b7d.rmeta: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/internal.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/lifetime_free.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/utils.rs
+
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/lib.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/internal.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/lifetime_free.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/castaway-0.2.4/src/utils.rs:

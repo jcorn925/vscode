@@ -1,0 +1,10 @@
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/rend-fb85b6cd8442723d.d: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_struct.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_traits.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_validation.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/librend-fb85b6cd8442723d.rlib: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_struct.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_traits.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_validation.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/librend-fb85b6cd8442723d.rmeta: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_struct.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_traits.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_validation.rs
+
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/lib.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_struct.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_traits.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rend-0.4.2/src/impl_validation.rs:

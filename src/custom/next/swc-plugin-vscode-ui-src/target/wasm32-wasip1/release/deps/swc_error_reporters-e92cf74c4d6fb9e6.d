@@ -1,0 +1,9 @@
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/swc_error_reporters-e92cf74c4d6fb9e6.d: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/diagnostic.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/handler.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libswc_error_reporters-e92cf74c4d6fb9e6.rlib: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/diagnostic.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/handler.rs
+
+/Users/macbookuser/vscode/src/custom/next/swc-plugin-vscode-ui-src/target/wasm32-wasip1/release/deps/libswc_error_reporters-e92cf74c4d6fb9e6.rmeta: /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/lib.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/diagnostic.rs /Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/handler.rs
+
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/lib.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/diagnostic.rs:
+/Users/macbookuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_error_reporters-23.0.0/src/handler.rs:

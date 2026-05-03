@@ -8,7 +8,32 @@ import path from 'path';
 import { spawn } from '@malept/cross-spawn-promise';
 
 const root = path.dirname(path.dirname(import.meta.dirname));
-const product = JSON.parse(fs.readFileSync(path.join(root, 'product.json'), 'utf8'));
+const product = JSON.parse(fs.readFileSync(path.join(root, 'product.json'), 'utf8')) as { nameLong: string; quality?: string };
+
+const darwinDir = import.meta.dirname;
+
+function resolveQuality(): string {
+	return process.env['VSCODE_QUALITY']?.trim() || product.quality || 'oss';
+}
+
+/**
+ * Prefer `dmg-background-${quality}.tiff`, then `dmg-background.tiff` (OSS default).
+ */
+function resolveBackgroundPath(quality: string): string {
+	const specific = path.join(darwinDir, `dmg-background-${quality}.tiff`);
+	if (fs.existsSync(specific)) {
+		return specific;
+	}
+	const fallback = path.join(darwinDir, 'dmg-background.tiff');
+	if (fs.existsSync(fallback)) {
+		console.log(`Using fallback DMG background: ${fallback}`);
+		return fallback;
+	}
+	throw new Error(
+		`No DMG background image found. Tried:\n  ${specific}\n  ${fallback}\n` +
+		'Add a 480×352 (or larger) TIFF as build/darwin/dmg-background.tiff, or dmg-background-<quality>.tiff.'
+	);
+}
 
 const DMGBUILD_REPO = 'https://github.com/dmgbuild/dmgbuild.git';
 const DMGBUILD_COMMIT = '75c8a6c7835c5b73dfd4510d92a8f357f93a5fbf';
@@ -141,7 +166,7 @@ async function runDmgBuild(settingsFile: string, volumeName: string, artifactPat
 
 async function main(buildDir?: string, outDir?: string): Promise<void> {
 	const arch = process.env['VSCODE_ARCH'];
-	const quality = process.env['VSCODE_QUALITY'];
+	const quality = resolveQuality();
 
 	if (!buildDir) {
 		throw new Error('Build directory argument is required');
@@ -160,9 +185,9 @@ async function main(buildDir?: string, outDir?: string): Promise<void> {
 	const appPath = path.join(appRoot, appName);
 	const dmgName = `VSCode-darwin-${arch}`;
 	const artifactPath = path.join(outDir, `${dmgName}.dmg`);
-	const backgroundPath = path.join(import.meta.dirname, `dmg-background-${quality}.tiff`);
+	const backgroundPath = resolveBackgroundPath(quality);
 	const diskIconPath = path.join(root, 'resources', 'darwin', 'code.icns');
-	let title = 'Code OSS';
+	let title = product.nameLong;
 	switch (quality) {
 		case 'stable':
 			title = 'VS Code';
@@ -172,6 +197,9 @@ async function main(buildDir?: string, outDir?: string): Promise<void> {
 			break;
 		case 'exploration':
 			title = 'VS Code Exploration';
+			break;
+		case 'oss':
+			title = 'Code OSS';
 			break;
 	}
 
