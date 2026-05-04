@@ -49,19 +49,6 @@ export type UiClickOverlayMessage = UiClickOverlayClickMessage | UiClickOverlayE
  * It captures click events, extracts lightweight DOM metadata, and sends it to
  * the host via window.postMessage.
  */
-/** Clears in-page marquee + mapped highlights (run inside embedded UI). */
-export function createClearUiMappedSelectionScript(): string {
-	return String.raw`(() => {
-	try {
-		document.querySelectorAll('.__vscode_mapped_selected').forEach(function (n) { n.classList.remove('__vscode_mapped_selected'); });
-		document.querySelectorAll('#__vscode_marquee_box').forEach(function (n) { n.remove(); });
-		document.documentElement.classList.remove('__vscode_marquee_dragging');
-	} catch {
-		// ignore
-	}
-})();`;
-}
-
 export function createUiClickOverlayScript(): string {
 	// Keep as a single string so it can be injected via <script> or executeJavaScript.
 	return String.raw`(() => {

@@ -31,7 +31,7 @@ import { INotificationService, Severity } from '../../../../platform/notificatio
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { INativeEnvironmentService } from '../../../../platform/environment/common/environment.js';
-import { createClearUiMappedSelectionScript, createUiClickOverlayScript, UiClickOverlayMessage } from './uiClickOverlayScript.js';
+import { createUiClickOverlayScript, UiClickOverlayMessage } from './uiClickOverlayScript.js';
 import { IChatService } from '../../chat/common/chatService/chatService.js';
 import { IChatWidgetService } from '../../chat/browser/chat.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
@@ -58,6 +58,7 @@ class ModeShellContribution extends Disposable {
 	private readonly processContainer: HTMLElement;
 	private readonly styleSheet = createStyleSheet();
 	private readonly uiBrowser: HTMLElement & { src: string };
+	private readonly uiBrowserShell: HTMLElement;
 	private readonly uiCallout: HTMLElement;
 	private readonly processCallout: HTMLElement;
 	private readonly processStartHints: HTMLElement;
@@ -68,13 +69,9 @@ class ModeShellContribution extends Disposable {
 	private readonly uiStartSubtitle: HTMLElement;
 	private readonly uiStartStatus: HTMLElement;
 	private readonly uiRuntimeText: HTMLElement;
-	private readonly uiMappedStrip: HTMLElement;
-	private readonly uiMappedSelectionText: HTMLElement;
-	private readonly uiMappedSelectionClear: HTMLButtonElement;
 	private lastUiStartHints: DevServerSuggestedCommands | undefined;
 	private readonly uiRuntimeLogs: string[] = [];
 	private readonly uiClickOverlayScript = createUiClickOverlayScript();
-	private readonly clearUiMappedSelectionScript = createClearUiMappedSelectionScript();
 	private readonly startHintActionDisposables = this._register(new DisposableStore());
 	private reachabilityAbort: AbortController | undefined;
 	private reachabilityUrl: string | undefined;
@@ -291,19 +288,15 @@ class ModeShellContribution extends Disposable {
 				background-color: var(--vscode-button-hoverBackground);
 			}
 
-			.monaco-workbench .custom-mode-ui-frame {
-				flex: 1;
-				width: 100%;
-				height: 100%;
-				border: 0;
-				background: transparent;
-				opacity: 0.35;
+			.monaco-workbench .custom-mode-ui-browser-shell {
+				display: contents;
 			}
-			
+
+			.monaco-workbench .custom-mode-ui-frame,
 			.monaco-workbench .custom-mode-ui-webview {
-				flex: 1;
+				flex: 1 1 auto;
+				min-height: 0;
 				width: 100%;
-				height: 100%;
 				border: 0;
 				background: transparent;
 				opacity: 0.35;
@@ -318,21 +311,92 @@ class ModeShellContribution extends Disposable {
 				opacity: 1;
 			}
 
+			/*
+			 * Bound the live preview: Next (etc.) pages use a tall dark body; stretching the webview with flex:1
+			 * showed a huge empty band above the host chat. The shell gets a max-height; the frame fills it and scrolls inside.
+			 */
+			.monaco-workbench.custom-mode-ui.custom-mode-shell-hasProject .custom-mode-ui-browser-shell {
+				display: flex;
+				flex-direction: column;
+				flex: 0 1 auto;
+				min-height: 0;
+				width: 100%;
+				max-height: min(42vh, 600px);
+				overflow: hidden;
+			}
+
+			.monaco-workbench.custom-mode-ui.custom-mode-shell-hasProject .custom-mode-ui-browser-shell .custom-mode-ui-frame,
+			.monaco-workbench.custom-mode-ui.custom-mode-shell-hasProject .custom-mode-ui-browser-shell .custom-mode-ui-webview {
+				flex: 1 1 auto;
+				min-height: 0;
+				width: 100%;
+				height: 100%;
+			}
+
+			/* Do not flex-grow with the preview (that produced a huge empty transcript band). */
 			.monaco-workbench .custom-mode-embedded-chat {
 				display: none;
-				flex: 0 0 320px;
-				min-height: 220px;
+				flex: 0 0 auto;
+				align-self: stretch;
+				min-height: 0;
+				min-width: 0;
+				padding: 0;
 				border-top: 1px solid var(--vscode-panel-border);
 				background: var(--vscode-editorBackground);
+				overflow: hidden;
 			}
 
 			.monaco-workbench .custom-mode-embedded-chat.visible {
-				display: block;
+				display: flex;
+				flex-direction: column;
 			}
 
-			/* When the app is reachable, hide the start bar (embedded browser is primary). */
-			.monaco-workbench.custom-mode-app-reachable .custom-mode-ui-container .custom-mode-setup {
-				display: none;
+			/*
+			 * Fill width: global chat.css centers .interactive-session at max-width 950px.
+			 * chat.css also sets height: 100% on .interactive-session — in a tall flex column that stretches the
+			 * whole session to the UI surface height while layout() only sizes the list internally, leaving a huge
+			 * empty band (same editor background) around the compact input strip.
+			 */
+			.monaco-workbench .custom-mode-embedded-chat .interactive-session {
+				max-width: none;
+				width: 100%;
+				margin: 0;
+				padding: 0;
+				min-height: 0;
+				flex: 0 0 auto;
+				height: auto;
+			}
+
+			/*
+			 * Empty transcript + compact: ChatWidget keeps .chat-welcome-view-container visible with flex:1 and a tall
+			 * explicit height (body minus input) while welcome content is never rendered—large blank band above the input.
+			 * Embedded UI chat should only show the transcript + input strip.
+			 */
+			.monaco-workbench .custom-mode-embedded-chat .chat-welcome-view-container {
+				display: none !important;
+				height: 0 !important;
+				min-height: 0 !important;
+				max-height: 0 !important;
+				flex: 0 0 0 !important;
+				overflow: hidden !important;
+				margin: 0 !important;
+				padding: 0 !important;
+				border: none !important;
+			}
+
+			.monaco-workbench .custom-mode-embedded-chat .interactive-list {
+				flex: 0 1 auto;
+				min-height: 0;
+			}
+
+			.monaco-workbench .custom-mode-embedded-chat .interactive-item-container {
+				padding-left: 8px;
+				padding-right: 8px;
+			}
+
+			/* When the dev server is up (or network probe succeeded), hide Start App / runtime panel over the preview. */
+			.monaco-workbench.custom-mode-app-reachable.custom-mode-shell-hasProject .custom-mode-ui-container > .custom-mode-setup {
+				display: none !important;
 			}
 
 			.monaco-workbench .custom-mode-ui-start-bar {
@@ -397,78 +461,6 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-start-app-runtime:empty {
 				display: none;
-			}
-
-			.monaco-workbench .custom-mode-ui-mapped-strip {
-				display: none;
-				flex-direction: column;
-				gap: 6px;
-				position: absolute;
-				left: 10px;
-				top: 10px;
-				right: auto;
-				bottom: auto;
-				z-index: 2400;
-				min-width: min(220px, calc(100% - 20px));
-				max-width: min(480px, calc(100% - 24px));
-				max-height: min(200px, 34vh);
-				padding: 8px 10px;
-				border-radius: 8px;
-				background-color: var(--vscode-editorWidget-background);
-				border: 1px solid var(--vscode-editorWidget-border);
-				box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-				pointer-events: auto;
-				-webkit-app-region: no-drag;
-			}
-
-			.monaco-workbench.custom-mode-shell-hasProject.custom-mode-app-reachable .custom-mode-ui-mapped-strip {
-				display: flex;
-			}
-
-			.monaco-workbench .custom-mode-ui-mapped-strip-header {
-				display: flex;
-				align-items: center;
-				justify-content: space-between;
-				gap: 8px;
-			}
-
-			.monaco-workbench .custom-mode-ui-mapped-strip-title {
-				font-size: 11px;
-				font-weight: 700;
-				color: var(--vscode-foreground);
-			}
-
-			.monaco-workbench .custom-mode-ui-mapped-strip-clear {
-				height: 22px;
-				padding: 0 8px;
-				border-radius: 4px;
-				border: 1px solid var(--vscode-button-border, transparent);
-				background-color: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
-				color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
-				cursor: pointer;
-				font-size: 11px;
-				font-weight: 600;
-			}
-
-			.monaco-workbench .custom-mode-ui-mapped-strip-clear:hover {
-				background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
-			}
-
-			.monaco-workbench .custom-mode-ui-mapped-strip-body {
-				margin: 0;
-				padding: 6px 8px;
-				border-radius: 4px;
-				background-color: var(--vscode-textCodeBlock-background);
-				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
-				font-family: var(--monaco-monospace-font);
-				font-size: 10px;
-				line-height: 1.35;
-				white-space: pre-wrap;
-				word-break: break-word;
-				color: var(--vscode-editor-foreground);
-				overflow: auto;
-				flex: 1;
-				min-height: 0;
 			}
 
 			.monaco-workbench .custom-mode-process-container.visible {
@@ -737,15 +729,6 @@ class ModeShellContribution extends Disposable {
 			this.uiRuntimeText
 		);
 		this.uiSetup.appendChild(uiStartBar);
-		this.uiMappedSelectionText = $('pre.custom-mode-ui-mapped-strip-body', undefined, '');
-		this.uiMappedSelectionClear = $('button.custom-mode-ui-mapped-strip-clear', { type: 'button' }, localize('customMode.uiMappedSelectionClear', 'Clear')) as HTMLButtonElement;
-		this.uiMappedStrip = $('div.custom-mode-ui-mapped-strip', undefined,
-			$('div.custom-mode-ui-mapped-strip-header', undefined,
-				$('span.custom-mode-ui-mapped-strip-title', undefined, localize('customMode.uiMappedSelectionTitle', 'Mapped selection')),
-				this.uiMappedSelectionClear
-			),
-			this.uiMappedSelectionText
-		);
 		this.uiCallout = this.createDefaultProjectCallout(localize('customMode.uiCalloutTitle', 'No project open'), localize('customMode.uiCalloutSubtitle', 'Create and open the default project to start coding.'), () => this.defaultProjectService.createAndOpenDefaultProject());
 		const initialUrl = this.devServerService.getActiveUrl() ?? 'http://localhost:3000';
 		// Use iframe on web and Electron webview on desktop.
@@ -762,12 +745,12 @@ class ModeShellContribution extends Disposable {
 				allowpopups: 'true'
 			}) as unknown as HTMLElement & { src: string };
 
+		this.uiBrowserShell = $('div.custom-mode-ui-browser-shell');
+		this.uiBrowserShell.appendChild(this.uiBrowser);
+
 		this.uiContainer.appendChild(this.uiCallout);
 		this.uiContainer.appendChild(this.uiSetup);
-		this.uiContainer.appendChild(this.uiBrowser);
-		this.uiContainer.appendChild(this.uiMappedStrip);
-		this._register(addDisposableListener(this.uiMappedSelectionClear, 'click', () => this.clearUiMappedSelection()));
-		this.updateUiMappedSelectionPanel([]);
+		this.uiContainer.appendChild(this.uiBrowserShell);
 		this.uiChatContainer = $('div.custom-mode-embedded-chat');
 		this.uiContainer.appendChild(this.uiChatContainer);
 
@@ -934,55 +917,27 @@ class ModeShellContribution extends Disposable {
 
 		if (data.type === 'vscode-ui-selection') {
 			const items = Array.isArray(data.items) ? data.items : [];
-			this.updateUiMappedSelectionPanel(items);
 			this.pushUiRuntimeLog(`[ui-selection] ${items.length} mapped item(s) href=${data.href}`);
 			void this.injectUiMappedSelectionIntoChat(items);
 			return;
 		}
 	}
 
-	private updateUiMappedSelectionPanel(items: ReadonlyArray<{ vscodeSrc: string; tag?: string; text?: string }>): void {
-		if (items.length === 0) {
-			this.uiMappedSelectionText.textContent = localize('customMode.uiMappedSelectionEmpty', 'Drag a rectangle in the preview to select mapped components; they are added as file context to the UI chat below. Shift+click a mapped element to switch to the Code tab and open that location in the editor.');
-			return;
-		}
-		const lines = items.map((it, i) => {
-			const tag = it.tag ? `${it.tag} ` : '';
-			const hint = it.text ? ` — ${it.text}` : '';
-			return `${i + 1}. ${tag}${it.vscodeSrc}${hint}`;
-		});
-		this.uiMappedSelectionText.textContent = lines.join('\n');
-	}
-
-	private clearUiMappedSelection(): void {
-		this.updateUiMappedSelectionPanel([]);
-		void this.runClearMappedSelectionInEmbeddedSurface();
-	}
-
-	private async runClearMappedSelectionInEmbeddedSurface(): Promise<void> {
-		const code = this.clearUiMappedSelectionScript;
-		if (!isWeb && this.isWebviewElement(this.uiBrowser)) {
-			const webview = this.uiBrowser as unknown as { executeJavaScript?: (c: string, userGesture?: boolean) => Promise<unknown> };
-			try {
-				await webview.executeJavaScript?.(code, false);
-			} catch {
-				// ignore
+	/** Removes file attachments injected from UI marquee mapping (`vscode-ui-map:` ids). */
+	private removeUiMappedInjectedChatAttachments(): void {
+		try {
+			if (!this.embeddedChatRefs.UI.value) {
+				return;
 			}
-			return;
-		}
-		if (isWeb) {
-			try {
-				const iframe = this.uiBrowser as unknown as HTMLIFrameElement;
-				const doc = iframe.contentDocument;
-				if (doc?.head) {
-					const s = doc.createElement('script');
-					s.textContent = code;
-					doc.head.appendChild(s);
-					s.remove();
-				}
-			} catch {
-				// cross-origin
+			const attachmentModel = this.uiChatWidget.input.attachmentModel;
+			const toDelete = attachmentModel.attachments
+				.filter(a => a.id.startsWith('vscode-ui-map:'))
+				.map(a => a.id);
+			if (toDelete.length > 0) {
+				attachmentModel.delete(...toDelete);
 			}
+		} catch {
+			// Chat session may not be bound yet.
 		}
 	}
 
@@ -1046,13 +1001,20 @@ class ModeShellContribution extends Disposable {
 			this.pushUiRuntimeLog('[ui-selection:chat] UI chat session not available');
 			return;
 		}
+		this.removeUiMappedInjectedChatAttachments();
 		const attachmentModel = this.uiChatWidget.input.attachmentModel;
+		const seenUris = new Set<string>();
 		let added = 0;
 		for (const it of items) {
 			const resolved = this.resolveVscodeSrcToWorkspaceResource(it.vscodeSrc, '[ui-selection:chat]');
 			if (!resolved) {
 				continue;
 			}
+			const uriKey = resolved.resource.toString();
+			if (seenUris.has(uriKey)) {
+				continue;
+			}
+			seenUris.add(uriKey);
 			const range: IRange = {
 				startLineNumber: resolved.line,
 				startColumn: resolved.column,
@@ -1060,9 +1022,8 @@ class ModeShellContribution extends Disposable {
 				endColumn: resolved.column,
 			};
 			try {
-				// Use a stable id per vscodeSrc path. Plain IRange objects do not implement toString(),
-				// so ChatAttachmentModel.asFileVariableEntry would otherwise collapse many locations to one id.
-				const id = `vscode-ui-map:${it.vscodeSrc}`;
+				// One attachment per workspace file (first mapped node in DOM order). Id matches resource so re-marquee does not duplicate chips.
+				const id = `vscode-ui-map:${uriKey}`;
 				const fileEntry: IChatRequestFileEntry = {
 					kind: 'file',
 					value: { uri: resolved.resource, range },
@@ -1169,6 +1130,7 @@ class ModeShellContribution extends Disposable {
 					autoScroll: mode => mode !== ChatModeKind.Ask,
 					renderFollowups: true,
 					renderStyle: 'compact',
+					inputEditorMinLines: 1,
 					supportsFileReferences: true,
 					enableImplicitContext: true,
 					enableWorkingSet: 'explicit',
@@ -1188,15 +1150,29 @@ class ModeShellContribution extends Disposable {
 		widget.render(container);
 		widget.setVisible(true);
 
-		const ro = new ResizeObserver(() => {
-			const w = container.clientWidth;
-			const h = container.clientHeight;
+		const layoutEmbeddedChat = () => {
+			const host = container.parentElement;
+			const w = Math.max(0, container.clientWidth || host?.clientWidth || 0);
+			const hostH = host?.clientHeight ?? 0;
+			// ChatWidget assigns (height − input) to the transcript list; keep totals modest so empty state is a strip, not a slab.
+			const fraction = 0.2;
+			const minChat = 72;
+			const maxChat = 220;
+			const h = hostH > 0
+				? Math.min(maxChat, Math.max(minChat, Math.floor(hostH * fraction)))
+				: Math.min(maxChat, Math.max(minChat, container.clientHeight || minChat));
 			if (w > 0 && h > 0) {
 				widget.layout(h, w);
 			}
-		});
+		};
+
+		const ro = new ResizeObserver(() => layoutEmbeddedChat());
+		if (container.parentElement) {
+			ro.observe(container.parentElement);
+		}
 		ro.observe(container);
 		this._register(toDisposable(() => ro.disconnect()));
+		queueMicrotask(() => layoutEmbeddedChat());
 
 		return widget;
 	}
@@ -1455,11 +1431,20 @@ class ModeShellContribution extends Disposable {
 
 	private updateReachabilityFromState(state: DevServerState): void {
 		const url = state.activeUrl;
-		if (!url) {
+		if (state.phase === 'running' && url) {
+			// Trust local dev server state — fetch/no-cors probes can time out or fail spuriously, which left
+			// `custom-mode-app-reachable` false so Start App stayed visible and iframe height caps never applied.
+			this.reachabilityUrl = url;
+			this.setAppReachable(true);
+			return;
+		}
+		if (!url || state.phase === 'idle' || state.phase === 'error') {
+			this.reachabilityUrl = undefined;
+			this.reachabilityAbort?.abort();
 			this.setAppReachable(false);
 			return;
 		}
-		// If we believe we're running but the URL changed, re-check.
+		// installing / starting: optional network hint when URL first appears
 		if (this.reachabilityUrl !== url) {
 			void this.checkUrlReachable(url);
 		}
@@ -1485,7 +1470,10 @@ class ModeShellContribution extends Disposable {
 			}
 		} catch {
 			if (this.reachabilityAbort === abort && this.reachabilityUrl === url) {
-				this.setAppReachable(false);
+				// Do not clear when the dev server already reported running (avoids abort/timeout false negatives).
+				if (this.devServerService.getState().phase !== 'running') {
+					this.setAppReachable(false);
+				}
 			}
 		} finally {
 			mainWindow.clearTimeout(timeoutHandle);

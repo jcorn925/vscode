@@ -6653,6 +6653,7 @@
 		"web-tree-sitter": "^0.23.0"
 	},
 	"overrides": {
+		"esbuild": "0.27.2",
 		"@aminya/node-gyp-build": "npm:node-gyp-build@4.8.1",
 		"string_decoder": "npm:string_decoder@1.2.0",
 		"node-gyp": "npm:node-gyp@10.3.1",
