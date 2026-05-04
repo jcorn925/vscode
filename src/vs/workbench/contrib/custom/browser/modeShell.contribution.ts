@@ -44,6 +44,50 @@ import { IRange } from '../../../../editor/common/core/range.js';
 import { ModeShellChatSessionManager } from './modeShellChatSessions.js';
 import { IIxIntegrationService, type IxIntegrationState } from '../../../../../custom/ix/IxIntegrationService.js';
 
+/** Every `ix` subcommand from https://ix-infra.com/docs/commands/ (grouped like the docs). */
+const IX_DOCS_COMMANDS_URL = 'https://ix-infra.com/docs/commands/';
+
+function getIxCliCommandReferenceText(): string {
+	const L = (key: string, def: string) => localize(key, def);
+	const sections: Array<{ title: string; commands: readonly string[] }> = [
+		{
+			title: L('customMode.ixCmdSectionSetup', 'Setup'),
+			commands: ['ix map', 'ix status', 'ix watch', 'ix docker', 'ix upgrade']
+		},
+		{
+			title: L('customMode.ixCmdSectionFind', 'Find'),
+			commands: ['ix search', 'ix locate', 'ix inventory', 'ix text']
+		},
+		{
+			title: L('customMode.ixCmdSectionUnderstand', 'Understand'),
+			commands: ['ix explain', 'ix overview', 'ix read']
+		},
+		{
+			title: L('customMode.ixCmdSectionAnalyze', 'Analyze'),
+			commands: ['ix impact', 'ix rank', 'ix smells', 'ix subsystems']
+		},
+		{
+			title: L('customMode.ixCmdSectionNavigate', 'Navigate'),
+			commands: ['ix callers', 'ix callees', 'ix contains', 'ix imports', 'ix imported-by', 'ix depends', 'ix trace']
+		},
+		{
+			title: L('customMode.ixCmdSectionHistory', 'History'),
+			commands: ['ix entity', 'ix history', 'ix diff', 'ix conflicts', 'ix stats']
+		},
+		{
+			title: L('customMode.ixCmdSectionOps', 'Ops'),
+			commands: ['ix reset', 'ix config']
+		},
+	];
+	const lines: string[] = [];
+	for (const { title, commands } of sections) {
+		lines.push(`— ${title} —`);
+		lines.push(...commands);
+		lines.push('');
+	}
+	return lines.join('\n').trimEnd();
+}
+
 class ModeShellContribution extends Disposable {
 
 	static readonly ID = 'workbench.contrib.modeShell';
@@ -86,6 +130,7 @@ class ModeShellContribution extends Disposable {
 	private readonly uiChatWidget: ChatWidget;
 	private readonly processChatWidget: ChatWidget;
 	private readonly processIxWebHint: HTMLElement;
+	private readonly processIxCommandsPanel: HTMLElement;
 	private readonly processIxDebug: HTMLElement;
 	private readonly processIxDebugText: HTMLElement;
 
@@ -209,7 +254,7 @@ class ModeShellContribution extends Disposable {
 				display: flex;
 				flex-direction: column;
 				align-items: stretch;
-				justify-content: stretch;
+				justify-content: flex-start;
 			}
 
 			.monaco-workbench.custom-mode-ui > .monaco-grid-view,
@@ -230,10 +275,19 @@ class ModeShellContribution extends Disposable {
 				min-height: 0;
 			}
 
+			/*
+			 * Visible containers still matched the rule above with flex: 1, so they grew to the full mode surface.
+			 * Preview is capped (~42vh) and the chat strip is short — the leftover flex space read as a giant "AI chat" slab.
+			 */
 			.monaco-workbench .custom-mode-ui-container.visible,
 			.monaco-workbench .custom-mode-process-container.visible {
 				display: flex;
 				flex-direction: column;
+				flex: 1 1 auto !important;
+				height: 100% !important;
+				min-height: 0 !important;
+				align-self: stretch;
+				justify-content: flex-start;
 			}
 
 			.monaco-workbench .custom-mode-ui-container,
@@ -318,10 +372,9 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench.custom-mode-ui.custom-mode-shell-hasProject .custom-mode-ui-browser-shell {
 				display: flex;
 				flex-direction: column;
-				flex: 0 1 auto;
+				flex: 1 1 auto;
 				min-height: 0;
 				width: 100%;
-				max-height: min(42vh, 600px);
 				overflow: hidden;
 			}
 
@@ -347,8 +400,16 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-embedded-chat.visible {
-				display: flex;
-				flex-direction: column;
+				display: flex !important;
+				flex-direction: column !important;
+				flex: 0 0 auto !important;
+				flex-grow: 0 !important;
+				/* Hard cap: keep UI chat a compact strip. */
+				height: 120px !important;
+				max-height: 120px !important;
+				min-height: 0 !important;
+				overflow-x: hidden !important;
+				overflow-y: hidden !important;
 			}
 
 			/*
@@ -363,8 +424,9 @@ class ModeShellContribution extends Disposable {
 				margin: 0;
 				padding: 0;
 				min-height: 0;
-				flex: 0 0 auto;
-				height: auto;
+				flex: 0 0 auto !important;
+				height: auto !important;
+				max-height: 120px !important;
 			}
 
 			/*
@@ -385,13 +447,22 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-embedded-chat .interactive-list {
-				flex: 0 1 auto;
+				flex: 0 0 auto !important;
+				flex-grow: 0 !important;
 				min-height: 0;
+				max-height: 60px !important;
+				overflow: hidden !important;
 			}
 
 			.monaco-workbench .custom-mode-embedded-chat .interactive-item-container {
 				padding-left: 8px;
 				padding-right: 8px;
+			}
+
+			.monaco-workbench .custom-mode-embedded-chat .chat-input-container {
+				background-color: transparent !important;
+				border: none !important;
+				padding: 0 !important;
 			}
 
 			/* When the dev server is up (or network probe succeeded), hide Start App / runtime panel over the preview. */
@@ -512,6 +583,54 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench .custom-mode-ix-debug-title {
 				font-weight: 600;
 				margin-bottom: 6px;
+			}
+
+			.monaco-workbench .custom-mode-ix-commands {
+				flex: 0 1 auto;
+				align-self: stretch;
+				min-height: 0;
+				margin: 0 12px 8px;
+				padding: 8px 10px 10px;
+				border-radius: 8px;
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+				background-color: var(--vscode-sideBar-background);
+				max-height: min(240px, 32vh);
+				overflow: auto;
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+			}
+
+			.monaco-workbench .custom-mode-ix-commands-header {
+				font-size: 12px;
+				font-weight: 600;
+				color: var(--vscode-foreground);
+				flex-shrink: 0;
+			}
+
+			.monaco-workbench .custom-mode-ix-commands-header a {
+				color: var(--vscode-textLink-foreground);
+				font-weight: 600;
+				margin-left: 6px;
+			}
+
+			.monaco-workbench .custom-mode-ix-commands-header a:hover {
+				color: var(--vscode-textLink-activeForeground);
+			}
+
+			.monaco-workbench .custom-mode-ix-commands-pre {
+				margin: 0;
+				padding: 0;
+				font-family: var(--monaco-monospace-font);
+				font-size: 11px;
+				line-height: 1.45;
+				white-space: pre-wrap;
+				word-break: break-word;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench.custom-mode-web .custom-mode-ix-commands {
+				display: none;
 			}
 
 			.monaco-workbench .custom-mode-start-hints {
@@ -773,6 +892,19 @@ class ModeShellContribution extends Disposable {
 		this.processSetup.appendChild(processSetupDetails);
 		this.processIxWebHint = $('div.custom-mode-ix-webhint', undefined,
 			localize('customMode.ixWebHint', 'Ix CLI automation (install, Docker, map, watch) runs only in the desktop application, not in the browser.'));
+		const ixCommandsDocsLink = document.createElement('a');
+		ixCommandsDocsLink.href = IX_DOCS_COMMANDS_URL;
+		ixCommandsDocsLink.target = '_blank';
+		ixCommandsDocsLink.rel = 'noopener noreferrer';
+		ixCommandsDocsLink.textContent = localize('customMode.ixCommandsDocsLink', 'ix-infra.com/docs/commands');
+		this.processIxCommandsPanel = $('div.custom-mode-ix-commands', undefined,
+			$('div.custom-mode-ix-commands-header', undefined,
+				localize('customMode.ixCommandsTitle', 'Ix CLI commands'),
+				document.createTextNode(' '),
+				ixCommandsDocsLink
+			),
+			$('pre.custom-mode-ix-commands-pre', undefined, getIxCliCommandReferenceText())
+		);
 		this.processIxDebugText = $('div');
 		this.processIxDebug = $('div.custom-mode-ix-debug', undefined,
 			$('div.custom-mode-ix-debug-title', undefined, localize('customMode.ixDebugTitle', 'Ix')),
@@ -781,6 +913,7 @@ class ModeShellContribution extends Disposable {
 		this.processContainer.appendChild(this.processCallout);
 		this.processContainer.appendChild(this.processSetup);
 		this.processContainer.appendChild(this.processIxWebHint);
+		this.processContainer.appendChild(this.processIxCommandsPanel);
 		this.processContainer.appendChild(this.processIxDebug);
 		this.processChatContainer = $('div.custom-mode-embedded-chat');
 		this.processContainer.appendChild(this.processChatContainer);
@@ -1153,14 +1286,8 @@ class ModeShellContribution extends Disposable {
 		const layoutEmbeddedChat = () => {
 			const host = container.parentElement;
 			const w = Math.max(0, container.clientWidth || host?.clientWidth || 0);
-			const hostH = host?.clientHeight ?? 0;
-			// ChatWidget assigns (height − input) to the transcript list; keep totals modest so empty state is a strip, not a slab.
-			const fraction = 0.2;
-			const minChat = 72;
-			const maxChat = 220;
-			const h = hostH > 0
-				? Math.min(maxChat, Math.max(minChat, Math.floor(hostH * fraction)))
-				: Math.min(maxChat, Math.max(minChat, container.clientHeight || minChat));
+			// Keep the embedded chat a small strip; avoid feeding potentially inflated parent heights into layout.
+			const h = 120;
 			if (w > 0 && h > 0) {
 				widget.layout(h, w);
 			}

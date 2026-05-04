@@ -70,6 +70,9 @@ export class TerminalViewPane extends ViewPane {
 	private _viewShowing: IContextKey<boolean>;
 	private readonly _disposableStore = this._register(new DisposableStore());
 	private readonly _actionDisposables: DisposableMap<TerminalCommandId> = this._register(new DisposableMap());
+	/** Coalesces ResizeObserver-driven layouts so xterm picks up the final width after async reflow. */
+	private readonly _terminalBodyResizeRaf = this._register(new MutableDisposable<IDisposable>());
+	private _lastObservedBodySize: { width: number; height: number } | undefined;
 
 	constructor(
 		options: IViewPaneOptions,
@@ -232,6 +235,31 @@ export class TerminalViewPane extends ViewPane {
 		}));
 		this._register(this._terminalService.onDidChangeConnectionState(() => this._initializeTerminal(true)));
 		this.layoutBody(this._parentDomElement.offsetHeight, this._parentDomElement.offsetWidth);
+
+		const targetWindow = dom.getWindow(container);
+		if (typeof targetWindow.ResizeObserver === 'function') {
+			const resizeObserver = this._register(new dom.DisposableResizeObserver((entries) => {
+				const entry = entries[0];
+				const nextWidth = Math.round(entry?.contentRect?.width ?? 0);
+				const nextHeight = Math.round(entry?.contentRect?.height ?? 0);
+				if (nextWidth <= 0 || nextHeight <= 0) {
+					return;
+				}
+				if (this._lastObservedBodySize?.width === nextWidth && this._lastObservedBodySize?.height === nextHeight) {
+					return;
+				}
+				this._lastObservedBodySize = { width: nextWidth, height: nextHeight };
+				this._terminalBodyResizeRaf.clear();
+				this._terminalBodyResizeRaf.value = dom.scheduleAtNextAnimationFrame(targetWindow, () => {
+					this._terminalBodyResizeRaf.clear();
+					if (!this._parentDomElement) {
+						return;
+					}
+					this.layoutBody(nextHeight, nextWidth);
+				});
+			}));
+			this._register(resizeObserver.observe(container));
+		}
 	}
 
 	private _createTabsView(): void {
