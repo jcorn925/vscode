@@ -35,6 +35,7 @@ export interface IIxIntegrationService {
 	restart(): Promise<void>;
 	installOrResolve(): Promise<void>;
 	openDocs(): Promise<void>;
+	runJsonQuery(args: readonly string[], cwd?: URI, timeoutMs?: number): Promise<{ ok: true; value: unknown; raw: string } | { ok: false; error: string; raw: string; exitCode: number }>;
 }
 
 export const IIxIntegrationService = createDecorator<IIxIntegrationService>('ixIntegrationService');
@@ -207,6 +208,34 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			return { exitCode, output: stripAnsi(buf) };
 		} finally {
 			store.dispose();
+		}
+	}
+
+	async runJsonQuery(args: readonly string[], cwd?: URI, timeoutMs: number = 60_000): Promise<{ ok: true; value: unknown; raw: string } | { ok: false; error: string; raw: string; exitCode: number }> {
+		if (isWeb) {
+			return { ok: false, error: 'Ix is not available on web.', raw: '', exitCode: 1 };
+		}
+
+		const folder = cwd ?? this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		if (!folder) {
+			return { ok: false, error: 'No workspace folder.', raw: '', exitCode: 1 };
+		}
+
+		const ixBin = await this.resolveIxBinary(folder);
+		if (!ixBin) {
+			return { ok: false, error: 'Could not resolve ix CLI binary.', raw: '', exitCode: 1 };
+		}
+
+		const cmd = `${ixBin} ${args.join(' ')}`;
+		const { exitCode, output } = await this.runCommand(folder, cmd, timeoutMs);
+		if (exitCode !== 0) {
+			return { ok: false, error: `ix exited with code ${exitCode}`, raw: output, exitCode };
+		}
+		try {
+			const value = JSON.parse(output);
+			return { ok: true, value, raw: output };
+		} catch (e: any) {
+			return { ok: false, error: `Failed to parse ix JSON output: ${String(e?.message ?? e)}`, raw: output, exitCode: 0 };
 		}
 	}
 

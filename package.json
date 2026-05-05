@@ -128,6 +128,8 @@
     "@xterm/headless": "^6.1.0-beta.197",
     "@xterm/xterm": "^6.1.0-beta.197",
     "chrome-remote-interface": "^0.33.0",
+    "cytoscape": "^3.33.3",
+    "cytoscape-fcose": "^2.2.0",
     "http-proxy-agent": "^7.0.0",
     "https-proxy-agent": "^7.0.2",
     "jschardet": "3.1.4",

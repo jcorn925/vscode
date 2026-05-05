@@ -38,11 +38,18 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../platfo
 import { ChatWidget } from '../../chat/browser/widget/chatWidget.js';
 import { ChatAgentLocation, ChatModeKind } from '../../chat/common/constants.js';
 import type { IChatRequestFileEntry } from '../../chat/common/attachments/chatVariableEntries.js';
+import { ILanguageModelsService } from '../../chat/common/languageModels.js';
 import { editorBackground, editorForeground, inputBackground } from '../../../../platform/theme/common/colorRegistry.js';
 import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../common/theme.js';
 import { IRange } from '../../../../editor/common/core/range.js';
 import { ModeShellChatSessionManager } from './modeShellChatSessions.js';
 import { IIxIntegrationService, type IxIntegrationState } from '../../../../../custom/ix/IxIntegrationService.js';
+import { IWebviewService } from '../../webview/browser/webview.js';
+import { ProcessNotesCytoscapeView, type ProcessNotesGraphWebviewMessage } from './processNotesCytoscapeView.js';
+import type { ProcessNoteGraph } from './processNotesTypes.js';
+import { ProcessNotesStore } from './processNotesStore.js';
+import { buildWebviewSelectionEvidencePack } from './processNotesIxEvidence.js';
+import { synthesizeWebviewSelectionNote } from './processNotesSynthesis.js';
 
 /** Every `ix` subcommand from https://ix-infra.com/docs/commands/ (grouped like the docs). */
 const IX_DOCS_COMMANDS_URL = 'https://ix-infra.com/docs/commands/';
@@ -139,9 +146,18 @@ class ModeShellContribution extends Disposable {
 	private readonly uiChatWidget: ChatWidget;
 	private readonly processChatWidget: ChatWidget;
 	private readonly processIxWebHint: HTMLElement;
-	private readonly processIxCommandsPanel: HTMLElement;
-	private readonly processIxDebug: HTMLElement;
+	private readonly processNotesPanel: HTMLElement;
+	private readonly processNotesGraphAnchor: HTMLElement;
+	private readonly processNotesGraphView: ProcessNotesCytoscapeView;
+	private readonly processNotesStore: ProcessNotesStore;
+	private readonly processNotesTopicSelect: HTMLSelectElement;
+	private readonly processNotesRegenerateButton: HTMLButtonElement;
+	private readonly processNotesMarkdown: HTMLElement;
 	private readonly processIxDebugText: HTMLElement;
+	private readonly processIxCommandsButton: HTMLButtonElement;
+	private readonly processIxLogsButton: HTMLButtonElement;
+	private readonly processIxCommandsPopover: HTMLElement;
+	private readonly processIxLogsPopover: HTMLElement;
 
 	private _processChatDismissed = false;
 	private _uiChatDismissed = false;
@@ -157,7 +173,11 @@ class ModeShellContribution extends Disposable {
 		@INotificationService private readonly notificationService: INotificationService,
 		@IChatService private readonly chatService: IChatService,
 		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
+		@ILanguageModelsService private readonly languageModelsService: ILanguageModelsService,
 		@IStorageService private readonly storageService: IStorageService,
+		@IFileService private readonly fileService: IFileService,
+		@IWebviewService private readonly webviewService: IWebviewService,
+		@INativeEnvironmentService private readonly nativeEnvironmentService: INativeEnvironmentService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IIxIntegrationService private readonly ixIntegrationService: IIxIntegrationService,
@@ -168,6 +188,7 @@ class ModeShellContribution extends Disposable {
 		this._uiChatDismissed = this.storageService.get(STORAGE_UI_CHAT_DISMISSED, StorageScope.PROFILE) === '1';
 
 		this.chatSessionManager = new ModeShellChatSessionManager(this.chatService, this.chatWidgetService, this.storageService);
+		this.processNotesStore = this._register(new ProcessNotesStore(this.fileService, this.workspaceContextService));
 
 		this.container = this.layoutService.getContainer(mainWindow);
 		this.container.classList.add('custom-mode-shell-enabled');
@@ -871,6 +892,156 @@ class ModeShellContribution extends Disposable {
 				display: none;
 			}
 
+			.monaco-workbench .custom-mode-process-ix-button {
+				height: 26px;
+				padding: 0 10px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-button-border, transparent);
+				background-color: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+				color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+				cursor: pointer;
+				font-size: 12px;
+				font-weight: 600;
+				-webkit-app-region: no-drag;
+			}
+
+			.monaco-workbench .custom-mode-process-ix-button:hover {
+				background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
+			}
+
+			.monaco-workbench .custom-mode-process-ix-popover {
+				position: absolute;
+				top: calc(100% + 8px);
+				right: 0;
+				width: min(640px, calc(100vw - 48px));
+				max-height: min(420px, 55vh);
+				overflow: auto;
+				padding: 10px 12px;
+				border-radius: 8px;
+				background-color: var(--vscode-editorWidget-background);
+				border: 1px solid var(--vscode-editorWidget-border);
+				box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+				color: var(--vscode-foreground);
+				font-size: 12px;
+				line-height: 1.35;
+				white-space: pre-wrap;
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-process-ix-popover.visible {
+				display: block;
+			}
+
+			.monaco-workbench .custom-mode-process-ix-popover-title {
+				font-weight: 700;
+				margin-bottom: 6px;
+				display: flex;
+				align-items: baseline;
+				gap: 8px;
+			}
+
+			.monaco-workbench .custom-mode-process-ix-popover-title a {
+				color: var(--vscode-textLink-foreground);
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-process-ix-popover-title a:hover {
+				color: var(--vscode-textLink-activeForeground);
+			}
+
+			/* Hide the old inline boxes (replaced by buttons + popovers). */
+			.monaco-workbench .custom-mode-ix-commands,
+			.monaco-workbench .custom-mode-ix-debug {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-process-notes {
+				flex: 0 1 auto;
+				align-self: stretch;
+				min-height: 0;
+				margin: 0 12px 8px;
+				padding: 10px 10px 10px;
+				border-radius: 8px;
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+				background-color: var(--vscode-editorWidget-background);
+				display: flex;
+				flex-direction: column;
+				gap: 8px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-header {
+				position: relative;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-header span {
+				font-size: 12px;
+				font-weight: 700;
+				color: var(--vscode-foreground);
+				margin-right: 6px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-topic {
+				height: 26px;
+				padding: 0 8px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-input-border, transparent);
+				background-color: var(--vscode-input-background);
+				color: var(--vscode-input-foreground);
+				font-size: 12px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-regenerate {
+				height: 26px;
+				padding: 0 10px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-button-border, transparent);
+				background-color: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+				color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+				cursor: pointer;
+				font-size: 12px;
+				font-weight: 600;
+				margin-left: auto;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-regenerate:hover:not(:disabled) {
+				background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
+			}
+
+			.monaco-workbench .custom-mode-process-notes-regenerate:disabled {
+				opacity: 0.45;
+				cursor: default;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-markdown {
+				font-size: 12px;
+				line-height: 1.45;
+				color: var(--vscode-descriptionForeground);
+				white-space: pre-wrap;
+				word-break: break-word;
+				max-height: min(180px, 24vh);
+				overflow: auto;
+				padding: 6px 8px;
+				border-radius: 6px;
+				background-color: var(--vscode-textCodeBlock-background);
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+			}
+
+			.monaco-workbench .custom-mode-process-notes-graph {
+				position: relative;
+				height: min(320px, 36vh);
+				border-radius: 6px;
+				overflow: hidden;
+				background: var(--vscode-editorBackground);
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+			}
+
+			.monaco-workbench.custom-mode-web .custom-mode-process-notes {
+				display: none;
+			}
+
 			.monaco-workbench .custom-mode-start-hints {
 				display: block;
 				padding: 10px 12px 12px;
@@ -1159,29 +1330,77 @@ class ModeShellContribution extends Disposable {
 		this.processSetup.appendChild(processSetupDetails);
 		this.processIxWebHint = $('div.custom-mode-ix-webhint', undefined,
 			localize('customMode.ixWebHint', 'Ix CLI automation (install, Docker, map, watch) runs only in the desktop application, not in the browser.'));
-		const ixCommandsDocsLink = document.createElement('a');
-		ixCommandsDocsLink.href = IX_DOCS_COMMANDS_URL;
-		ixCommandsDocsLink.target = '_blank';
-		ixCommandsDocsLink.rel = 'noopener noreferrer';
-		ixCommandsDocsLink.textContent = localize('customMode.ixCommandsDocsLink', 'ix-infra.com/docs/commands');
-		this.processIxCommandsPanel = $('div.custom-mode-ix-commands', undefined,
-			$('div.custom-mode-ix-commands-header', undefined,
+
+		// Ix buttons + popovers (shown next to the topic picker).
+		this.processIxCommandsButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('customMode.processIxCommandsBtn', 'Ix commands')) as HTMLButtonElement;
+		this.processIxLogsButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('customMode.processIxLogsBtn', 'Ix process')) as HTMLButtonElement;
+
+		const ixCommandsDocsLink2 = document.createElement('a');
+		ixCommandsDocsLink2.href = IX_DOCS_COMMANDS_URL;
+		ixCommandsDocsLink2.target = '_blank';
+		ixCommandsDocsLink2.rel = 'noopener noreferrer';
+		ixCommandsDocsLink2.textContent = localize('customMode.ixCommandsDocsLink', 'ix-infra.com/docs/commands');
+
+		this.processIxCommandsPopover = $('div.custom-mode-process-ix-popover', undefined,
+			$('div.custom-mode-process-ix-popover-title', undefined,
 				localize('customMode.ixCommandsTitle', 'Ix CLI commands'),
-				document.createTextNode(' '),
-				ixCommandsDocsLink
+				ixCommandsDocsLink2
 			),
-			$('pre.custom-mode-ix-commands-pre', undefined, getIxCliCommandReferenceText())
+			$('pre', undefined, getIxCliCommandReferenceText())
 		);
+
+		// Shared Ix log content element (used inside the popover).
 		this.processIxDebugText = $('div');
-		this.processIxDebug = $('div.custom-mode-ix-debug', undefined,
-			$('div.custom-mode-ix-debug-title', undefined, localize('customMode.ixDebugTitle', 'Ix')),
+		this.processIxLogsPopover = $('div.custom-mode-process-ix-popover', undefined,
+			$('div.custom-mode-process-ix-popover-title', undefined,
+				localize('customMode.ixDebugTitle', 'Ix')
+			),
 			this.processIxDebugText
 		);
+
+		// Process notes (generated via Ix + AI) with an interactive Cytoscape graph canvas.
+		this.processNotesTopicSelect = $('select.custom-mode-process-notes-topic') as HTMLSelectElement;
+		this.processNotesTopicSelect.appendChild(new Option(localize('customMode.processNotes.topic.webviewSelection', 'Webview selection'), 'webview-selection'));
+		this.processNotesRegenerateButton = $('button.custom-mode-process-notes-regenerate', { type: 'button' }, localize('customMode.processNotes.regenerate', 'Regenerate')) as HTMLButtonElement;
+		this.processNotesMarkdown = $('div.custom-mode-process-notes-markdown');
+		this.processNotesGraphAnchor = $('div.custom-mode-process-notes-graph');
+		this.processNotesPanel = $('div.custom-mode-process-notes', undefined,
+			$('div.custom-mode-process-notes-header', undefined,
+				$('span', undefined, localize('customMode.processNotesTitle', 'Process notes')),
+				this.processNotesTopicSelect,
+				this.processIxCommandsButton,
+				this.processIxLogsButton,
+				this.processNotesRegenerateButton,
+				this.processIxCommandsPopover,
+				this.processIxLogsPopover,
+			),
+			this.processNotesMarkdown,
+			this.processNotesGraphAnchor
+		);
+
+		const appRoot = this.nativeEnvironmentService.appRoot
+			? URI.file(this.nativeEnvironmentService.appRoot)
+			: URI.file(process.cwd());
+		const cytoscapeRoot = URI.joinPath(appRoot, 'node_modules', 'cytoscape', 'dist');
+		const fcoseRoot = URI.joinPath(appRoot, 'node_modules', 'cytoscape-fcose');
+		this.processNotesGraphView = this._register(new ProcessNotesCytoscapeView(
+			this.webviewService,
+			[cytoscapeRoot, fcoseRoot],
+			(msg: ProcessNotesGraphWebviewMessage) => this.onProcessNotesGraphMessage(msg),
+		));
+
+		// Attach the webview overlay to the placeholder element.
+		this.processNotesGraphView.attach(this.processNotesGraphAnchor, this.processMainColumn);
+
+		const cytoscapeUri = this.processNotesGraphView.asWebviewUri(URI.joinPath(cytoscapeRoot, 'cytoscape.min.js'));
+		const fcoseUri = this.processNotesGraphView.asWebviewUri(URI.joinPath(fcoseRoot, 'cytoscape-fcose.js'));
+		this.processNotesGraphView.setHtml(cytoscapeUri, fcoseUri);
+		this.processNotesGraphView.setGraph({ nodes: [], edges: [] } satisfies ProcessNoteGraph);
+
 		this.processMainColumn.appendChild(this.processCallout);
 		this.processMainColumn.appendChild(this.processSetup);
 		this.processMainColumn.appendChild(this.processIxWebHint);
-		this.processMainColumn.appendChild(this.processIxCommandsPanel);
-		this.processMainColumn.appendChild(this.processIxDebug);
+		this.processMainColumn.appendChild(this.processNotesPanel);
 		this.processContainer.appendChild(this.processMainColumn);
 
 		this.processChatContainer = $('div.custom-mode-embedded-chat.custom-mode-process-side-chat');
@@ -1204,6 +1423,26 @@ class ModeShellContribution extends Disposable {
 
 		this._register(addDisposableListener(processCloseBtn, 'click', () => this.setProcessChatDismissed(true)));
 		this._register(addDisposableListener(this.processChatReopenBtn, 'click', () => this.setProcessChatDismissed(false)));
+		this._register(addDisposableListener(this.processNotesRegenerateButton, 'click', () => void this.regenerateSelectedProcessNote()));
+		this._register(addDisposableListener(this.processNotesTopicSelect, 'change', () => void this.loadSelectedProcessNote()));
+		this._register(addDisposableListener(this.processIxCommandsButton, 'click', () => {
+			const show = !this.processIxCommandsPopover.classList.contains('visible');
+			this.processIxCommandsPopover.classList.toggle('visible', show);
+			this.processIxLogsPopover.classList.remove('visible');
+		}));
+		this._register(addDisposableListener(this.processIxLogsButton, 'click', () => {
+			const show = !this.processIxLogsPopover.classList.contains('visible');
+			this.processIxLogsPopover.classList.toggle('visible', show);
+			this.processIxCommandsPopover.classList.remove('visible');
+		}));
+		this._register(addDisposableListener(mainWindow, 'mousedown', (e: MouseEvent) => {
+			const target = e.target as Node | null;
+			if (target && this.processNotesPanel.contains(target)) {
+				return;
+			}
+			this.processIxCommandsPopover.classList.remove('visible');
+			this.processIxLogsPopover.classList.remove('visible');
+		}));
 
 		this.modeSurface.appendChild(this.uiContainer);
 		this.modeSurface.appendChild(this.processContainer);
@@ -1235,6 +1474,7 @@ class ModeShellContribution extends Disposable {
 		this.updateProjectState();
 		this.updateDevServerDebug(this.devServerService.getState());
 		this.updateIxDebug(this.ixIntegrationService.getState());
+		void this.loadSelectedProcessNote();
 		this.updateReachabilityFromState(this.devServerService.getState());
 		this.updateUiUrlPill(this.devServerService.getActiveUrl());
 
@@ -1861,6 +2101,63 @@ class ModeShellContribution extends Disposable {
 			lines.push(state.lastOutput);
 		}
 		this.processIxDebugText.textContent = lines.join('\n');
+	}
+
+	private onProcessNotesGraphMessage(message: ProcessNotesGraphWebviewMessage): void {
+		// Wiring for click-to-open is implemented once notes + citations are loaded.
+		if (message.type !== 'processNotes.nodeClick') {
+			return;
+		}
+
+		// Minimal mapping for v1 topic. Once we persist per-node file/range metadata in the notes file,
+		// this becomes a generic lookup by nodeId.
+		const folder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		if (!folder) {
+			return;
+		}
+		switch (message.nodeId) {
+			case 'overlay':
+				void this.editorService.openEditor({ resource: URI.joinPath(folder, 'src/vs/workbench/contrib/custom/browser/uiClickOverlayScript.ts') });
+				break;
+			case 'host':
+				void this.editorService.openEditor({ resource: URI.joinPath(folder, 'src/vs/workbench/contrib/custom/browser/modeShell.contribution.ts') });
+				break;
+		}
+	}
+
+	private async loadSelectedProcessNote(): Promise<void> {
+		const topic = this.processNotesTopicSelect.value;
+		const file = await this.processNotesStore.load();
+		const note = file?.notes.find(n => n.id === topic);
+		this.processNotesMarkdown.textContent = note?.markdown ?? localize('customMode.processNotes.empty', 'No saved note yet. Click Regenerate to create one.');
+		if (note?.graph) {
+			this.processNotesGraphView.setGraph(note.graph);
+		}
+	}
+
+	private async regenerateSelectedProcessNote(): Promise<void> {
+		const folder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		if (!folder) {
+			this.notificationService.notify({ severity: Severity.Warning, message: localize('customMode.processNotes.noWorkspace', 'Open a workspace folder to generate process notes.') });
+			return;
+		}
+
+		this.processNotesRegenerateButton.disabled = true;
+		try {
+			const evidence = await buildWebviewSelectionEvidencePack(this.ixIntegrationService, folder);
+			const synth = await synthesizeWebviewSelectionNote(this.languageModelsService, evidence, this.chatSessionsCts.token);
+			const now = Date.now();
+			await this.processNotesStore.upsertNote({
+				id: 'webview-selection',
+				title: localize('customMode.processNotes.topic.webviewSelection', 'Webview selection'),
+				markdown: synth.markdown,
+				graph: synth.graph,
+				meta: { generatedAt: now },
+			});
+			await this.loadSelectedProcessNote();
+		} finally {
+			this.processNotesRegenerateButton.disabled = false;
+		}
 	}
 
 	private updateDevServerDebug(state: DevServerState): void {
