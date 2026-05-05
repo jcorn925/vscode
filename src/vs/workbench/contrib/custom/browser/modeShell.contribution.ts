@@ -17,7 +17,7 @@ import { IEditorService } from '../../../services/editor/common/editorService.js
 import { MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { IContextKeyService, type IScopedContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
-import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { IInstantiationService, type ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
 import { DevServerState, DevServerSuggestedCommands, IDevServerService } from '../../../../../custom/devserver/DevServerService.js';
 import { IDefaultProjectService } from '../../../../../custom/devserver/DefaultProjectService.js';
@@ -32,9 +32,9 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { INativeEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { createUiClickOverlayScript, UiClickOverlayMessage } from './uiClickOverlayScript.js';
-import { IChatService } from '../../chat/common/chatService/chatService.js';
+import { IChatService, type IChatModelReference } from '../../chat/common/chatService/chatService.js';
 import { IChatWidgetService } from '../../chat/browser/chat.js';
-import { IStorageService } from '../../../../platform/storage/common/storage.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { ChatWidget } from '../../chat/browser/widget/chatWidget.js';
 import { ChatAgentLocation, ChatModeKind } from '../../chat/common/constants.js';
 import type { IChatRequestFileEntry } from '../../chat/common/attachments/chatVariableEntries.js';
@@ -46,6 +46,9 @@ import { IIxIntegrationService, type IxIntegrationState } from '../../../../../c
 
 /** Every `ix` subcommand from https://ix-infra.com/docs/commands/ (grouped like the docs). */
 const IX_DOCS_COMMANDS_URL = 'https://ix-infra.com/docs/commands/';
+
+const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
+const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
 
 function getIxCliCommandReferenceText(): string {
 	const L = (key: string, def: string) => localize(key, def);
@@ -100,6 +103,12 @@ class ModeShellContribution extends Disposable {
 	private readonly modeSurface: HTMLElement;
 	private readonly uiContainer: HTMLElement;
 	private readonly processContainer: HTMLElement;
+	private readonly processMainColumn: HTMLElement;
+	private readonly processChatColumn: HTMLElement;
+	private readonly processChatReopenBtn: HTMLButtonElement;
+	private readonly uiMainColumn: HTMLElement;
+	private readonly uiChatColumn: HTMLElement;
+	private readonly uiChatReopenBtn: HTMLButtonElement;
 	private readonly styleSheet = createStyleSheet();
 	private readonly uiBrowser: HTMLElement & { src: string };
 	private readonly uiBrowserShell: HTMLElement;
@@ -122,8 +131,8 @@ class ModeShellContribution extends Disposable {
 	private readonly chatSessionsCts = this._register(new CancellationTokenSource());
 	private readonly chatSessionManager: ModeShellChatSessionManager;
 	private readonly embeddedChatRefs = {
-		UI: this._register(new MutableDisposable<any>()),
-		Process: this._register(new MutableDisposable<any>()),
+		UI: this._register(new MutableDisposable<IChatModelReference>()),
+		Process: this._register(new MutableDisposable<IChatModelReference>()),
 	};
 	private readonly uiChatContainer: HTMLElement;
 	private readonly processChatContainer: HTMLElement;
@@ -133,6 +142,9 @@ class ModeShellContribution extends Disposable {
 	private readonly processIxCommandsPanel: HTMLElement;
 	private readonly processIxDebug: HTMLElement;
 	private readonly processIxDebugText: HTMLElement;
+
+	private _processChatDismissed = false;
+	private _uiChatDismissed = false;
 
 	constructor(
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
@@ -151,6 +163,9 @@ class ModeShellContribution extends Disposable {
 		@IIxIntegrationService private readonly ixIntegrationService: IIxIntegrationService,
 	) {
 		super();
+
+		this._processChatDismissed = this.storageService.get(STORAGE_PROCESS_CHAT_DISMISSED, StorageScope.PROFILE) === '1';
+		this._uiChatDismissed = this.storageService.get(STORAGE_UI_CHAT_DISMISSED, StorageScope.PROFILE) === '1';
 
 		this.chatSessionManager = new ModeShellChatSessionManager(this.chatService, this.chatWidgetService, this.storageService);
 
@@ -279,15 +294,248 @@ class ModeShellContribution extends Disposable {
 			 * Visible containers still matched the rule above with flex: 1, so they grew to the full mode surface.
 			 * Preview is capped (~42vh) and the chat strip is short — the leftover flex space read as a giant "AI chat" slab.
 			 */
-			.monaco-workbench .custom-mode-ui-container.visible,
-			.monaco-workbench .custom-mode-process-container.visible {
+			.monaco-workbench .custom-mode-ui-container.visible {
 				display: flex;
-				flex-direction: column;
+				flex-direction: row;
 				flex: 1 1 auto !important;
 				height: 100% !important;
 				min-height: 0 !important;
 				align-self: stretch;
+				align-items: stretch;
 				justify-content: flex-start;
+				position: relative;
+			}
+
+			.monaco-workbench .custom-mode-ui-main {
+				display: flex;
+				flex-direction: column;
+				flex: 1 1 0;
+				min-width: 0;
+				min-height: 0;
+				overflow: auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-chat-column {
+				display: flex;
+				flex-direction: column;
+				flex: 0 0 min(400px, 38vw);
+				width: min(400px, 38vw);
+				max-width: min(440px, 42vw);
+				min-width: 280px;
+				min-height: 0;
+				border-left: 1px solid var(--vscode-panel-border);
+				background-color: var(--vscode-editorBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-chat-dismissed .custom-mode-ui-chat-column {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-ui-chat-header {
+				display: flex;
+				flex-direction: row;
+				align-items: center;
+				justify-content: space-between;
+				flex: 0 0 auto;
+				gap: 8px;
+				padding: 6px 8px 6px 10px;
+				border-bottom: 1px solid var(--vscode-panel-border);
+				background-color: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background));
+				font-size: 12px;
+				font-weight: 600;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-chat-header button {
+				background: transparent;
+				border: none;
+				color: var(--vscode-foreground);
+				cursor: pointer;
+				padding: 2px 6px;
+				border-radius: 3px;
+				font-size: 16px;
+				line-height: 1;
+			}
+
+			.monaco-workbench .custom-mode-ui-chat-header button:hover {
+				background-color: var(--vscode-toolbar-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-chat-reopen {
+				display: none;
+				position: absolute;
+				right: 0;
+				top: 50%;
+				transform: translateY(-50%);
+				z-index: 25;
+				align-items: center;
+				justify-content: center;
+				writing-mode: vertical-rl;
+				text-orientation: mixed;
+				padding: 12px 6px;
+				border: 1px solid var(--vscode-panel-border);
+				border-right: none;
+				border-radius: 6px 0 0 6px;
+				background-color: var(--vscode-sideBar-background);
+				color: var(--vscode-foreground);
+				font-size: 12px;
+				font-weight: 600;
+				cursor: pointer;
+				box-shadow: -2px 0 8px rgba(0, 0, 0, 0.2);
+			}
+
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-chat-dismissed.visible .custom-mode-ui-chat-reopen {
+				display: flex;
+			}
+
+			.monaco-workbench .custom-mode-ui-chat-column .custom-mode-embedded-chat.custom-mode-ui-side-chat.visible {
+				display: flex !important;
+				flex-direction: column !important;
+				flex: 1 1 auto !important;
+				flex-grow: 1 !important;
+				min-height: 0 !important;
+				height: auto !important;
+				max-height: none !important;
+				width: 100%;
+				border-top: none;
+				padding: 0;
+				overflow: hidden;
+			}
+
+			.monaco-workbench .custom-mode-ui-chat-column .custom-mode-ui-side-chat.visible .interactive-session {
+				flex: 1 1 auto !important;
+				min-height: 0 !important;
+				max-height: none !important;
+				height: auto !important;
+			}
+
+			.monaco-workbench .custom-mode-ui-chat-column .custom-mode-ui-side-chat.visible .interactive-list {
+				flex: 1 1 auto !important;
+				min-height: 0 !important;
+				max-height: none !important;
+				overflow: auto !important;
+			}
+
+			.monaco-workbench .custom-mode-process-container.visible {
+				display: flex;
+				flex-direction: row;
+				flex: 1 1 auto !important;
+				height: 100% !important;
+				min-height: 0 !important;
+				align-self: stretch;
+				align-items: stretch;
+				justify-content: flex-start;
+				position: relative;
+			}
+
+			.monaco-workbench .custom-mode-process-main {
+				display: flex;
+				flex-direction: column;
+				flex: 1 1 0;
+				min-width: 0;
+				min-height: 0;
+				overflow: auto;
+			}
+
+			.monaco-workbench .custom-mode-process-chat-column {
+				display: flex;
+				flex-direction: column;
+				flex: 0 0 min(400px, 38vw);
+				width: min(400px, 38vw);
+				max-width: min(440px, 42vw);
+				min-width: 280px;
+				min-height: 0;
+				border-left: 1px solid var(--vscode-panel-border);
+				background-color: var(--vscode-editorBackground);
+			}
+
+			.monaco-workbench .custom-mode-process-container.custom-mode-process-chat-dismissed .custom-mode-process-chat-column {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-process-chat-header {
+				display: flex;
+				flex-direction: row;
+				align-items: center;
+				justify-content: space-between;
+				flex: 0 0 auto;
+				gap: 8px;
+				padding: 6px 8px 6px 10px;
+				border-bottom: 1px solid var(--vscode-panel-border);
+				background-color: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background));
+				font-size: 12px;
+				font-weight: 600;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-process-chat-header button {
+				background: transparent;
+				border: none;
+				color: var(--vscode-foreground);
+				cursor: pointer;
+				padding: 2px 6px;
+				border-radius: 3px;
+				font-size: 16px;
+				line-height: 1;
+			}
+
+			.monaco-workbench .custom-mode-process-chat-header button:hover {
+				background-color: var(--vscode-toolbar-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-process-chat-reopen {
+				display: none;
+				position: absolute;
+				right: 0;
+				top: 50%;
+				transform: translateY(-50%);
+				z-index: 25;
+				align-items: center;
+				justify-content: center;
+				writing-mode: vertical-rl;
+				text-orientation: mixed;
+				padding: 12px 6px;
+				border: 1px solid var(--vscode-panel-border);
+				border-right: none;
+				border-radius: 6px 0 0 6px;
+				background-color: var(--vscode-sideBar-background);
+				color: var(--vscode-foreground);
+				font-size: 12px;
+				font-weight: 600;
+				cursor: pointer;
+				box-shadow: -2px 0 8px rgba(0, 0, 0, 0.2);
+			}
+
+			.monaco-workbench .custom-mode-process-container.custom-mode-process-chat-dismissed.visible .custom-mode-process-chat-reopen {
+				display: flex;
+			}
+
+			.monaco-workbench .custom-mode-process-chat-column .custom-mode-embedded-chat.custom-mode-process-side-chat.visible {
+				display: flex !important;
+				flex-direction: column !important;
+				flex: 1 1 auto !important;
+				flex-grow: 1 !important;
+				min-height: 0 !important;
+				height: auto !important;
+				max-height: none !important;
+				width: 100%;
+				border-top: none;
+				padding: 0;
+				overflow: hidden;
+			}
+
+			.monaco-workbench .custom-mode-process-chat-column .custom-mode-process-side-chat.visible .interactive-session {
+				flex: 1 1 auto !important;
+				min-height: 0 !important;
+				max-height: none !important;
+				height: auto !important;
+			}
+
+			.monaco-workbench .custom-mode-process-chat-column .custom-mode-process-side-chat.visible .interactive-list {
+				flex: 1 1 auto !important;
+				min-height: 0 !important;
+				max-height: none !important;
+				overflow: auto !important;
 			}
 
 			.monaco-workbench .custom-mode-ui-container,
@@ -386,8 +634,8 @@ class ModeShellContribution extends Disposable {
 				height: 100%;
 			}
 
-			/* Do not flex-grow with the preview (that produced a huge empty transcript band). */
-			.monaco-workbench .custom-mode-embedded-chat {
+			/* Bottom strip variant only (UI/Process side panels use .custom-mode-ui-side-chat / .custom-mode-process-side-chat). */
+			.monaco-workbench .custom-mode-embedded-chat:not(.custom-mode-ui-side-chat):not(.custom-mode-process-side-chat) {
 				display: none;
 				flex: 0 0 auto;
 				align-self: stretch;
@@ -399,12 +647,11 @@ class ModeShellContribution extends Disposable {
 				overflow: hidden;
 			}
 
-			.monaco-workbench .custom-mode-embedded-chat.visible {
+			.monaco-workbench .custom-mode-embedded-chat.visible:not(.custom-mode-ui-side-chat):not(.custom-mode-process-side-chat) {
 				display: flex !important;
 				flex-direction: column !important;
 				flex: 0 0 auto !important;
 				flex-grow: 0 !important;
-				/* Hard cap: keep UI chat a compact strip. */
 				height: 120px !important;
 				max-height: 120px !important;
 				min-height: 0 !important;
@@ -418,11 +665,11 @@ class ModeShellContribution extends Disposable {
 			 * whole session to the UI surface height while layout() only sizes the list internally, leaving a huge
 			 * empty band (same editor background) around the compact input strip.
 			 */
-			.monaco-workbench .custom-mode-embedded-chat .interactive-session {
-				max-width: none;
-				width: 100%;
-				margin: 0;
-				padding: 0;
+			.monaco-workbench .custom-mode-embedded-chat:not(.custom-mode-ui-side-chat):not(.custom-mode-process-side-chat) .interactive-session {
+				max-width: none !important;
+				width: 100% !important;
+				margin: 0 !important;
+				padding: 0 !important;
 				min-height: 0;
 				flex: 0 0 auto !important;
 				height: auto !important;
@@ -432,9 +679,9 @@ class ModeShellContribution extends Disposable {
 			/*
 			 * Empty transcript + compact: ChatWidget keeps .chat-welcome-view-container visible with flex:1 and a tall
 			 * explicit height (body minus input) while welcome content is never rendered—large blank band above the input.
-			 * Embedded UI chat should only show the transcript + input strip.
+			 * Embedded strip chat should only show the transcript + input strip.
 			 */
-			.monaco-workbench .custom-mode-embedded-chat .chat-welcome-view-container {
+			.monaco-workbench .custom-mode-embedded-chat:not(.custom-mode-ui-side-chat):not(.custom-mode-process-side-chat) .chat-welcome-view-container {
 				display: none !important;
 				height: 0 !important;
 				min-height: 0 !important;
@@ -446,12 +693,12 @@ class ModeShellContribution extends Disposable {
 				border: none !important;
 			}
 
-			.monaco-workbench .custom-mode-embedded-chat .interactive-list {
-				flex: 0 0 auto !important;
+			.monaco-workbench .custom-mode-embedded-chat:not(.custom-mode-ui-side-chat):not(.custom-mode-process-side-chat) .interactive-list {
+				flex: 0 1 auto !important;
 				flex-grow: 0 !important;
 				min-height: 0;
-				max-height: 60px !important;
-				overflow: hidden !important;
+				max-height: var(--custom-mode-chat-list-height, 60px) !important;
+				overflow: auto !important;
 			}
 
 			.monaco-workbench .custom-mode-embedded-chat .interactive-item-container {
@@ -466,7 +713,7 @@ class ModeShellContribution extends Disposable {
 			}
 
 			/* When the dev server is up (or network probe succeeded), hide Start App / runtime panel over the preview. */
-			.monaco-workbench.custom-mode-app-reachable.custom-mode-shell-hasProject .custom-mode-ui-container > .custom-mode-setup {
+			.monaco-workbench.custom-mode-app-reachable.custom-mode-shell-hasProject .custom-mode-ui-main > .custom-mode-setup {
 				display: none !important;
 			}
 
@@ -532,15 +779,6 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-start-app-runtime:empty {
 				display: none;
-			}
-
-			.monaco-workbench .custom-mode-process-container.visible {
-				align-items: stretch;
-				justify-content: flex-start;
-			}
-
-			.monaco-workbench .custom-mode-process-container {
-				position: relative;
 			}
 
 			.monaco-workbench .custom-mode-ix-webhint {
@@ -812,6 +1050,7 @@ class ModeShellContribution extends Disposable {
 				font-size: 11px;
 				color: var(--vscode-descriptionForeground);
 			}
+
 		`;
 
 		this.modeTopBar = $('div.custom-mode-top-modes', { role: 'tablist' });
@@ -833,6 +1072,10 @@ class ModeShellContribution extends Disposable {
 		this.modeSurface = $('div.custom-mode-surface');
 
 		this.uiContainer = $('div.custom-mode-ui-container');
+		if (this._uiChatDismissed) {
+			this.uiContainer.classList.add('custom-mode-ui-chat-dismissed');
+		}
+		this.uiMainColumn = $('div.custom-mode-ui-main');
 		this.uiSetup = $('div.custom-mode-setup');
 		this.uiUrlPill = $('div.custom-mode-ui-urlPill');
 		this.uiUrlPill.appendChild($('strong', undefined, localize('customMode.urlLabel', 'URL')));
@@ -867,11 +1110,31 @@ class ModeShellContribution extends Disposable {
 		this.uiBrowserShell = $('div.custom-mode-ui-browser-shell');
 		this.uiBrowserShell.appendChild(this.uiBrowser);
 
-		this.uiContainer.appendChild(this.uiCallout);
-		this.uiContainer.appendChild(this.uiSetup);
-		this.uiContainer.appendChild(this.uiBrowserShell);
-		this.uiChatContainer = $('div.custom-mode-embedded-chat');
-		this.uiContainer.appendChild(this.uiChatContainer);
+		this.uiMainColumn.appendChild(this.uiCallout);
+		this.uiMainColumn.appendChild(this.uiSetup);
+		this.uiMainColumn.appendChild(this.uiBrowserShell);
+		this.uiContainer.appendChild(this.uiMainColumn);
+
+		this.uiChatContainer = $('div.custom-mode-embedded-chat.custom-mode-ui-side-chat');
+		const uiChatTitle = localize('customMode.uiChatTitle', 'AI chat');
+		const uiChatCloseLabel = localize('customMode.uiChatClose', 'Close');
+		const uiCloseBtn = $('button', { type: 'button', 'aria-label': uiChatCloseLabel, title: uiChatCloseLabel }, '\u2715') as HTMLButtonElement;
+		const uiChatHeader = $('div.custom-mode-ui-chat-header', undefined,
+			$('span', undefined, uiChatTitle),
+			uiCloseBtn
+		);
+		this.uiChatColumn = $('div.custom-mode-ui-chat-column', undefined, uiChatHeader, this.uiChatContainer);
+		this.uiContainer.appendChild(this.uiChatColumn);
+
+		this.uiChatReopenBtn = $('button.custom-mode-ui-chat-reopen', {
+			type: 'button',
+			title: localize('customMode.uiChatReopen', 'Open AI chat'),
+			'aria-label': localize('customMode.uiChatReopen', 'Open AI chat'),
+		}, localize('customMode.uiChatReopenShort', 'AI chat')) as HTMLButtonElement;
+		this.uiContainer.appendChild(this.uiChatReopenBtn);
+
+		this._register(addDisposableListener(uiCloseBtn, 'click', () => this.setUiChatDismissed(true)));
+		this._register(addDisposableListener(this.uiChatReopenBtn, 'click', () => this.setUiChatDismissed(false)));
 
 		// Show the active URL in the top mode bar, right before the "UI" tab.
 		const uiTab = this.topModeButtons.get('UI');
@@ -881,6 +1144,10 @@ class ModeShellContribution extends Disposable {
 		}
 
 		this.processContainer = $('div.custom-mode-process-container');
+		if (this._processChatDismissed) {
+			this.processContainer.classList.add('custom-mode-process-chat-dismissed');
+		}
+		this.processMainColumn = $('div.custom-mode-process-main');
 		this.processCallout = this.createDefaultProjectCallout(localize('customMode.processCalloutTitle', 'No project open'), localize('customMode.processCalloutSubtitle', 'Create and open the default project to start coding.'), () => this.defaultProjectService.createAndOpenDefaultProject());
 		this.processStartHints = $('div.custom-mode-start-hints');
 		this.processSetup = $('div.custom-mode-setup');
@@ -910,13 +1177,33 @@ class ModeShellContribution extends Disposable {
 			$('div.custom-mode-ix-debug-title', undefined, localize('customMode.ixDebugTitle', 'Ix')),
 			this.processIxDebugText
 		);
-		this.processContainer.appendChild(this.processCallout);
-		this.processContainer.appendChild(this.processSetup);
-		this.processContainer.appendChild(this.processIxWebHint);
-		this.processContainer.appendChild(this.processIxCommandsPanel);
-		this.processContainer.appendChild(this.processIxDebug);
-		this.processChatContainer = $('div.custom-mode-embedded-chat');
-		this.processContainer.appendChild(this.processChatContainer);
+		this.processMainColumn.appendChild(this.processCallout);
+		this.processMainColumn.appendChild(this.processSetup);
+		this.processMainColumn.appendChild(this.processIxWebHint);
+		this.processMainColumn.appendChild(this.processIxCommandsPanel);
+		this.processMainColumn.appendChild(this.processIxDebug);
+		this.processContainer.appendChild(this.processMainColumn);
+
+		this.processChatContainer = $('div.custom-mode-embedded-chat.custom-mode-process-side-chat');
+		const processChatTitle = localize('customMode.processChatTitle', 'AI chat');
+		const processChatCloseLabel = localize('customMode.processChatClose', 'Close');
+		const processCloseBtn = $('button', { type: 'button', 'aria-label': processChatCloseLabel, title: processChatCloseLabel }, '\u2715') as HTMLButtonElement;
+		const processChatHeader = $('div.custom-mode-process-chat-header', undefined,
+			$('span', undefined, processChatTitle),
+			processCloseBtn
+		);
+		this.processChatColumn = $('div.custom-mode-process-chat-column', undefined, processChatHeader, this.processChatContainer);
+		this.processContainer.appendChild(this.processChatColumn);
+
+		this.processChatReopenBtn = $('button.custom-mode-process-chat-reopen', {
+			type: 'button',
+			title: localize('customMode.processChatReopen', 'Open AI chat'),
+			'aria-label': localize('customMode.processChatReopen', 'Open AI chat'),
+		}, localize('customMode.processChatReopenShort', 'AI chat')) as HTMLButtonElement;
+		this.processContainer.appendChild(this.processChatReopenBtn);
+
+		this._register(addDisposableListener(processCloseBtn, 'click', () => this.setProcessChatDismissed(true)));
+		this._register(addDisposableListener(this.processChatReopenBtn, 'click', () => this.setProcessChatDismissed(false)));
 
 		this.modeSurface.appendChild(this.uiContainer);
 		this.modeSurface.appendChild(this.processContainer);
@@ -963,11 +1250,12 @@ class ModeShellContribution extends Disposable {
 		// Forward webview console/errors into the debug panel (desktop only).
 		if (!isWeb && this.isWebviewElement(this.uiBrowser)) {
 			const webview = this.uiBrowser as unknown as {
-				addEventListener: (type: string, listener: (e: any) => void) => void;
+				addEventListener: (type: string, listener: (e: unknown) => void) => void;
 				executeJavaScript?: (code: string, userGesture?: boolean) => Promise<unknown>;
 			};
 
 			const log = (type: string, detail?: string) => this.pushUiRuntimeLog(`[webview:${type}]${detail ? ` ${detail}` : ''}`);
+			const asRecord = (v: unknown): Record<string, unknown> | undefined => (v && typeof v === 'object') ? (v as Record<string, unknown>) : undefined;
 
 			webview.addEventListener('did-start-loading', () => log('did-start-loading'));
 			webview.addEventListener('did-stop-loading', () => log('did-stop-loading'));
@@ -977,18 +1265,20 @@ class ModeShellContribution extends Disposable {
 				try {
 					await webview.executeJavaScript?.(this.uiClickOverlayScript);
 					log('inject-click-overlay');
-				} catch (e: any) {
-					log('inject-failed', String(e?.message ?? e));
+				} catch (e: unknown) {
+					const err = e as { message?: string } | undefined;
+					log('inject-failed', String(err?.message ?? e));
 				}
 			});
-			webview.addEventListener('did-navigate', (e: any) => log('did-navigate', e?.url ? String(e.url) : undefined));
-			webview.addEventListener('did-navigate-in-page', (e: any) => log('did-navigate-in-page', e?.url ? String(e.url) : undefined));
+			webview.addEventListener('did-navigate', (e: unknown) => log('did-navigate', asRecord(e)?.url ? String(asRecord(e)?.url) : undefined));
+			webview.addEventListener('did-navigate-in-page', (e: unknown) => log('did-navigate-in-page', asRecord(e)?.url ? String(asRecord(e)?.url) : undefined));
 
-			this._register(addDisposableListener(this.uiBrowser as unknown as HTMLElement, 'console-message', (e: any) => {
-				const msg = e?.message ?? '';
-				const level = e?.level ?? '';
-				const line = e?.line ? `:${e.line}` : '';
-				const source = e?.sourceId ? ` (${e.sourceId}${line})` : '';
+			this._register(addDisposableListener(this.uiBrowser as unknown as HTMLElement, 'console-message', (e: unknown) => {
+				const evt = asRecord(e);
+				const msg = evt?.message ?? '';
+				const level = evt?.level ?? '';
+				const line = typeof evt?.line === 'number' ? `:${evt.line}` : '';
+				const source = evt?.sourceId ? ` (${String(evt.sourceId)}${line})` : '';
 				// Parse click overlay marker emitted from inside <webview>.
 				if (typeof msg === 'string' && (msg.startsWith('__VSCODE_UI_CLICK__') || msg.startsWith('__VSCODE_UI_ENV__') || msg.startsWith('__VSCODE_UI_SELECTION__'))) {
 					try {
@@ -998,7 +1288,7 @@ class ModeShellContribution extends Disposable {
 								? msg.slice('__VSCODE_UI_SELECTION__'.length)
 								: msg.slice('__VSCODE_UI_CLICK__'.length);
 						const data = JSON.parse(json) as UiClickOverlayMessage;
-						this.onEmbeddedUiMessage(new MessageEvent('message', { data } as any));
+						this.onEmbeddedUiMessage(new MessageEvent<UiClickOverlayMessage>('message', { data }));
 						return;
 					} catch {
 						// fall through and log raw
@@ -1008,12 +1298,13 @@ class ModeShellContribution extends Disposable {
 				this.pushUiRuntimeLog(`[console${level ? `:${level}` : ''}] ${msg}${source}`);
 			}));
 
-			this._register(addDisposableListener(this.uiBrowser as unknown as HTMLElement, 'did-fail-load', (e: any) => {
-				const url = e?.validatedURL ?? '';
-				const desc = e?.errorDescription ?? e?.errorCode ?? 'load failed';
+			this._register(addDisposableListener(this.uiBrowser as unknown as HTMLElement, 'did-fail-load', (e: unknown) => {
+				const evt = asRecord(e);
+				const url = typeof evt?.validatedURL === 'string' ? evt.validatedURL : '';
+				const desc = evt?.errorDescription ?? evt?.errorCode ?? 'load failed';
 				// ERR_ABORTED (-3) is emitted when a navigation is intentionally interrupted
 				// (e.g. subsequent src update). Don't treat it as a real error.
-				if (e?.errorCode === -3 || String(desc).includes('ERR_ABORTED')) {
+				if (evt?.errorCode === -3 || String(desc).includes('ERR_ABORTED')) {
 					return;
 				}
 				this.pushUiRuntimeLog(`[load-failed] ${desc}${url ? ` (${url})` : ''}`);
@@ -1281,13 +1572,30 @@ class ModeShellContribution extends Disposable {
 		);
 
 		widget.render(container);
-		widget.setVisible(true);
 
+		const defaultStripHeightPx = 120;
 		const layoutEmbeddedChat = () => {
+			if (!container.classList.contains('visible')) {
+				return;
+			}
 			const host = container.parentElement;
 			const w = Math.max(0, container.clientWidth || host?.clientWidth || 0);
-			// Keep the embedded chat a small strip; avoid feeding potentially inflated parent heights into layout.
-			const h = 120;
+			// Strip height fallback, or UI/Process right-panel chat column height minus header.
+			const measured = container.clientHeight;
+			let h = measured;
+			if (h <= 0) {
+				if (container.classList.contains('custom-mode-process-side-chat') && host && host.clientHeight > 0) {
+					const headerEl = host.querySelector('.custom-mode-process-chat-header');
+					const headerH = headerEl instanceof HTMLElement ? headerEl.clientHeight : 40;
+					h = Math.max(120, host.clientHeight - headerH);
+				} else if (container.classList.contains('custom-mode-ui-side-chat') && host && host.clientHeight > 0) {
+					const headerEl = host.querySelector('.custom-mode-ui-chat-header');
+					const headerH = headerEl instanceof HTMLElement ? headerEl.clientHeight : 40;
+					h = Math.max(120, host.clientHeight - headerH);
+				} else {
+					h = defaultStripHeightPx;
+				}
+			}
 			if (w > 0 && h > 0) {
 				widget.layout(h, w);
 			}
@@ -1304,17 +1612,50 @@ class ModeShellContribution extends Disposable {
 		return widget;
 	}
 
+	private setUiChatDismissed(dismissed: boolean): void {
+		if (this._uiChatDismissed === dismissed) {
+			return;
+		}
+		this._uiChatDismissed = dismissed;
+		this.uiContainer.classList.toggle('custom-mode-ui-chat-dismissed', dismissed);
+		this.storageService.store(STORAGE_UI_CHAT_DISMISSED, dismissed ? '1' : '0', StorageScope.PROFILE, StorageTarget.USER);
+		const inUi = this.modeService.getMode() === 'UI';
+		const showUiChat = inUi && !dismissed;
+		this.uiChatContainer.classList.toggle('visible', showUiChat);
+		this.uiChatWidget.setVisible(showUiChat);
+		queueMicrotask(() => this.layoutService.layout());
+	}
+
+	private setProcessChatDismissed(dismissed: boolean): void {
+		if (this._processChatDismissed === dismissed) {
+			return;
+		}
+		this._processChatDismissed = dismissed;
+		this.processContainer.classList.toggle('custom-mode-process-chat-dismissed', dismissed);
+		this.storageService.store(STORAGE_PROCESS_CHAT_DISMISSED, dismissed ? '1' : '0', StorageScope.PROFILE, StorageTarget.USER);
+		const inProcess = this.modeService.getMode() === 'Process';
+		const showProcessChat = inProcess && !dismissed;
+		this.processChatContainer.classList.toggle('visible', showProcessChat);
+		this.processChatWidget.setVisible(showProcessChat);
+		queueMicrotask(() => this.layoutService.layout());
+	}
+
 	private async updateEmbeddedChat(mode: Mode): Promise<void> {
 		const showUi = mode === 'UI';
 		const showProcess = mode === 'Process';
-		this.uiChatContainer.classList.toggle('visible', showUi);
-		this.processChatContainer.classList.toggle('visible', showProcess);
+		const uiChatOpen = showUi && !this._uiChatDismissed;
+		this.uiChatContainer.classList.toggle('visible', uiChatOpen);
+		const processChatOpen = showProcess && !this._processChatDismissed;
+		this.processChatContainer.classList.toggle('visible', processChatOpen);
 
 		if (showUi) {
 			await this.ensureEmbeddedChatModel('UI');
 		} else if (showProcess) {
 			await this.ensureEmbeddedChatModel('Process');
 		}
+
+		this.uiChatWidget.setVisible(uiChatOpen);
+		this.processChatWidget.setVisible(processChatOpen);
 	}
 
 	private async ensureEmbeddedChatModel(mode: 'UI' | 'Process'): Promise<void> {
@@ -1331,7 +1672,6 @@ class ModeShellContribution extends Disposable {
 
 		const widget = mode === 'UI' ? this.uiChatWidget : this.processChatWidget;
 		widget.setModel(ref.object);
-		widget.setVisible(true);
 	}
 
 	private updateProjectState(): void {
@@ -1645,7 +1985,7 @@ registerAction2(class EnableNextComponentMappingAction extends Action2 {
 		});
 	}
 
-	override async run(accessor: any): Promise<void> {
+	override async run(accessor: ServicesAccessor): Promise<void> {
 		const workspaceContextService = accessor.get(IWorkspaceContextService);
 		const quickInputService = accessor.get(IQuickInputService);
 		const notificationService = accessor.get(INotificationService);
@@ -1765,7 +2105,7 @@ registerAction2(class EnableNextComponentMappingAction extends Action2 {
 	}
 });
 
-function withModeShellChatManager(accessor: any, fn: (mgr: ModeShellChatSessionManager) => Promise<void> | void): Promise<void> | void {
+function withModeShellChatManager(accessor: ServicesAccessor, fn: (mgr: ModeShellChatSessionManager) => Promise<void> | void): Promise<void> | void {
 	const chatService = accessor.get(IChatService);
 	const chatWidgetService = accessor.get(IChatWidgetService);
 	const storageService = accessor.get(IStorageService);
@@ -1781,7 +2121,7 @@ registerAction2(class SwitchChatToUiAction extends Action2 {
 			f1: true,
 		});
 	}
-	override async run(accessor: any): Promise<void> {
+	override async run(accessor: ServicesAccessor): Promise<void> {
 		accessor.get(IModeService).setMode('UI');
 		await withModeShellChatManager(accessor, mgr => mgr.openSessionForMode('UI'));
 	}
@@ -1795,7 +2135,7 @@ registerAction2(class SwitchChatToProcessAction extends Action2 {
 			f1: true,
 		});
 	}
-	override async run(accessor: any): Promise<void> {
+	override async run(accessor: ServicesAccessor): Promise<void> {
 		accessor.get(IModeService).setMode('Process');
 		await withModeShellChatManager(accessor, mgr => mgr.openSessionForMode('Process'));
 	}
@@ -1809,7 +2149,7 @@ registerAction2(class SwitchChatToCodeAction extends Action2 {
 			f1: true,
 		});
 	}
-	override async run(accessor: any): Promise<void> {
+	override async run(accessor: ServicesAccessor): Promise<void> {
 		accessor.get(IModeService).setMode('Code');
 		await withModeShellChatManager(accessor, mgr => mgr.openSessionForMode('Code'));
 	}
@@ -1823,7 +2163,7 @@ registerAction2(class ResetModeShellChatsAction extends Action2 {
 			f1: true,
 		});
 	}
-	override async run(accessor: any): Promise<void> {
+	override async run(accessor: ServicesAccessor): Promise<void> {
 		const modeService = accessor.get(IModeService);
 		const notificationService = accessor.get(INotificationService);
 		await withModeShellChatManager(accessor, async mgr => {
