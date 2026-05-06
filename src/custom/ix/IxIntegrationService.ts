@@ -21,11 +21,31 @@ import { localize } from '../../vs/nls.js';
 
 export type IxPhase = 'idle' | 'installing' | 'docker' | 'mapping' | 'watching' | 'error';
 
+export type IxPipelineStepStatus = 'idle' | 'running' | 'success' | 'error' | 'skipped';
+
+export type IxPipelineStepKind = 'global' | 'workspace';
+
+export interface IxPipelineStepSnapshot {
+	readonly id: string;
+	readonly kind: IxPipelineStepKind;
+	readonly label: string;
+	readonly workspaceUri?: string;
+	readonly workspaceName?: string;
+	readonly status: IxPipelineStepStatus;
+	readonly command?: string;
+	readonly error?: string;
+	readonly startedAtMs?: number;
+	readonly endedAtMs?: number;
+	readonly outputTail: string;
+}
+
 export interface IxIntegrationState {
 	readonly phase: IxPhase;
 	readonly lastCommand: string | undefined;
 	readonly lastError: string | undefined;
 	readonly lastOutput: string;
+	readonly pipelineGeneration: number;
+	readonly pipelineSteps: ReadonlyArray<IxPipelineStepSnapshot>;
 }
 
 export interface IIxIntegrationService {
@@ -44,6 +64,17 @@ const STORAGE_IX_CLI = 'custom.ix/resolvedCliPath';
 
 const OUTPUT_TAIL = 16_384;
 
+const STEP_RESOLVE = 'resolve';
+const STEP_DOCKER = 'docker';
+
+function mapStepId(uri: URI): string {
+	return `map:${uri.toString()}`;
+}
+
+function watchStepId(uri: URI): string {
+	return `watch:${uri.toString()}`;
+}
+
 function stripAnsi(data: string): string {
 	return data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 }
@@ -55,6 +86,20 @@ function tailOutput(text: string): string {
 	}
 	const lines = t.split(/\r?\n/);
 	return lines.slice(-24).join('\n');
+}
+
+interface IxPipelineStepMutable {
+	readonly id: string;
+	readonly kind: IxPipelineStepKind;
+	readonly label: string;
+	workspaceUri?: string;
+	workspaceName?: string;
+	status: IxPipelineStepStatus;
+	command?: string;
+	error?: string;
+	startedAtMs?: number;
+	endedAtMs?: number;
+	outputBuf: string;
 }
 
 export class IxIntegrationService extends Disposable implements IIxIntegrationService {
@@ -69,8 +114,10 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 	private outputBuffer = '';
 
 	private pipelineGeneration = 0;
+	private pipelineStepsMutable: IxPipelineStepMutable[] = [];
 	private readonly watchInstances = new Map<string, DisposableStore>();
 	private readonly startScheduler = this._register(new RunOnceScheduler(() => void this.runAutoStartPipeline(), 900));
+	private readonly pipelineOutputFlushScheduler = this._register(new RunOnceScheduler(() => this.fireState(), 120));
 
 	constructor(
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
@@ -105,6 +152,8 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			lastCommand: this.lastCommand,
 			lastError: this.lastError,
 			lastOutput: this.getLastOutputSnippet(),
+			pipelineGeneration: this.pipelineGeneration,
+			pipelineSteps: this.snapshotPipeline(),
 		};
 	}
 
@@ -112,17 +161,132 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		return tailOutput(this.outputBuffer);
 	}
 
-	private pushOutput(chunk: string): void {
+	private pushAggregateOutput(chunk: string): void {
 		this.outputBuffer = (this.outputBuffer + chunk).slice(-OUTPUT_TAIL);
+	}
+
+	private pushPipelineOutput(stepId: string | undefined, chunk: string, debounce: boolean): void {
+		if (stepId) {
+			const s = this.findStep(stepId);
+			if (s) {
+				s.outputBuf = (s.outputBuf + chunk).slice(-OUTPUT_TAIL);
+			}
+		}
+		this.pushAggregateOutput(chunk);
+		if (debounce) {
+			this.pipelineOutputFlushScheduler.schedule();
+		} else {
+			this.fireState();
+		}
+	}
+
+	private clearPipeline(): void {
+		this.pipelineStepsMutable = [];
+	}
+
+	private rebuildPipelineForFolders(folders: ReadonlyArray<{ readonly name: string; readonly uri: URI }>): void {
+		this.pipelineStepsMutable = [];
+		this.pipelineStepsMutable.push({
+			id: STEP_RESOLVE,
+			kind: 'global',
+			label: localize('ix.pipeline.resolve', 'Resolve CLI'),
+			status: 'idle',
+			outputBuf: '',
+		});
+		this.pipelineStepsMutable.push({
+			id: STEP_DOCKER,
+			kind: 'global',
+			label: localize('ix.pipeline.docker', 'Docker start'),
+			status: 'idle',
+			outputBuf: '',
+		});
+		for (const f of folders) {
+			this.pipelineStepsMutable.push({
+				id: mapStepId(f.uri),
+				kind: 'workspace',
+				label: localize('ix.pipeline.mapFolder', 'Map: {0}', f.name),
+				workspaceUri: f.uri.toString(),
+				workspaceName: f.name,
+				status: 'idle',
+				outputBuf: '',
+			});
+		}
+		for (const f of folders) {
+			this.pipelineStepsMutable.push({
+				id: watchStepId(f.uri),
+				kind: 'workspace',
+				label: localize('ix.pipeline.watchFolder', 'Watch: {0}', f.name),
+				workspaceUri: f.uri.toString(),
+				workspaceName: f.name,
+				status: 'idle',
+				outputBuf: '',
+			});
+		}
+	}
+
+	private rebuildPipelineResolveOnly(): void {
+		this.pipelineStepsMutable = [{
+			id: STEP_RESOLVE,
+			kind: 'global',
+			label: localize('ix.pipeline.resolve', 'Resolve CLI'),
+			status: 'idle',
+			outputBuf: '',
+		}];
+	}
+
+	private findStep(id: string): IxPipelineStepMutable | undefined {
+		return this.pipelineStepsMutable.find(s => s.id === id);
+	}
+
+	private beginStep(id: string): void {
+		const s = this.findStep(id);
+		if (!s) {
+			return;
+		}
+		s.status = 'running';
+		s.startedAtMs = Date.now();
+		s.endedAtMs = undefined;
+		s.error = undefined;
 		this.fireState();
 	}
 
-	private setPhase(phase: IxPhase, error?: string): void {
-		this.phase = phase;
+	private completeStep(id: string, status: 'success' | 'error' | 'skipped', error?: string): void {
+		const s = this.findStep(id);
+		if (!s) {
+			return;
+		}
+		s.status = status;
+		s.endedAtMs = Date.now();
 		if (error) {
-			this.lastError = error;
+			s.error = error;
 		}
 		this.fireState();
+	}
+
+	private markRemainingIdleStepsSkipped(): void {
+		for (const s of this.pipelineStepsMutable) {
+			if (s.status === 'idle') {
+				s.status = 'skipped';
+				s.endedAtMs = Date.now();
+			}
+		}
+		this.fireState();
+	}
+
+	private snapshotPipeline(): ReadonlyArray<IxPipelineStepSnapshot> {
+		return this.pipelineStepsMutable.map(s => ({
+			id: s.id,
+			kind: s.kind,
+			label: s.label,
+			workspaceUri: s.workspaceUri,
+			workspaceName: s.workspaceName,
+			status: s.status,
+			command: s.command,
+			error: s.error,
+			startedAtMs: s.startedAtMs,
+			endedAtMs: s.endedAtMs,
+			outputTail: tailOutput(s.outputBuf),
+		}));
 	}
 
 	private fireState(): void {
@@ -169,13 +333,30 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		return { executable: '/bin/bash', args: ['-c', commandLine] };
 	}
 
-	private async runCommand(cwd: URI | undefined, commandLine: string, timeoutMs: number): Promise<{ exitCode: number; output: string }> {
+	private async runCommand(
+		cwd: URI | undefined,
+		commandLine: string,
+		timeoutMs: number,
+		opts?: { ui?: 'pipeline' | 'none'; stepId?: string; debounceOutput?: boolean },
+	): Promise<{ exitCode: number; output: string }> {
+		const ui = opts?.ui ?? 'pipeline';
+		const stepId = opts?.stepId;
+		const debounce = opts?.debounceOutput ?? false;
+
 		const shell = this.shellLaunchForCommand(commandLine);
 		const store = new DisposableStore();
 		let buf = '';
 		try {
-			this.lastCommand = commandLine;
-			this.fireState();
+			if (ui !== 'none') {
+				this.lastCommand = commandLine;
+				if (stepId) {
+					const s = this.findStep(stepId);
+					if (s) {
+						s.command = commandLine;
+					}
+				}
+				this.fireState();
+			}
 
 			const instance = await this.terminalService.createTerminal({
 				cwd,
@@ -189,7 +370,10 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			store.add(instance);
 			store.add(instance.onData(d => {
 				buf += d;
-				this.pushOutput(d);
+				if (ui === 'none') {
+					return;
+				}
+				this.pushPipelineOutput(stepId, d, debounce);
 			}));
 
 			const exitCode = await new Promise<number>((resolve, reject) => {
@@ -204,6 +388,11 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 					}
 				}));
 			});
+
+			if (ui !== 'none' && debounce) {
+				this.pipelineOutputFlushScheduler.cancel();
+				this.fireState();
+			}
 
 			return { exitCode, output: stripAnsi(buf) };
 		} finally {
@@ -227,7 +416,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 
 		const cmd = `${ixBin} ${args.join(' ')}`;
-		const { exitCode, output } = await this.runCommand(folder, cmd, timeoutMs);
+		const { exitCode, output } = await this.runCommand(folder, cmd, timeoutMs, { ui: 'none' });
 		if (exitCode !== 0) {
 			return { ok: false, error: `ix exited with code ${exitCode}`, raw: output, exitCode };
 		}
@@ -255,13 +444,13 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 
 		const probe = this.probeCommand();
-		const r = await this.runCommand(cwd, probe, 30_000);
+		const r = await this.runCommand(cwd, probe, 30_000, { ui: 'none' });
 		if (r.exitCode !== 0) {
 			return undefined;
 		}
 
 		if (isWindows) {
-			const w = await this.runCommand(cwd, 'where ix', 30_000);
+			const w = await this.runCommand(cwd, 'where ix', 30_000, { ui: 'none' });
 			const line = w.output.split(/\r?\n/).map(l => l.trim()).filter(Boolean)[0];
 			if (line) {
 				this.storageService.store(STORAGE_IX_CLI, line, StorageScope.APPLICATION, StorageTarget.MACHINE);
@@ -288,7 +477,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		return `curl -fsSL '${safe}' | sh`;
 	}
 
-	private async ensureInstalled(cwd: URI, gen: number): Promise<string | undefined> {
+	private async ensureInstalled(cwd: URI, gen: number, resolveStepId: string): Promise<string | undefined> {
 		let binary = await this.resolveIxBinary(cwd);
 		if (binary) {
 			return binary;
@@ -296,7 +485,9 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 
 		const allowInstall = Boolean(this.configurationService.getValue<boolean>('custom.ix.autoInstall') ?? true);
 		if (!allowInstall) {
-			this.setPhase('error', localize('ix.error.noCli', 'The ix CLI was not found and automatic installation is disabled (custom.ix.autoInstall).'));
+			const msg = localize('ix.error.noCli', 'The ix CLI was not found and automatic installation is disabled (custom.ix.autoInstall).');
+			this.completeStep(resolveStepId, 'error', msg);
+			this.setPhase('error', msg);
 			this.notificationService.notify({
 				severity: Severity.Error,
 				message: localize('ix.notify.noCli', 'Ix CLI not found. Install ix manually or enable custom.ix.autoInstall.'),
@@ -311,12 +502,14 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		this.setPhase('installing');
 		const installCmd = this.buildInstallCommand();
 		try {
-			const r = await this.runCommand(cwd, installCmd, 600_000);
+			const r = await this.runCommand(cwd, installCmd, 600_000, { stepId: resolveStepId });
 			if (gen !== this.pipelineGeneration) {
 				return undefined;
 			}
 			if (r.exitCode !== 0) {
-				this.setPhase('error', localize('ix.error.installFailed', 'Ix install script failed (exit {0}).', String(r.exitCode)));
+				const err = localize('ix.error.installFailed', 'Ix install script failed (exit {0}).', String(r.exitCode));
+				this.completeStep(resolveStepId, 'error', err);
+				this.setPhase('error', err);
 				this.notificationService.notify({
 					severity: Severity.Error,
 					message: localize('ix.notify.installFailed', 'Ix installation failed. Check the Process tab log or install ix manually.'),
@@ -327,6 +520,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			if (gen !== this.pipelineGeneration) {
 				return undefined;
 			}
+			this.completeStep(resolveStepId, 'error', String(e));
 			this.setPhase('error', String(e));
 			this.notificationService.notify({ severity: Severity.Error, message: String(e) });
 			return undefined;
@@ -335,7 +529,9 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		this.storageService.remove(STORAGE_IX_CLI, StorageScope.APPLICATION);
 		binary = await this.resolveIxBinary(cwd);
 		if (!binary) {
-			this.setPhase('error', localize('ix.error.afterInstall', 'Ix install finished but `ix` is still not on PATH.'));
+			const msg = localize('ix.error.afterInstall', 'Ix install finished but `ix` is still not on PATH.');
+			this.completeStep(resolveStepId, 'error', msg);
+			this.setPhase('error', msg);
 			this.notificationService.notify({
 				severity: Severity.Warning,
 				message: localize('ix.notify.afterInstall', 'Ix was installed but could not be detected on PATH. Restart VS Code or set custom.ix.cliPath.'),
@@ -351,12 +547,14 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 
 	private async runAutoStartPipeline(): Promise<void> {
 		if (isWeb || !this.isIxAutomationEnabled() || !this.isAutoStartEnabled()) {
+			this.clearPipeline();
 			this.setPhase('idle');
 			return;
 		}
 
 		if (this.workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY) {
 			this.disposeWatchers();
+			this.clearPipeline();
 			this.setPhase('idle');
 			this.lastCommand = undefined;
 			this.lastError = undefined;
@@ -366,22 +564,40 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 
 		const gen = ++this.pipelineGeneration;
-		const primary = this.getPrimaryFolder();
+		const folders = this.workspaceContextService.getWorkspace().folders;
+		const primary = folders[0]?.uri;
 		if (!primary) {
+			this.clearPipeline();
+			this.fireState();
 			return;
 		}
 
 		this.lastError = undefined;
+		this.lastCommand = undefined;
 		this.outputBuffer = '';
+		this.rebuildPipelineForFolders(folders);
 
-		const ix = await this.ensureInstalled(primary, gen);
-		if (!ix || gen !== this.pipelineGeneration) {
+		this.beginStep(STEP_RESOLVE);
+		const ix = await this.ensureInstalled(primary, gen, STEP_RESOLVE);
+		if (gen !== this.pipelineGeneration) {
+			return;
+		}
+		if (!ix) {
+			const rs = this.findStep(STEP_RESOLVE);
+			if (rs?.status === 'error') {
+				this.markRemainingIdleStepsSkipped();
+			}
 			return;
 		}
 
-		this.setPhase('docker');
+		const rs = this.findStep(STEP_RESOLVE);
+		if (rs?.status === 'running') {
+			this.completeStep(STEP_RESOLVE, 'success');
+		}
+
+		this.beginStep(STEP_DOCKER);
 		try {
-			const docker = await this.runCommand(primary, `${this.quoteIx(ix)} docker start`, 300_000);
+			const docker = await this.runCommand(primary, `${this.quoteIx(ix)} docker start`, 300_000, { stepId: STEP_DOCKER });
 			if (gen !== this.pipelineGeneration) {
 				return;
 			}
@@ -390,6 +606,8 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 				const detail = tail
 					? localize('ix.error.dockerWithLog', '`ix docker start` failed (exit {0}). Recent output:\n\n{1}', String(docker.exitCode), tail)
 					: localize('ix.error.docker', '`ix docker start` failed (exit {0}). Is Docker running?', String(docker.exitCode));
+				this.completeStep(STEP_DOCKER, 'error', detail);
+				this.markRemainingIdleStepsSkipped();
 				this.setPhase('error', detail);
 				this.notificationService.notify({
 					severity: Severity.Error,
@@ -397,38 +615,48 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 				});
 				return;
 			}
+			this.completeStep(STEP_DOCKER, 'success');
 		} catch (e) {
 			if (gen !== this.pipelineGeneration) {
 				return;
 			}
+			this.completeStep(STEP_DOCKER, 'error', String(e));
+			this.markRemainingIdleStepsSkipped();
 			this.setPhase('error', String(e));
 			this.notificationService.notify({ severity: Severity.Error, message: String(e) });
 			return;
 		}
 
 		this.setPhase('mapping');
-		const folders = this.workspaceContextService.getWorkspace().folders;
 		for (const folder of folders) {
 			if (gen !== this.pipelineGeneration) {
 				return;
 			}
+			const mid = mapStepId(folder.uri);
+			this.beginStep(mid);
 			try {
-				const map = await this.runCommand(folder.uri, `${this.quoteIx(ix)} map`, 600_000);
+				const map = await this.runCommand(folder.uri, `${this.quoteIx(ix)} map`, 600_000, { stepId: mid });
 				if (gen !== this.pipelineGeneration) {
 					return;
 				}
 				if (map.exitCode !== 0) {
-					this.setPhase('error', localize('ix.error.map', '`ix map` failed for {0} (exit {1}).', folder.name, String(map.exitCode)));
+					const err = localize('ix.error.map', '`ix map` failed for {0} (exit {1}).', folder.name, String(map.exitCode));
+					this.completeStep(mid, 'error', err);
+					this.markRemainingIdleStepsSkipped();
+					this.setPhase('error', err);
 					this.notificationService.notify({
 						severity: Severity.Error,
 						message: localize('ix.notify.map', 'Ix map failed for folder {0}.', folder.name),
 					});
 					return;
 				}
+				this.completeStep(mid, 'success');
 			} catch (e) {
 				if (gen !== this.pipelineGeneration) {
 					return;
 				}
+				this.completeStep(mid, 'error', String(e));
+				this.markRemainingIdleStepsSkipped();
 				this.setPhase('error', String(e));
 				this.notificationService.notify({ severity: Severity.Error, message: String(e) });
 				return;
@@ -461,6 +689,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 				return;
 			}
 			const key = folder.uri.toString();
+			const wid = watchStepId(folder.uri);
 			void this.terminalService.createTerminal({
 				cwd: folder.uri,
 				config: {
@@ -476,14 +705,46 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 				}
 				const store = new DisposableStore();
 				store.add(instance);
-				store.add(instance.onData(d => this.pushOutput(`[watch:${folder.name}] ${d}`)));
+
+				this.beginStep(wid);
+
+				store.add(instance.onData(d => {
+					const prefixed = `[${folder.name}] ${d}`;
+					this.pushPipelineOutput(wid, prefixed, true);
+				}));
+
+				let exitHandled = false;
+				store.add(instance.onExit(code => {
+					if (exitHandled || gen !== this.pipelineGeneration) {
+						return;
+					}
+					exitHandled = true;
+					if (typeof code === 'number' && code !== 0) {
+						this.completeStep(wid, 'error', localize('ix.error.watchExit', '`ix watch` exited ({0}) for {1}.', String(code), folder.name));
+					} else {
+						this.completeStep(wid, 'success');
+					}
+				}));
+
 				store.add(instance.onDisposed(() => {
 					this.watchInstances.delete(key);
 					if (!store.isDisposed) {
 						store.dispose();
 					}
+					if (gen !== this.pipelineGeneration || exitHandled) {
+						return;
+					}
+					const s = this.findStep(wid);
+					if (s?.status === 'running') {
+						this.completeStep(wid, 'success');
+					}
 				}));
+
 				this.watchInstances.set(key, store);
+			}).catch(err => {
+				if (gen === this.pipelineGeneration) {
+					this.completeStep(wid, 'error', String(err));
+				}
 			});
 		}
 	}
@@ -518,13 +779,32 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		if (!primary) {
 			return;
 		}
+		const gen = this.pipelineGeneration;
 		this.storageService.remove(STORAGE_IX_CLI, StorageScope.APPLICATION);
-		await this.ensureInstalled(primary, this.pipelineGeneration);
+		this.rebuildPipelineResolveOnly();
+		this.beginStep(STEP_RESOLVE);
+		const ix = await this.ensureInstalled(primary, gen, STEP_RESOLVE);
+		if (this.pipelineGeneration !== gen) {
+			this.fireState();
+			return;
+		}
+		const rs = this.findStep(STEP_RESOLVE);
+		if (ix && rs?.status === 'running') {
+			this.completeStep(STEP_RESOLVE, 'success');
+		}
 		this.fireState();
 	}
 
 	async openDocs(): Promise<void> {
 		await this.openerService.open(URI.parse('https://ix-infra.com/docs/'));
+	}
+
+	private setPhase(phase: IxPhase, error?: string): void {
+		this.phase = phase;
+		if (error) {
+			this.lastError = error;
+		}
+		this.fireState();
 	}
 }
 

@@ -93,7 +93,7 @@ export class ProcessNotesCytoscapeView extends Disposable {
 </head>
 <body>
 	<div id="cy"></div>
-	<div id="hint">drag to pan • wheel to zoom • click node to open source</div>
+	<div id="hint">drag to pan • wheel to zoom • topics: click to expand • detail: click node to open source</div>
 	<script nonce="${nonce}" src="${cytoscapeUri.toString()}"></script>
 	<script nonce="${nonce}" src="${fcoseUri.toString()}"></script>
 	<script nonce="${nonce}">
@@ -111,6 +111,10 @@ export class ProcessNotesCytoscapeView extends Disposable {
 					case 'Chat': return '#ef4444';
 					default: return currentTheme === 'dark' ? '#94a3b8' : '#64748b';
 				}
+			}
+
+			function topicOverviewColor() {
+				return currentTheme === 'dark' ? '#475569' : '#64748b';
 			}
 
 			function ensureCy() {
@@ -156,6 +160,17 @@ export class ProcessNotesCytoscapeView extends Disposable {
 							}
 						},
 						{
+							selector: 'node[kind = "topic"]',
+							style: {
+								'padding': 18,
+								'font-size': 13,
+								'font-weight': '600',
+								'text-max-width': 220,
+								'border-width': 2,
+								'border-color': currentTheme === 'dark' ? 'rgba(148,163,184,0.55)' : 'rgba(71,85,105,0.45)',
+							}
+						},
+						{
 							selector: 'node:selected',
 							style: {
 								'border-width': 2,
@@ -178,9 +193,13 @@ export class ProcessNotesCytoscapeView extends Disposable {
 
 			function setGraph(graph) {
 				ensureCy();
-				const nodes = (graph?.nodes ?? []).map(n => ({
-					data: { id: n.id, label: n.label, color: laneColor(n.lane) }
-				}));
+				const nodes = (graph?.nodes ?? []).map(n => {
+					const kind = typeof n.kind === 'string' ? n.kind : '';
+					const color = kind === 'topic' ? topicOverviewColor() : laneColor(n.lane);
+					return {
+						data: { id: n.id, label: n.label, color, kind },
+					};
+				});
 				const edges = (graph?.edges ?? []).map((e, i) => ({
 					data: {
 						id: 'e' + String(i),

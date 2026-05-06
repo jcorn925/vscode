@@ -15,6 +15,7 @@ export type ProcessNoteLane =
 	| 'Chat';
 
 export type ProcessGraphNodeKind =
+	| 'topic'
 	| 'file'
 	| 'symbol'
 	| 'event'
@@ -63,6 +64,12 @@ export interface ProcessNoteMeta {
 	readonly generatedAt: number;
 	readonly gitHead?: string;
 	readonly ixRevision?: string;
+	/** Workspace folder this note was generated for (serialized URI). */
+	readonly workspaceUri?: string;
+	/** User question for custom-prompt recipes. */
+	readonly userPrompt?: string;
+	/** Built-in routing: `webview-selection` | `custom-prompt`. */
+	readonly recipeId?: string;
 }
 
 export interface ProcessNote {
