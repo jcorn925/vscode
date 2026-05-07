@@ -447,7 +447,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		if (!looksIxGraphEmptyFromStats(stats.output)) {
 			return { statsPreview, ranMap: false };
 		}
-		const mapped = await this.runCommand(cwd, `${this.quoteIx(ixBin)} map .`, 600_000, { ui: 'none' });
+		const mapped = await this.runCommand(cwd, `${this.quoteIx(ixBin)} map --all-items .`, 600_000, { ui: 'none' });
 		return { statsPreview, ranMap: mapped.exitCode === 0 };
 	}
 
@@ -476,8 +476,21 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			const value = JSON.parse(normalized);
 			return { ok: true, value, raw: output };
 		} catch (e: any) {
-			const head = output.trim().split(/\r?\n/).slice(0, 3).join('\n');
-			return { ok: false, error: `Failed to parse ix JSON output: ${String(e?.message ?? e)}${head ? `\n${head}` : ''}`, raw: output, exitCode: 0 };
+			const trimmed = output.trim();
+			const head = trimmed.split(/\r?\n/).slice(0, 6).join('\n');
+			// Some ix subcommands print a human-readable message even when --format json was requested.
+			// Treat this as an ix-level failure rather than a JSON parsing failure, and prefer the ix message.
+			const parseMsg = String(e?.message ?? e);
+			const ixMessage = head || trimmed;
+			if (/^No entity named\b/i.test(ixMessage)) {
+				return { ok: false, error: ixMessage, raw: output, exitCode: 0 };
+			}
+			return {
+				ok: false,
+				error: localize('ix.jsonQuery.notJson', 'Ix did not return JSON. {0}{1}', parseMsg ? `(${parseMsg})` : '', head ? `\n${head}` : ''),
+				raw: output,
+				exitCode: 0
+			};
 		}
 	}
 
@@ -703,7 +716,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			this.beginStep(mid);
 			try {
 				// Prefer `map .`: bare `ix map` may bind to ~/.ix registered default workspace instead of terminal cwd.
-				const map = await this.runCommand(folder.uri, `${this.quoteIx(ix)} map .`, 600_000, { stepId: mid });
+				const map = await this.runCommand(folder.uri, `${this.quoteIx(ix)} map --all-items .`, 600_000, { stepId: mid });
 				if (gen !== this.pipelineGeneration) {
 					return;
 				}

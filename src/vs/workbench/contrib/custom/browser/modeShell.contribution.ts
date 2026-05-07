@@ -47,7 +47,7 @@ import { IIxIntegrationService, type IxIntegrationState, type IxPipelineStepSnap
 import { IWebviewService } from '../../webview/browser/webview.js';
 import { ProcessNotesCytoscapeView, type ProcessNotesGraphWebviewMessage } from './processNotesCytoscapeView.js';
 import type { ProcessNoteGraph, ProcessNoteId, ProcessNotesFile } from './processNotesTypes.js';
-import type { ProcessNoteSuggestion, ProcessTopicsFile } from './processNotesTypes.js';
+import type { ProcessNoteSuggestion } from './processNotesTypes.js';
 import { ProcessNotesStore } from './processNotesStore.js';
 import {
 	RECIPE_CUSTOM_PROMPT,
@@ -60,7 +60,7 @@ import { formatSavedProcessNoteMarkdown, ixCommandLabelsFromEvidenceRaw } from '
 import type { ProcessNotesSynthesisResult } from './processNotesSynthesis.js';
 import { synthesizeCustomPromptNote } from './processNotesSynthesis.js';
 import { selectProcessCandidatesFromIxMap } from './processNotesSynthesis.js';
-import { applyProbeResults, computeProcessSuggestionsFromIxDiscovery } from './processNotesSuggestions.js';
+// Suggested “system processes” are derived directly from ix subsystems output.
 import { resolveIxEvidenceWorkspaceFolderUri } from './processNotesIxFolder.js';
 
 /** Every `ix` subcommand from https://ix-infra.com/docs/commands/ (grouped like the docs). */
@@ -68,7 +68,6 @@ const IX_DOCS_COMMANDS_URL = 'https://ix-infra.com/docs/commands/';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
-const STORAGE_PROCESS_NOTES_SUGGESTIONS_CACHE = 'modeShell.processNotesSuggestionsCache';
 
 function getIxCliCommandReferenceText(): string {
 	const L = (key: string, def: string) => localize(key, def);
@@ -177,9 +176,11 @@ class ModeShellContribution extends Disposable {
 	private readonly processNotesMarkdown: HTMLElement;
 	private readonly processNotesCards: HTMLElement;
 	private processNotesSuggestions: readonly ProcessNoteSuggestion[] = [];
+	private processNotesSuggestionsLoadState: 'idle' | 'running' | 'success' | 'error' = 'idle';
+	private processNotesSuggestionsLoadLog: string[] = [];
 	private processNotesGraphLayer: 'overview' | 'detail' = 'overview';
 	private processNotesMergedTopicIds: ProcessNoteId[] = mergeProcessNoteTopicIds(undefined);
-	private processNotesCachedFile: ProcessNotesFile | undefined;
+	// Saved notes list is removed; keep latest file only if needed later.
 	private readonly processIxDebugText: HTMLElement;
 	private readonly processIxCommandsButton: HTMLButtonElement;
 	private readonly processIxLogsButton: HTMLButtonElement;
@@ -189,6 +190,7 @@ class ModeShellContribution extends Disposable {
 	private readonly processIxPipelineGlobalRow: HTMLElement;
 	private readonly processIxPipelineWorkspaceRows: HTMLElement;
 	private readonly ixPipelineOpenOutput = new Set<string>();
+	private readonly ixPipelineOutputScrollTops = new Map<string, number>();
 	private lastIxPipelineState: IxIntegrationState | undefined;
 	private readonly ixPipelineDurationTicker = this._register(new MutableDisposable<IDisposable>());
 
@@ -223,7 +225,6 @@ class ModeShellContribution extends Disposable {
 
 		this.chatSessionManager = new ModeShellChatSessionManager(this.chatService, this.chatWidgetService, this.storageService);
 		this.processNotesStore = this._register(new ProcessNotesStore(this.fileService, this.workspaceContextService, this.configurationService));
-		void this.loadProcessNotesSuggestions();
 
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('custom.ix.preferredWorkspaceFolder')) {
@@ -897,6 +898,15 @@ class ModeShellContribution extends Disposable {
 				position: relative; /* anchor ix popovers */
 			}
 
+			/* When global + workspace steps are shown together, keep everything on one row. */
+			.monaco-workbench .custom-mode-ix-pipeline-combined-row {
+				display: flex;
+				flex-direction: row;
+				flex-wrap: wrap;
+				gap: 10px;
+				align-items: stretch;
+			}
+
 			.monaco-workbench .custom-mode-ix-pipeline-controls {
 				display: flex;
 				align-items: center;
@@ -979,6 +989,24 @@ class ModeShellContribution extends Disposable {
 				user-select: none;
 			}
 
+			.monaco-workbench .custom-mode-ix-pipeline-copy {
+				height: 22px;
+				padding: 0 8px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-button-border, transparent);
+				background-color: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+				color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+				cursor: pointer;
+				font-size: 11px;
+				font-weight: 600;
+				align-self: flex-start;
+				-webkit-app-region: no-drag;
+			}
+
+			.monaco-workbench .custom-mode-ix-pipeline-copy:hover {
+				background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
+			}
+
 			.monaco-workbench .custom-mode-ix-pipeline-pre {
 				margin: 6px 0 0;
 				padding: 8px;
@@ -992,6 +1020,8 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-descriptionForeground);
 				background: var(--vscode-textBlockQuote-background, rgba(127, 127, 127, 0.08));
 				border-radius: 4px;
+				user-select: text;
+				-webkit-user-select: text;
 			}
 
 			.monaco-workbench .custom-mode-ix-pipeline-step.status-running {
@@ -1123,6 +1153,8 @@ class ModeShellContribution extends Disposable {
 				line-height: 1.35;
 				white-space: pre-wrap;
 				display: none;
+				user-select: text;
+				-webkit-user-select: text;
 			}
 
 			.monaco-workbench .custom-mode-process-ix-popover.visible {
@@ -1297,6 +1329,23 @@ class ModeShellContribution extends Disposable {
 				padding: 6px 8px;
 				border-radius: 6px;
 				background: var(--vscode-textBlockQuote-background, rgba(127, 127, 127, 0.08));
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-process-notes-discovery-logs {
+				font-family: var(--monaco-monospace-font);
+				font-size: 10px;
+				line-height: 1.4;
+				user-select: text;
+				-webkit-user-select: text;
+				white-space: pre-wrap;
+				word-break: break-word;
+				max-height: min(120px, 18vh);
+				overflow: auto;
+				padding: 6px 8px;
+				border-radius: 6px;
+				background: var(--vscode-textCodeBlock-background);
 				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
 				color: var(--vscode-descriptionForeground);
 			}
@@ -1762,13 +1811,21 @@ class ModeShellContribution extends Disposable {
 		);
 
 		// Shared Ix log content element (used inside the popover).
-		this.processIxDebugText = $('div');
+		this.processIxDebugText = $('pre', { style: 'margin: 0; user-select: text; -webkit-user-select: text;' });
+		const ixCopyLabel = localize('customMode.ixDebugCopy', 'Copy');
+		const ixCopyButton = $('button.custom-mode-process-ix-button', { type: 'button', title: ixCopyLabel, 'aria-label': ixCopyLabel }, ixCopyLabel) as HTMLButtonElement;
 		this.processIxLogsPopover = $('div.custom-mode-process-ix-popover', undefined,
 			$('div.custom-mode-process-ix-popover-title', undefined,
-				localize('customMode.ixDebugTitle', 'Ix')
+				localize('customMode.ixDebugTitle', 'Ix'),
+				ixCopyButton
 			),
 			this.processIxDebugText
 		);
+		this._register(addDisposableListener(ixCopyButton, 'click', e => {
+			e.preventDefault();
+			e.stopPropagation();
+			void this.copyTextToClipboard(this.processIxDebugText.textContent ?? '');
+		}));
 
 		// Process notes (generated via Ix + AI) with an interactive Cytoscape graph canvas.
 		this.processNotesTopicSelect = $('select.custom-mode-process-notes-topic') as HTMLSelectElement;
@@ -1929,6 +1986,8 @@ class ModeShellContribution extends Disposable {
 		this.updateProjectState();
 		this.updateDevServerDebug(this.devServerService.getState());
 		this.updateIxDebug(this.ixIntegrationService.getState());
+		// Start the (UI-rendering) discovery only after Process notes UI exists.
+		void this.loadProcessNotesSuggestions();
 		void this.loadSelectedProcessNote().then(() => this.showProcessNotesOverview());
 		this.updateReachabilityFromState(this.devServerService.getState());
 		this.updateUiUrlPill(this.devServerService.getActiveUrl());
@@ -2605,6 +2664,29 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
+	private async copyTextToClipboard(text: string): Promise<void> {
+		try {
+			await mainWindow.navigator?.clipboard?.writeText(text);
+			return;
+		} catch {
+			// fall through
+		}
+		try {
+			const ta = document.createElement('textarea');
+			ta.value = text;
+			ta.setAttribute('readonly', 'true');
+			ta.style.position = 'fixed';
+			ta.style.left = '-9999px';
+			ta.style.top = '0';
+			document.body.appendChild(ta);
+			ta.select();
+			document.execCommand('copy');
+			ta.remove();
+		} catch {
+			// ignore
+		}
+	}
+
 	private appendPipelineStep(parent: HTMLElement, step: IxPipelineStepSnapshot): void {
 		const wrap = $('div.custom-mode-ix-pipeline-step');
 		wrap.classList.add(`status-${step.status}`);
@@ -2612,6 +2694,7 @@ class ModeShellContribution extends Disposable {
 		const st = $('span.custom-mode-ix-pipeline-status', { title: step.status, 'aria-label': step.status }, this.ixPipelineStatusGlyph(step.status));
 		const label = $('span.custom-mode-ix-pipeline-label', undefined, step.label);
 		const dur = $('span.custom-mode-ix-pipeline-dur', undefined, this.formatStepDuration(step));
+		dur.dataset['stepId'] = step.id;
 		head.appendChild(st);
 		head.appendChild(label);
 		head.appendChild(dur);
@@ -2636,10 +2719,47 @@ class ModeShellContribution extends Disposable {
 		summary.textContent = localize('customMode.ixPipeline.output', 'Output');
 		details.appendChild(summary);
 		const tail = step.outputTail.trim();
-		details.appendChild($('pre.custom-mode-ix-pipeline-pre', undefined,
-			tail.length > 0 ? tail : localize('customMode.ixPipeline.noOutput', '(no output yet)')));
+		const copyBtn = $('button.custom-mode-ix-pipeline-copy', { type: 'button' }, localize('customMode.ixPipeline.copy', 'Copy')) as HTMLButtonElement;
+		this._register(addDisposableListener(copyBtn, 'click', (e: MouseEvent) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const text = step.outputTail.trim();
+			void this.copyTextToClipboard(text.length > 0 ? text : '');
+		}));
+		details.appendChild(copyBtn);
+		const pre = $('pre.custom-mode-ix-pipeline-pre', undefined,
+			tail.length > 0 ? tail : localize('customMode.ixPipeline.noOutput', '(no output yet)'));
+		pre.dataset['stepId'] = step.id;
+		const restored = this.ixPipelineOutputScrollTops.get(step.id);
+		if (typeof restored === 'number' && restored >= 0) {
+			queueMicrotask(() => {
+				try { pre.scrollTop = restored; } catch { /* ignore */ }
+			});
+		}
+		this._register(addDisposableListener(pre, 'scroll', () => {
+			try { this.ixPipelineOutputScrollTops.set(step.id, pre.scrollTop); } catch { /* ignore */ }
+		}));
+		details.appendChild(pre);
 		wrap.appendChild(details);
 		parent.appendChild(wrap);
+	}
+
+	private updateIxPipelineDurationsOnly(state: IxIntegrationState): void {
+		const durations = new Map<string, string>();
+		for (const s of state.pipelineSteps) {
+			durations.set(s.id, this.formatStepDuration(s));
+		}
+		for (const el of Array.from(this.processIxPipeline.querySelectorAll('.custom-mode-ix-pipeline-dur'))) {
+			const span = el as HTMLElement;
+			const id = span.dataset['stepId'];
+			if (!id) {
+				continue;
+			}
+			const d = durations.get(id);
+			if (typeof d === 'string') {
+				span.textContent = d;
+			}
+		}
 	}
 
 	private renderIxPipeline(state: IxIntegrationState): void {
@@ -2647,7 +2767,9 @@ class ModeShellContribution extends Disposable {
 			this.processIxPipeline.style.display = 'none';
 			return;
 		}
-		if (state.pipelineSteps.length === 0) {
+		// Hide pipeline cards that are noisy in the Process UI.
+		const visibleSteps = state.pipelineSteps.filter(s => s.id !== 'resolve' && !s.id.startsWith('watch:'));
+		if (visibleSteps.length === 0) {
 			this.processIxPipeline.style.display = 'none';
 			return;
 		}
@@ -2655,32 +2777,32 @@ class ModeShellContribution extends Disposable {
 		this.clearPipelineContainer(this.processIxPipelineGlobalRow);
 		this.clearPipelineContainer(this.processIxPipelineWorkspaceRows);
 
-		const globals = state.pipelineSteps.filter(s => s.kind === 'global');
-		const workspaces = state.pipelineSteps.filter(s => s.kind === 'workspace');
+		const globals = visibleSteps.filter(s => s.kind === 'global');
+		const workspaces = visibleSteps.filter(s => s.kind === 'workspace');
 
+		// Workspace steps header row + Ix controls (moved here from Process Notes header).
+		const controls = $('div.custom-mode-ix-pipeline-controls', undefined,
+			this.processIxCommandsButton,
+			this.processIxLogsButton,
+			this.processIxCommandsPopover,
+			this.processIxLogsPopover,
+		);
+
+		// Put everything into one combined row so the user sees a single "pipeline" line.
+		// (Globals + workspace steps rendered as siblings.)
+		this.processIxPipelineWorkspaceRows.appendChild(
+			$('div.custom-mode-ix-pipeline-workspace-head', undefined,
+				$('div.custom-mode-ix-pipeline-workspace-label', undefined, localize('customMode.ixPipeline.workspaceSteps', 'Workspace steps')),
+				controls,
+			));
+		const combinedRow = $('div.custom-mode-ix-pipeline-combined-row');
 		for (const s of globals) {
-			this.appendPipelineStep(this.processIxPipelineGlobalRow, s);
+			this.appendPipelineStep(combinedRow, s);
 		}
-
-		if (workspaces.length > 0) {
-			// Workspace steps header row + Ix controls (moved here from Process Notes header).
-			const controls = $('div.custom-mode-ix-pipeline-controls', undefined,
-				this.processIxCommandsButton,
-				this.processIxLogsButton,
-				this.processIxCommandsPopover,
-				this.processIxLogsPopover,
-			);
-			this.processIxPipelineWorkspaceRows.appendChild(
-				$('div.custom-mode-ix-pipeline-workspace-head', undefined,
-					$('div.custom-mode-ix-pipeline-workspace-label', undefined, localize('customMode.ixPipeline.workspaceSteps', 'Workspace steps')),
-					controls,
-				));
-			const rowWrap = $('div.custom-mode-ix-pipeline-global-row');
-			for (const s of workspaces) {
-				this.appendPipelineStep(rowWrap, s);
-			}
-			this.processIxPipelineWorkspaceRows.appendChild(rowWrap);
+		for (const s of workspaces) {
+			this.appendPipelineStep(combinedRow, s);
 		}
+		this.processIxPipelineWorkspaceRows.appendChild(combinedRow);
 
 		this.refreshIxPipelineTicker(state);
 	}
@@ -2701,7 +2823,7 @@ class ModeShellContribution extends Disposable {
 						this.ixPipelineDurationTicker.clear();
 						return;
 					}
-					this.renderIxPipeline(this.lastIxPipelineState);
+					this.updateIxPipelineDurationsOnly(this.lastIxPipelineState);
 				}, 450);
 				this.ixPipelineDurationTicker.value = toDisposable(() => mainWindow.clearInterval(id));
 			}
@@ -2791,16 +2913,12 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
-	private getProcessTopicLabelEntries(): { id: ProcessNoteId; label: string }[] {
-		return this.processNotesMergedTopicIds.map(id => ({
-			id,
-			label: resolveProcessTopicLabel(id, this.processNotesCachedFile, i => this.localizeProcessTopicTitle(i)),
-		}));
-	}
+	// Saved-notes cards have been removed; keep topic selection internal only.
 
 	private updateProcessNotesGraphLayerUi(): void {
 		this.processNotesBackButton.classList.toggle('hidden', this.processNotesGraphLayer !== 'detail');
-		this.processNotesCards.classList.toggle('hidden', this.processNotesGraphLayer !== 'overview');
+		// Keep the card grid visible in both overview and detail so suggested processes are always discoverable.
+		this.processNotesCards.classList.toggle('hidden', false);
 		const detail = this.processNotesGraphLayer === 'detail';
 		this.processNotesOutputTab.classList.toggle('hidden', !detail);
 		this.processNotesLogsTab.classList.toggle('hidden', !detail);
@@ -2826,8 +2944,20 @@ class ModeShellContribution extends Disposable {
 
 	private renderProcessNotesCards(): void {
 		this.processNotesCards.replaceChildren();
+		this.processNotesCards.appendChild($('div.custom-mode-process-notes-section-title', undefined, localize('customMode.processNotes.systemTitle', 'System processes')));
+		if (this.processNotesSuggestionsLoadState === 'running' || this.processNotesSuggestionsLoadLog.length) {
+			const title = this.processNotesSuggestionsLoadState === 'running'
+				? localize('customMode.processNotes.discoveryLogs.running', 'Discovery logs (running)')
+				: localize('customMode.processNotes.discoveryLogs', 'Discovery logs');
+			const details = document.createElement('details');
+			details.open = this.processNotesSuggestionsLoadState === 'running';
+			const summary = document.createElement('summary');
+			summary.textContent = title;
+			details.appendChild(summary);
+			details.appendChild($('pre.custom-mode-process-notes-discovery-logs', undefined, this.processNotesSuggestionsLoadLog.join('\n')));
+			this.processNotesCards.appendChild(details);
+		}
 		if (this.processNotesSuggestions.length) {
-			this.processNotesCards.appendChild($('div.custom-mode-process-notes-section-title', undefined, localize('customMode.processNotes.suggestedTitle', 'Suggested processes')));
 			for (const s of this.processNotesSuggestions.slice(0, 12)) {
 				const summary = s.probe
 					? localize('customMode.processNotes.suggestion.probe', '{0} targets', String(s.probe.resolvedTargets))
@@ -2842,35 +2972,20 @@ class ModeShellContribution extends Disposable {
 				) as HTMLButtonElement;
 				card.title = s.label;
 				this._register(addDisposableListener(card, 'click', () => {
+					// Select the system process so Generate saves into it.
+					this.processNotesTopicSelect.value = this.systemProcessNoteId(s.label);
+					void this.loadSelectedProcessNote(this.processNotesTopicSelect.value);
 					this.processNotesPromptInput.value = s.promptTemplates[0] ?? `How does ${s.label} work?`;
 					this.hideProcessNotesTypeahead();
 					this.processNotesPromptInput.focus();
 				}));
 				this.processNotesCards.appendChild(card);
 			}
-			this.processNotesCards.appendChild($('div.custom-mode-process-notes-section-title', undefined, localize('customMode.processNotes.savedTitle', 'Saved notes')));	
-		}
-		for (const entry of this.getProcessTopicLabelEntries()) {
-			const note = this.processNotesCachedFile?.notes.find(n => n.id === entry.id);
-			const generated = note?.meta.generatedAt ? new Date(note.meta.generatedAt).toLocaleString() : localize('customMode.processNotes.card.never', 'Not generated');
-			const binding = note?.meta.binding;
-			const card = $('button.custom-mode-process-notes-card', { type: 'button' },
-				$('div.custom-mode-process-notes-card-title', undefined, entry.label),
-				$('div.custom-mode-process-notes-card-summary', undefined, note?.meta.userPrompt ?? ''),
-				$('div.custom-mode-process-notes-card-meta', undefined, generated),
-				$('div.custom-mode-process-notes-card-meta', undefined, localize(
-					'customMode.processNotes.card.stats',
-					'{0} targets · {1} subsystems',
-					String(binding?.resolvedTargets.length ?? note?.graph.nodes.length ?? 0),
-					String(binding?.selection.length ?? 0),
-				)),
-				$('div.custom-mode-process-notes-card-chips', undefined,
-					...(binding?.selection.slice(0, 3).map(s => $('span.custom-mode-process-notes-card-chip', undefined, s.label)) ?? [])
-				),
-			) as HTMLButtonElement;
-			card.title = entry.label;
-			this._register(addDisposableListener(card, 'click', () => void this.drillIntoProcessTopic(entry.id)));
-			this.processNotesCards.appendChild(card);
+		} else {
+			this.processNotesCards.appendChild($('div.custom-mode-placeholder', undefined, localize(
+				'customMode.processNotes.noSuggestions',
+				'No system processes yet. Ix discovery runs on load; expand Discovery logs for details.'
+			)));
 		}
 	}
 
@@ -2971,14 +3086,13 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private async loadSelectedProcessNote(preferredTopicId?: string): Promise<void> {
-		const selectionHint = preferredTopicId ?? this.processNotesTopicSelect.value;
-		const file = await this.processNotesStore.load();
-		this.processNotesCachedFile = file;
-		this.rebuildProcessNotesTopicSelectOptions(file, selectionHint);
+		if (preferredTopicId) {
+			this.processNotesTopicSelect.value = preferredTopicId;
+		}
 		const topic = this.processNotesTopicSelect.value;
-		const note = file?.notes.find(n => n.id === topic);
-		this.processNotesPromptInput.value = note?.meta?.userPrompt ?? '';
-		this.processNotesMarkdown.textContent = note?.markdown ?? localize('customMode.processNotes.empty', 'No saved note yet. Use Generate to create one.');
+		const file = await this.processNotesStore.load();
+		const note = topic ? file?.notes.find(n => n.id === topic) : undefined;
+		this.processNotesMarkdown.textContent = note?.markdown ?? localize('customMode.processNotes.empty', 'No note generated for this system yet. Select a system process card and use Generate.');
 		this.processNotesLogs.textContent = note?.meta?.generationLog ?? '';
 		if (this.processNotesGraphLayer === 'detail') {
 			this.processNotesGraphView.setGraph(note?.graph ?? { nodes: [], edges: [] });
@@ -2997,8 +3111,10 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 
-		const noteId = stableCustomNoteId(prompt);
-		const title = prompt.length > 80 ? `${prompt.slice(0, 77)}…` : prompt;
+		// Save generated output into the currently selected system process (if present).
+		const noteId = this.processNotesTopicSelect.value || stableCustomNoteId(prompt);
+		const systemLabel = this.systemLabelFromProcessNoteId(noteId);
+		const title = systemLabel ?? (prompt.length > 80 ? `${prompt.slice(0, 77)}…` : prompt);
 
 		this.processNotesGenerateButton.disabled = true;
 		try {
@@ -3111,120 +3227,138 @@ class ModeShellContribution extends Disposable {
 		return folder ? folder.toString() : undefined;
 	}
 
-	private readCachedSuggestions(workspaceKey: string): ProcessTopicsFile | undefined {
-		const raw = this.storageService.get(STORAGE_PROCESS_NOTES_SUGGESTIONS_CACHE, StorageScope.PROFILE);
-		if (!raw) {
-			return undefined;
-		}
-		try {
-			const parsed = JSON.parse(raw) as { byWorkspace?: Record<string, ProcessTopicsFile> };
-			const entry = parsed?.byWorkspace?.[workspaceKey];
-			return entry && entry.version === 1 && Array.isArray(entry.suggestions) ? entry : undefined;
-		} catch {
-			return undefined;
-		}
-	}
-
-	private writeCachedSuggestions(workspaceKey: string, file: ProcessTopicsFile): void {
-		let byWorkspace: Record<string, ProcessTopicsFile> = {};
-		const raw = this.storageService.get(STORAGE_PROCESS_NOTES_SUGGESTIONS_CACHE, StorageScope.PROFILE);
-		if (raw) {
-			try {
-				const parsed = JSON.parse(raw) as { byWorkspace?: Record<string, ProcessTopicsFile> };
-				if (parsed?.byWorkspace && typeof parsed.byWorkspace === 'object') {
-					byWorkspace = parsed.byWorkspace;
-				}
-			} catch {
-				// ignore
-			}
-		}
-		byWorkspace[workspaceKey] = file;
-		this.storageService.store(
-			STORAGE_PROCESS_NOTES_SUGGESTIONS_CACHE,
-			JSON.stringify({ byWorkspace }),
-			StorageScope.PROFILE,
-			StorageTarget.USER
-		);
-	}
-
 	private async loadProcessNotesSuggestions(): Promise<void> {
 		const workspaceKey = this.workspaceKeyForSuggestions();
 		if (!workspaceKey || isWeb) {
 			this.processNotesSuggestions = [];
+			this.processNotesSuggestionsLoadState = 'idle';
+			this.processNotesSuggestionsLoadLog = [];
 			if (this.processNotesGraphLayer === 'overview') {
 				this.renderProcessNotesCards();
 			}
 			return;
 		}
 
-		// 1) Fast path: storage cache
-		const cached = this.readCachedSuggestions(workspaceKey);
-		if (cached) {
-			this.processNotesSuggestions = cached.suggestions;
-			if (this.processNotesGraphLayer === 'overview') {
-				this.renderProcessNotesCards();
-			}
-			return;
-		}
+		const log = (line: string) => {
+			this.processNotesSuggestionsLoadLog.push(line);
+			// Keep the UI responsive while discovery is running.
+			this.renderProcessNotesCards();
+		};
 
-		// 2) Workspace file
-		const topics = await this.processNotesStore.loadTopics();
-		if (topics?.suggestions?.length) {
-			this.processNotesSuggestions = topics.suggestions;
-			this.writeCachedSuggestions(workspaceKey, topics);
-			if (this.processNotesGraphLayer === 'overview') {
-				this.renderProcessNotesCards();
-			}
-			return;
-		}
+		this.processNotesSuggestionsLoadState = 'running';
+		this.processNotesSuggestionsLoadLog = [];
+		log(`[discovery] • Starting discovery`);
 
-		// 3) Compute from Ix discovery
+		// Always recompute suggestions on each app load when Ix runs again.
+		// Suggested processes are intentionally NOT persisted across reloads.
+		this.processNotesSuggestions = [];
+		this.renderProcessNotesCards();
+
+		// Compute from Ix discovery
 		const discoveryFolder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
 		if (!discoveryFolder) {
 			this.processNotesSuggestions = [];
+			this.processNotesSuggestionsLoadState = 'error';
+			log(`[discovery] ✗ No workspace folder for Ix evidence.`);
 			if (this.processNotesGraphLayer === 'overview') {
 				this.renderProcessNotesCards();
 			}
 			return;
 		}
 
+		log(`[discovery] … ensure ix mapped`);
 		await this.ixIntegrationService.ensureIxMappedIfEmpty(discoveryFolder);
+		log(`[discovery] ✓ ensure ix mapped`);
 
-		const subsystems = await this.ixIntegrationService.runJsonQuery(['subsystems', '--format', 'json', '.'], discoveryFolder, 90_000);
-		const map = await this.ixIntegrationService.runJsonQuery(['map', '--format', 'json', '.'], discoveryFolder, 90_000);
-		const discoveryJsons: unknown[] = [];
-		if (subsystems.ok) { discoveryJsons.push(subsystems.value); }
-		if (map.ok) { discoveryJsons.push(map.value); }
+		// Prefer the "importance" view: this matches what users see in `ix subsystems --sort importance --all-items`.
+		// For the first pass, we only need the system names to render "System processes" cards quickly.
+		log(`[discovery] … ix subsystems --sort importance --all-items --format json`);
+		// IMPORTANT: Do not pass '.' here. Ix returns a different "target/children" JSON shape for a scoped target,
+		// whereas the global command returns the full `regions` list we need for system cards.
+		const subsystems = await this.ixIntegrationService.runJsonQuery(['subsystems', '--sort', 'importance', '--all-items', '--format', 'json'], discoveryFolder, 90_000);
+		log(subsystems.ok ? `[discovery] ✓ ix subsystems --sort importance --all-items --format json` : `[discovery] ✗ ix subsystems --sort importance --all-items --format json\n${subsystems.error}`);
 
-		const computed = computeProcessSuggestionsFromIxDiscovery({
-			workspaceUri: discoveryFolder.toString(),
-			mapRev: (subsystems.ok && typeof (subsystems.value as any)?.map_rev === 'string') ? (subsystems.value as any).map_rev : (map.ok && typeof (map.value as any)?.map_rev === 'string') ? (map.value as any).map_rev : undefined,
-			discoveryJsons,
-			generatedAt: Date.now(),
-		});
-		// Optional light probe budget: validate top suggestions by running `ix search <label>`.
-		const probes: Array<{ label: string; ok: boolean; json?: unknown; ranAt: number }> = [];
-		let budget = 8;
-		for (const s of computed.suggestions.slice(0, 12)) {
-			if (budget <= 0) {
-				break;
+		if (!subsystems.ok) {
+			this.processNotesSuggestionsLoadState = 'error';
+			log(`[discovery] ✗ No discovery JSON available.`);
+			return;
+		}
+
+		const systemLabels = this.extractSystemLabelsFromIxSubsystems(subsystems.value);
+		// Populate the hidden "topic" select with system note ids so Generate/Delete operate on the selected system.
+		if (this.processNotesTopicSelect.options.length === 0) {
+			for (const label of systemLabels) {
+				this.processNotesTopicSelect.appendChild(new Option(label, this.systemProcessNoteId(label)));
 			}
-			budget--;
-			const ranAt = Date.now();
-			const res = await this.ixIntegrationService.runJsonQuery(['search', s.label, '--format', 'json'], discoveryFolder, 30_000);
-			if (res.ok) {
-				probes.push({ label: s.label, ok: true, json: res.value, ranAt });
-			} else {
-				probes.push({ label: s.label, ok: false, ranAt });
+			if (this.processNotesTopicSelect.options.length > 0) {
+				this.processNotesTopicSelect.value = this.processNotesTopicSelect.options[0].value;
 			}
 		}
-		const probed = probes.length ? applyProbeResults(computed, probes) : computed;
-		this.processNotesSuggestions = probed.suggestions;
-		this.writeCachedSuggestions(workspaceKey, probed);
-		await this.processNotesStore.saveTopics(probed);
-		if (this.processNotesGraphLayer === 'overview') {
-			this.renderProcessNotesCards();
+		this.processNotesSuggestions = systemLabels.map(label => ({
+			id: this.stableHash(`system|${label}`),
+			label,
+			subsystemKey: this.stableHash(`system|${label}`),
+			kind: 'system',
+			promptTemplates: [
+				`How does ${label} work?`,
+				`What is the ${label} pipeline?`,
+				`How does ${label} run end-to-end (UI → API → core logic)?`,
+			],
+		}));
+		log(`[selection] ✓ systems=${systemLabels.length}`);
+
+		this.processNotesSuggestionsLoadState = 'success';
+		log(`[done] ✓ suggestions=${this.processNotesSuggestions.length}`);
+	}
+
+	private stableHash(text: string): string {
+		let h = 2166136261;
+		for (let i = 0; i < text.length; i++) {
+			h ^= text.charCodeAt(i);
+			h = Math.imul(h, 16777619);
 		}
+		return (h >>> 0).toString(16);
+	}
+
+	private extractSystemLabelsFromIxSubsystems(json: unknown): string[] {
+		const out: string[] = [];
+		const seen = new Set<string>();
+		const visit = (v: unknown) => {
+			if (Array.isArray(v)) {
+				for (const item of v) { visit(item); }
+				return;
+			}
+			if (!v || typeof v !== 'object') { return; }
+			const rec = v as Record<string, unknown>;
+			const label = typeof rec.label === 'string' ? rec.label : typeof rec.name === 'string' ? rec.name : typeof rec.title === 'string' ? rec.title : undefined;
+			const kind = typeof rec.label_kind === 'string' ? rec.label_kind : typeof rec.kind === 'string' ? rec.kind : typeof rec.type === 'string' ? rec.type : undefined;
+			if (label && kind && kind.toLowerCase() === 'system') {
+				const key = label.toLowerCase().trim();
+				if (!seen.has(key)) {
+					seen.add(key);
+					out.push(label.trim());
+				}
+			}
+			for (const k of ['children', 'items', 'modules', 'subsystems', 'systems', 'regions', 'branches', 'map', 'architecture', 'architectural_map']) {
+				if (k in rec) {
+					visit(rec[k]);
+				}
+			}
+		};
+		visit(json);
+		return out;
+	}
+
+	private systemProcessNoteId(label: string): string {
+		return `system:${label}`;
+	}
+
+	private systemLabelFromProcessNoteId(id: string): string | undefined {
+		if (!id.startsWith('system:')) {
+			return undefined;
+		}
+		const label = id.slice('system:'.length).trim();
+		return label.length ? label : undefined;
 	}
 
 	private updateReachabilityFromState(state: DevServerState): void {

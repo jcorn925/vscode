@@ -367,7 +367,9 @@ function extractTargets(json: unknown, source: ResolvedIxTarget['source'], fallb
 		}
 	};
 	visit(json);
-	if (!targets.length && fallback.trim().length) {
+	// Never fabricate "resolved targets" from the fallback term for locate/search.
+	// Those commands either resolve concrete graph entities/paths or they didn't.
+	if (!targets.length && source === 'text' && fallback.trim().length) {
 		targets.push({ target: fallback, source, score: baseScore * 0.5 });
 	}
 	return targets.slice(0, 3);

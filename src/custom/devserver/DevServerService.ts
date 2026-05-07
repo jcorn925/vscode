@@ -217,7 +217,11 @@ export class DevServerService extends Disposable implements IDevServerService {
 
 	private async getOrCreateDevServerTerminal(folder: URI): Promise<{ instance: ITerminalInstance; isExisting: boolean }> {
 		const expectedTitle = this.getDevServerTerminalTitle(folder);
-		const existing = this.terminalService.instances.find(i => i.title === expectedTitle || this.terminalLaunchCwdMatches(i, folder));
+		const existing = this.terminalService.instances.find(i =>
+			i.title === expectedTitle
+			|| (typeof i.title === 'string' && i.title.startsWith('Dev Server') && this.terminalLaunchCwdMatches(i, folder))
+			|| this.terminalLaunchCwdMatches(i, folder)
+		);
 		if (existing) {
 			return { instance: existing, isExisting: true };
 		}
@@ -236,10 +240,25 @@ export class DevServerService extends Disposable implements IDevServerService {
 		if (!cwd) {
 			return false;
 		}
+		const normalizePath = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').trim().toLowerCase();
+		const folderFs = normalizePath(folder.fsPath);
+		const folderStr = normalizePath(folder.toString());
+		const folderBase = String(basename(folder) ?? '').toLowerCase();
+		const matches = (candidate: string) => {
+			const c = normalizePath(candidate);
+			if (!c) {
+				return false;
+			}
+			if (c === folderFs || c === folderStr) {
+				return true;
+			}
+			// Some terminals report CWD as a child path (or with a different prefix); accept basename match as a fallback.
+			return Boolean(folderBase) && (c.endsWith('/' + folderBase) || c === folderBase);
+		};
 		if (typeof cwd === 'string') {
-			return cwd === folder.fsPath || cwd === folder.toString();
+			return matches(cwd);
 		}
-		return cwd.toString() === folder.toString();
+		return matches(cwd.toString());
 	}
 
 	private attachTerminalDataListener(instance: ITerminalInstance): void {
