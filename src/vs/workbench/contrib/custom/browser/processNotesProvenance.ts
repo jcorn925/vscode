@@ -10,6 +10,10 @@ export interface ProcessNoteProvenanceInput {
 	readonly bodyMarkdown: string;
 	/** Ix invocations, in run order (e.g. `ix read package.json --format json`). */
 	readonly ixCommandLabels: readonly string[];
+	readonly ixCommandPhases?: readonly { readonly phase: string; readonly labels: readonly string[] }[];
+	readonly selectionReason?: string;
+	readonly selectionPrompt?: string;
+	readonly selectionModelId?: string;
 	readonly systemPrompt: string;
 	readonly userPrompt: string;
 	readonly modelId?: string;
@@ -48,6 +52,7 @@ export function formatSavedProcessNoteMarkdown(input: ProcessNoteProvenanceInput
 	const hProv = localize('customMode.processNotes.provenance.heading', 'Provenance');
 	const hIx = localize('customMode.processNotes.provenance.ixHeading', 'Ix commands invoked');
 	const hAi = localize('customMode.processNotes.provenance.aiHeading', 'AI synthesis');
+	const hSelection = localize('customMode.processNotes.provenance.selectionHeading', 'Candidate selection');
 	const modelLabel = localize('customMode.processNotes.provenance.model', 'Model');
 	const systemLabel = localize('customMode.processNotes.provenance.systemPrompt', 'System prompt');
 	const userLabel = localize('customMode.processNotes.provenance.userPrompt', 'User message (full prompt to the model)');
@@ -59,11 +64,24 @@ export function formatSavedProcessNoteMarkdown(input: ProcessNoteProvenanceInput
 			? input.ixCommandLabels.map(l => `- \`${l.replace(/`/g, "'")}\``).join('\n')
 			: noneIx;
 
+	const phaseLines = input.ixCommandPhases?.length
+		? input.ixCommandPhases.map(p => {
+			const labels = p.labels.length
+				? p.labels.map(l => `  - \`${l.replace(/`/g, "'")}\``).join('\n')
+				: `  - ${noneIx}`;
+			return `- **${p.phase}**\n${labels}`;
+		}).join('\n')
+		: ixLines;
+
 	const modelLine = input.modelId
 		? `${modelLabel}: \`${input.modelId.replace(/`/g, "'")}\``
 		: `${modelLabel}: ${noModel}`;
+	const selectionModelLine = input.selectionModelId
+		? `${modelLabel}: \`${input.selectionModelId.replace(/`/g, "'")}\``
+		: `${modelLabel}: ${noModel}`;
+	const selectionReason = input.selectionReason?.trim();
 
-	return [
+	const parts = [
 		input.bodyMarkdown.trim(),
 		'',
 		'---',
@@ -72,7 +90,23 @@ export function formatSavedProcessNoteMarkdown(input: ProcessNoteProvenanceInput
 		'',
 		`### ${hIx}`,
 		'',
-		ixLines,
+		phaseLines,
+		'',
+		`### ${hSelection}`,
+		'',
+		selectionReason ? asMarkdownBlockQuote(selectionReason) : `> _${localize('customMode.processNotes.provenance.noSelectionReason', 'No selection reason recorded.')}_`,
+		'',
+		selectionModelLine,
+	];
+	if (input.selectionPrompt?.trim()) {
+		parts.push(
+			'',
+			`**${localize('customMode.processNotes.provenance.selectionPrompt', 'Selection prompt')}**`,
+			'',
+			asMarkdownBlockQuote(input.selectionPrompt),
+		);
+	}
+	parts.push(
 		'',
 		`### ${hAi}`,
 		'',
@@ -86,5 +120,6 @@ export function formatSavedProcessNoteMarkdown(input: ProcessNoteProvenanceInput
 		'',
 		asMarkdownBlockQuote(input.userPrompt),
 		'',
-	].join('\n');
+	);
+	return parts.join('\n');
 }

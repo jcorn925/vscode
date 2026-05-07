@@ -61,6 +61,12 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			default: '',
 			description: localize('custom.ix.cliPath', "Optional absolute path to the `ix` executable. When set, automatic PATH detection and cached path are ignored."),
 			scope: ConfigurationScope.APPLICATION
+		},
+		'custom.ix.preferredWorkspaceFolder': {
+			type: 'string',
+			default: '',
+			description: localize('custom.ix.preferredWorkspaceFolder', "In a multi-root workspace, the Explorer folder **name**, **basename**, or filesystem path substring to use as the Process notes / Ix evidence root. When empty, the first workspace folder is used. This does not change `~/.ix/config.yaml`; it tells this editor which VS Code workspace root drives `cwd` when running `ix` for Process notes and suggestions."),
+			scope: ConfigurationScope.WINDOW
 		}
 	}
 });

@@ -5,33 +5,23 @@
 
 import type { ProcessNoteGraph, ProcessNoteId, ProcessNotesFile } from './processNotesTypes.js';
 
-/** Registered built-in topic ids (must match persisted `ProcessNote.id` when shipped). */
-export const PROCESS_NOTE_TOPIC_IDS: readonly ProcessNoteId[] = ['webview-selection'];
-
 /** Recipe ids stored on `ProcessNote.meta.recipeId`. */
-export const RECIPE_WEBVIEW_SELECTION = 'webview-selection';
 export const RECIPE_CUSTOM_PROMPT = 'custom-prompt';
 
 /**
- * Built-in ids first, then other workspace notes by newest `generatedAt` first.
+ * Workspace notes by newest `generatedAt` first.
  */
 export function mergeProcessNoteTopicIds(file: ProcessNotesFile | undefined): ProcessNoteId[] {
-	const ids: ProcessNoteId[] = [];
 	const seen = new Set<string>();
-	for (const id of PROCESS_NOTE_TOPIC_IDS) {
-		if (!seen.has(id)) {
-			seen.add(id);
-			ids.push(id);
-		}
-	}
-	const extras = (file?.notes ?? [])
+	const ids = (file?.notes ?? [])
 		.filter(n => !seen.has(n.id))
 		.sort((a, b) => (b.meta.generatedAt ?? 0) - (a.meta.generatedAt ?? 0));
-	for (const n of extras) {
+	const out: ProcessNoteId[] = [];
+	for (const n of ids) {
 		seen.add(n.id);
-		ids.push(n.id as ProcessNoteId);
+		out.push(n.id as ProcessNoteId);
 	}
-	return ids;
+	return out;
 }
 
 export function resolveProcessTopicLabel(

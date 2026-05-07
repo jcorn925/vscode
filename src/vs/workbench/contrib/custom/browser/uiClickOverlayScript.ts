@@ -382,6 +382,8 @@ function onMarqueeMouseDown(ev) {
 	if (ev.button !== 0) { return; }
 	const t = ev.target;
 	if (t && t.closest && t.closest('input,textarea,select,[contenteditable]')) { return; }
+	// Allow normal text selection in the Process Notes panel (logs/markdown).
+	if (t && t.closest && t.closest('.custom-mode-process-notes-logs,.custom-mode-process-notes-markdown')) { return; }
 	dragState = { x0: ev.clientX, y0: ev.clientY, active: false, marquee: null, lastHits: [] };
 	window.addEventListener('mousemove', onMarqueeMouseMove, true);
 	window.addEventListener('mouseup', onMarqueeMouseUp, true);

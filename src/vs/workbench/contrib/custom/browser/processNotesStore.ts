@@ -7,25 +7,37 @@ import { URI } from '../../../../base/common/uri.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { resolveIxEvidenceWorkspaceFolderUri } from './processNotesIxFolder.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
-import type { ProcessNote, ProcessNotesFile } from './processNotesTypes.js';
+import type { ProcessNote, ProcessNotesFile, ProcessTopicsFile } from './processNotesTypes.js';
 
 const DEFAULT_NOTES_FILE = '.vscode/process-notes.json';
+const DEFAULT_TOPICS_FILE = '.vscode/process-topics.json';
 
 export class ProcessNotesStore extends Disposable {
 	constructor(
 		private readonly fileService: IFileService,
 		private readonly workspaceContextService: IWorkspaceContextService,
+		private readonly configurationService: IConfigurationService,
 	) {
 		super();
 	}
 
 	getNotesResource(): URI | undefined {
-		const folder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		const folder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
 		if (!folder) {
 			return undefined;
 		}
 		return URI.joinPath(folder, DEFAULT_NOTES_FILE);
+	}
+
+	getTopicsResource(): URI | undefined {
+		const folder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
+		if (!folder) {
+			return undefined;
+		}
+		return URI.joinPath(folder, DEFAULT_TOPICS_FILE);
 	}
 
 	async load(): Promise<ProcessNotesFile | undefined> {
@@ -45,13 +57,43 @@ export class ProcessNotesStore extends Disposable {
 		}
 	}
 
+	async loadTopics(): Promise<ProcessTopicsFile | undefined> {
+		const resource = this.getTopicsResource();
+		if (!resource) {
+			return undefined;
+		}
+		try {
+			const buf = await this.fileService.readFile(resource);
+			const json = JSON.parse(buf.value.toString()) as ProcessTopicsFile;
+			if (!json || json.version !== 1 || !Array.isArray(json.suggestions)) {
+				return undefined;
+			}
+			return json;
+		} catch {
+			return undefined;
+		}
+	}
+
 	async save(file: ProcessNotesFile): Promise<void> {
 		const resource = this.getNotesResource();
 		if (!resource) {
 			throw new Error('No workspace folder');
 		}
 		// Ensure .vscode exists
-		const folder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		const folder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
+		if (folder) {
+			await this.fileService.createFolder(URI.joinPath(folder, '.vscode'));
+		}
+		await this.fileService.writeFile(resource, VSBuffer.fromString(JSON.stringify(file, null, 2) + '\n'));
+	}
+
+	async saveTopics(file: ProcessTopicsFile): Promise<void> {
+		const resource = this.getTopicsResource();
+		if (!resource) {
+			throw new Error('No workspace folder');
+		}
+		// Ensure .vscode exists
+		const folder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
 		if (folder) {
 			await this.fileService.createFolder(URI.joinPath(folder, '.vscode'));
 		}
@@ -62,6 +104,15 @@ export class ProcessNotesStore extends Disposable {
 		const existing = await this.load();
 		const current: ProcessNotesFile = existing ?? { version: 1, notes: [] };
 		const notes = [...current.notes.filter(n => n.id !== note.id), note];
+		const next: ProcessNotesFile = { version: 1, notes };
+		await this.save(next);
+		return next;
+	}
+
+	async deleteNote(id: string): Promise<ProcessNotesFile> {
+		const existing = await this.load();
+		const current: ProcessNotesFile = existing ?? { version: 1, notes: [] };
+		const notes = current.notes.filter(n => n.id !== id);
 		const next: ProcessNotesFile = { version: 1, notes };
 		await this.save(next);
 		return next;

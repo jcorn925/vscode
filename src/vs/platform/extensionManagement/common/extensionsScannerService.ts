@@ -625,6 +625,14 @@ class ExtensionsScanner extends Disposable {
 				if (input.type === ExtensionType.User && basename(c.resource).indexOf('.') === 0) {
 					return null;
 				}
+				// Explicitly skip Copilot built-in sources in this fork.
+				// This prevents the extension host from activating `GitHub.copilot-chat`.
+				if (input.type === ExtensionType.System) {
+					const folder = basename(c.resource).toLowerCase();
+					if (folder === 'copilot' || folder === 'copilot-chat') {
+						return null;
+					}
+				}
 				const extensionScannerInput = new ExtensionScannerInput(c.resource, input.mtime, input.applicationExtensionslocation, input.applicationExtensionslocationMtime, input.profile, input.profileScanOptions, input.type, input.validate, input.productVersion, input.productDate, input.productCommit, input.devMode, input.language, input.translations);
 				return this.scanExtension(extensionScannerInput);
 			}));

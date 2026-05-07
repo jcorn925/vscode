@@ -56,6 +56,11 @@ export interface IIxIntegrationService {
 	installOrResolve(): Promise<void>;
 	openDocs(): Promise<void>;
 	runJsonQuery(args: readonly string[], cwd?: URI, timeoutMs?: number): Promise<{ ok: true; value: unknown; raw: string } | { ok: false; error: string; raw: string; exitCode: number }>;
+	/**
+	 * Runs `ix stats`; if there are no nodes, runs `ix map .` once to hydrate the workspace graph.
+	 * Use before `ix subsystems` / JSON `ix map` in Process notes flows.
+	 */
+	ensureIxMappedIfEmpty(cwd: URI): Promise<{ readonly statsPreview: string; readonly ranMap: boolean }>;
 }
 
 export const IIxIntegrationService = createDecorator<IIxIntegrationService>('ixIntegrationService');
@@ -66,6 +71,7 @@ const OUTPUT_TAIL = 16_384;
 
 const STEP_RESOLVE = 'resolve';
 const STEP_DOCKER = 'docker';
+const STEP_STATS = 'ix-stats';
 
 function mapStepId(uri: URI): string {
 	return `map:${uri.toString()}`;
@@ -79,6 +85,11 @@ function stripAnsi(data: string): string {
 	return data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 }
 
+/** True when `ix stats` reports zero nodes (cold or reset graph). */
+function looksIxGraphEmptyFromStats(statsOutput: string): boolean {
+	return /nodes\s*\(\s*0\s+total\s*\)/i.test(stripAnsi(statsOutput));
+}
+
 function tailOutput(text: string): string {
 	const t = stripAnsi(text).trim();
 	if (!t) {
@@ -86,6 +97,22 @@ function tailOutput(text: string): string {
 	}
 	const lines = t.split(/\r?\n/);
 	return lines.slice(-24).join('\n');
+}
+
+function normalizeIxJsonOutput(output: string): string {
+	const trimmed = output.trim().replace(/^\uFEFF/, '');
+	if (!trimmed) {
+		return trimmed;
+	}
+	if (trimmed.startsWith('```')) {
+		const lines = trimmed.split(/\r?\n/);
+		const fenceEnd = lines.findIndex((l, i) => i > 0 && l.trim() === '```');
+		if (fenceEnd > 0) {
+			return lines.slice(1, fenceEnd).join('\n').trim();
+		}
+	}
+	const start = trimmed.search(/[\[{]/);
+	return start > 0 ? trimmed.slice(start).trim() : trimmed;
 }
 
 interface IxPipelineStepMutable {
@@ -197,6 +224,13 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			id: STEP_DOCKER,
 			kind: 'global',
 			label: localize('ix.pipeline.docker', 'Docker start'),
+			status: 'idle',
+			outputBuf: '',
+		});
+		this.pipelineStepsMutable.push({
+			id: STEP_STATS,
+			kind: 'global',
+			label: localize('ix.pipeline.stats', 'Ix stats'),
 			status: 'idle',
 			outputBuf: '',
 		});
@@ -400,6 +434,23 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 	}
 
+	async ensureIxMappedIfEmpty(cwd: URI): Promise<{ readonly statsPreview: string; readonly ranMap: boolean }> {
+		if (isWeb) {
+			return { statsPreview: '', ranMap: false };
+		}
+		const ixBin = await this.resolveIxBinary(cwd);
+		if (!ixBin) {
+			return { statsPreview: '', ranMap: false };
+		}
+		const stats = await this.runCommand(cwd, `${this.quoteIx(ixBin)} stats`, 30_000, { ui: 'none' });
+		const statsPreview = stripAnsi(stats.output).trim();
+		if (!looksIxGraphEmptyFromStats(stats.output)) {
+			return { statsPreview, ranMap: false };
+		}
+		const mapped = await this.runCommand(cwd, `${this.quoteIx(ixBin)} map .`, 600_000, { ui: 'none' });
+		return { statsPreview, ranMap: mapped.exitCode === 0 };
+	}
+
 	async runJsonQuery(args: readonly string[], cwd?: URI, timeoutMs: number = 60_000): Promise<{ ok: true; value: unknown; raw: string } | { ok: false; error: string; raw: string; exitCode: number }> {
 		if (isWeb) {
 			return { ok: false, error: 'Ix is not available on web.', raw: '', exitCode: 1 };
@@ -421,10 +472,12 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			return { ok: false, error: `ix exited with code ${exitCode}`, raw: output, exitCode };
 		}
 		try {
-			const value = JSON.parse(output);
+			const normalized = normalizeIxJsonOutput(output);
+			const value = JSON.parse(normalized);
 			return { ok: true, value, raw: output };
 		} catch (e: any) {
-			return { ok: false, error: `Failed to parse ix JSON output: ${String(e?.message ?? e)}`, raw: output, exitCode: 0 };
+			const head = output.trim().split(/\r?\n/).slice(0, 3).join('\n');
+			return { ok: false, error: `Failed to parse ix JSON output: ${String(e?.message ?? e)}${head ? `\n${head}` : ''}`, raw: output, exitCode: 0 };
 		}
 	}
 
@@ -627,6 +680,20 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			return;
 		}
 
+		this.beginStep(STEP_STATS);
+		try {
+			await this.runCommand(primary, `${this.quoteIx(ix)} stats`, 30_000, { stepId: STEP_STATS });
+			if (gen !== this.pipelineGeneration) {
+				return;
+			}
+			this.completeStep(STEP_STATS, 'success');
+		} catch (e) {
+			if (gen !== this.pipelineGeneration) {
+				return;
+			}
+			this.completeStep(STEP_STATS, 'error', String(e));
+		}
+
 		this.setPhase('mapping');
 		for (const folder of folders) {
 			if (gen !== this.pipelineGeneration) {
@@ -635,7 +702,8 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			const mid = mapStepId(folder.uri);
 			this.beginStep(mid);
 			try {
-				const map = await this.runCommand(folder.uri, `${this.quoteIx(ix)} map`, 600_000, { stepId: mid });
+				// Prefer `map .`: bare `ix map` may bind to ~/.ix registered default workspace instead of terminal cwd.
+				const map = await this.runCommand(folder.uri, `${this.quoteIx(ix)} map .`, 600_000, { stepId: mid });
 				if (gen !== this.pipelineGeneration) {
 					return;
 				}
@@ -693,7 +761,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			void this.terminalService.createTerminal({
 				cwd: folder.uri,
 				config: {
-					...this.shellLaunchForCommand(`${this.quoteIx(ix)} watch`),
+					...this.shellLaunchForCommand(`${this.quoteIx(ix)} watch .`),
 					name: `Ix watch (${folder.name})`,
 					hideFromUser: true,
 					isFeatureTerminal: true,

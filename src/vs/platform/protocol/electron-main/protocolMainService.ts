@@ -41,6 +41,9 @@ export class ProtocolMainService extends Disposable implements IProtocolMainServ
 		this.addValidFileRoot(environmentService.extensionsPath);
 		this.addValidFileRoot(userDataProfilesService.defaultProfile.globalStorageHome.with({ scheme: Schemas.file }).fsPath);
 		this.addValidFileRoot(environmentService.workspaceStorageHome.with({ scheme: Schemas.file }).fsPath);
+		// #region agent log
+		fetch('http://127.0.0.1:7678/ingest/b3c4b434-a44a-428c-a491-ca46a80d6724', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '8655ed' }, body: JSON.stringify({ sessionId: '8655ed', runId: 'pre-fix', hypothesisId: 'H1', location: 'protocolMainService.ts:ctor', message: 'ProtocolMainService roots', data: { appRoot: environmentService.appRoot, extensionsPath: environmentService.extensionsPath, workspaceStorageHome: environmentService.workspaceStorageHome?.toString?.(), globalStorageHome: userDataProfilesService.defaultProfile.globalStorageHome?.toString?.(), isBuilt: environmentService.isBuilt }, timestamp: Date.now() }) }).catch(() => { });
+		// #endregion agent log
 
 		// Handle protocols
 		this.handleProtocols();
@@ -94,6 +97,9 @@ export class ProtocolMainService extends Disposable implements IProtocolMainServ
 	private handleResourceRequest(request: Electron.ProtocolRequest, callback: ProtocolCallback): void {
 		const path = this.requestToNormalizedFilePath(request);
 		const pathBasename = basename(path);
+		// #region agent log
+		fetch('http://127.0.0.1:7678/ingest/b3c4b434-a44a-428c-a491-ca46a80d6724', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '8655ed' }, body: JSON.stringify({ sessionId: '8655ed', runId: 'pre-fix', hypothesisId: 'H1', location: 'protocolMainService.ts:handleResourceRequest', message: 'vscode-file request', data: { url: request.url, path, pathBasename, appRoot: this.environmentService.appRoot, validRootsHit: Boolean(this.validRoots.findSubstr(path)) }, timestamp: Date.now() }) }).catch(() => { });
+		// #endregion agent log
 
 		let headers: Record<string, string> | undefined;
 		if (this.environmentService.crossOriginIsolated) {
@@ -135,6 +141,9 @@ export class ProtocolMainService extends Disposable implements IProtocolMainServ
 
 		// finally block to load the resource
 		this.logService.error(`${Schemas.vscodeFileResource}: Refused to load resource ${path} from ${Schemas.vscodeFileResource}: protocol (original URL: ${request.url})`);
+		// #region agent log
+		fetch('http://127.0.0.1:7678/ingest/b3c4b434-a44a-428c-a491-ca46a80d6724', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '8655ed' }, body: JSON.stringify({ sessionId: '8655ed', runId: 'pre-fix', hypothesisId: 'H1', location: 'protocolMainService.ts:handleResourceRequest', message: 'vscode-file refused', data: { url: request.url, path, pathBasename, appRoot: this.environmentService.appRoot }, timestamp: Date.now() }) }).catch(() => { });
+		// #endregion agent log
 
 		return callback({ error: -3 /* ABORTED */ });
 	}

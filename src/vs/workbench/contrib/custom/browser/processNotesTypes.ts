@@ -5,7 +5,7 @@
 
 import { URI } from '../../../../base/common/uri.js';
 
-export type ProcessNoteId = 'webview-selection' | string;
+export type ProcessNoteId = string;
 
 export type ProcessNoteLane =
 	| 'Build'
@@ -68,8 +68,65 @@ export interface ProcessNoteMeta {
 	readonly workspaceUri?: string;
 	/** User question for custom-prompt recipes. */
 	readonly userPrompt?: string;
-	/** Built-in routing: `webview-selection` | `custom-prompt`. */
+	/** Routing: currently `custom-prompt`. */
 	readonly recipeId?: string;
+	/** Ix-backed subsystem and target bindings used to create/refresh this note. */
+	readonly binding?: ProcessNoteBinding;
+	/** Persisted generation log text (rendered in the Logs tab). */
+	readonly generationLog?: string;
+}
+
+export interface ProcessNoteBinding {
+	readonly prompt: string;
+	readonly selection: readonly {
+		readonly subsystemKey: string;
+		readonly label: string;
+		readonly labelKind?: string;
+		readonly level?: number;
+		readonly score: number;
+		readonly selectedBy: 'model' | 'deterministic';
+	}[];
+	readonly resolvedTargets: readonly {
+		readonly target: string;
+		readonly kind?: string;
+		readonly path?: string;
+		readonly source: 'search' | 'locate' | 'text' | 'subsystem';
+	}[];
+	readonly fingerprints: {
+		readonly subsystem: string;
+		readonly resolvedTargets: string;
+		readonly evidence: string;
+	};
+	readonly ix: {
+		readonly mapRev?: string;
+		readonly generatedAt: number;
+	};
+}
+
+export type ProcessNoteSuggestionKind = 'system' | 'subsystem' | 'module';
+
+export interface ProcessNoteSuggestionProbe {
+	readonly ok: boolean;
+	readonly resolvedTargets: number;
+	readonly ranAt: number;
+}
+
+export interface ProcessNoteSuggestion {
+	/** Stable suggestion id. */
+	readonly id: string;
+	/** Display label (from Ix region label). */
+	readonly label: string;
+	/** Stable subsystem binding key derived from Ix region fields. */
+	readonly subsystemKey: string;
+	readonly kind: ProcessNoteSuggestionKind;
+	readonly confidence?: number;
+	readonly files?: number;
+	readonly crosscut?: number;
+	readonly signals?: readonly string[];
+	/** Deterministic prompt templates users can pick/fill. */
+	readonly promptTemplates: readonly string[];
+	/** Optional validation probe summary (budgeted). */
+	readonly probe?: ProcessNoteSuggestionProbe;
 }
 
 export interface ProcessNote {
@@ -83,5 +140,13 @@ export interface ProcessNote {
 export interface ProcessNotesFile {
 	readonly version: 1;
 	readonly notes: readonly ProcessNote[];
+}
+
+export interface ProcessTopicsFile {
+	readonly version: 1;
+	readonly generatedAt: number;
+	readonly workspaceUri?: string;
+	readonly mapRev?: string;
+	readonly suggestions: readonly ProcessNoteSuggestion[];
 }
 

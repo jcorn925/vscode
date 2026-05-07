@@ -67,7 +67,7 @@ export class ProcessNotesCytoscapeView extends Disposable {
 		this.webview.postMessage({ type: 'processNotes.setTheme', theme });
 	}
 
-	setHtml(cytoscapeUri: URI, fcoseUri: URI): void {
+	setHtml(cytoscapeUri: URI, coseBaseUri: URI, fcoseUri: URI): void {
 		const nonce = String(Math.random()).slice(2);
 		const cspSource = webviewGenericCspSource;
 		this.webview.setHtml(`<!doctype html>
@@ -95,12 +95,24 @@ export class ProcessNotesCytoscapeView extends Disposable {
 	<div id="cy"></div>
 	<div id="hint">drag to pan • wheel to zoom • topics: click to expand • detail: click node to open source</div>
 	<script nonce="${nonce}" src="${cytoscapeUri.toString()}"></script>
+	<script nonce="${nonce}" src="${coseBaseUri.toString()}"></script>
 	<script nonce="${nonce}" src="${fcoseUri.toString()}"></script>
 	<script nonce="${nonce}">
 		(function() {
 			const vscode = acquireVsCodeApi();
 			let cy;
 			let currentTheme = 'dark';
+
+			// cytoscape-fcose (UMD) exports "cytoscapeFcose" but may not auto-register the layout.
+			// It also expects "coseBase" to be loaded as a global.
+			try {
+				const ext = (globalThis).cytoscapeFcose;
+				if (ext && typeof (globalThis).cytoscape?.use === 'function') {
+					(globalThis).cytoscape.use(ext);
+				}
+			} catch {
+				// ignore; layout will fail later and surface via console
+			}
 
 			function laneColor(lane) {
 				switch (lane) {

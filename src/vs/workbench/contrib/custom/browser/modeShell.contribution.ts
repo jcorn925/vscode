@@ -47,26 +47,28 @@ import { IIxIntegrationService, type IxIntegrationState, type IxPipelineStepSnap
 import { IWebviewService } from '../../webview/browser/webview.js';
 import { ProcessNotesCytoscapeView, type ProcessNotesGraphWebviewMessage } from './processNotesCytoscapeView.js';
 import type { ProcessNoteGraph, ProcessNoteId, ProcessNotesFile } from './processNotesTypes.js';
+import type { ProcessNoteSuggestion, ProcessTopicsFile } from './processNotesTypes.js';
 import { ProcessNotesStore } from './processNotesStore.js';
 import {
 	RECIPE_CUSTOM_PROMPT,
-	RECIPE_WEBVIEW_SELECTION,
-	buildProcessTopicsOverviewGraph,
 	mergeProcessNoteTopicIds,
 	resolveProcessTopicLabel,
 	stableCustomNoteId,
 } from './processTopics.js';
-import { buildWebviewSelectionEvidencePack } from './processNotesIxEvidence.js';
-import { buildCustomPromptEvidencePack } from './processNotesCustomEvidence.js';
+import { buildCustomPromptEvidencePack, type ProcessNotesGenerationProgressEvent } from './processNotesCustomEvidence.js';
 import { formatSavedProcessNoteMarkdown, ixCommandLabelsFromEvidenceRaw } from './processNotesProvenance.js';
 import type { ProcessNotesSynthesisResult } from './processNotesSynthesis.js';
-import { synthesizeCustomPromptNote, synthesizeWebviewSelectionNote } from './processNotesSynthesis.js';
+import { synthesizeCustomPromptNote } from './processNotesSynthesis.js';
+import { selectProcessCandidatesFromIxMap } from './processNotesSynthesis.js';
+import { applyProbeResults, computeProcessSuggestionsFromIxDiscovery } from './processNotesSuggestions.js';
+import { resolveIxEvidenceWorkspaceFolderUri } from './processNotesIxFolder.js';
 
 /** Every `ix` subcommand from https://ix-infra.com/docs/commands/ (grouped like the docs). */
 const IX_DOCS_COMMANDS_URL = 'https://ix-infra.com/docs/commands/';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
+const STORAGE_PROCESS_NOTES_SUGGESTIONS_CACHE = 'modeShell.processNotesSuggestionsCache';
 
 function getIxCliCommandReferenceText(): string {
 	const L = (key: string, def: string) => localize(key, def);
@@ -141,6 +143,7 @@ class ModeShellContribution extends Disposable {
 	private readonly uiStartStatus: HTMLElement;
 	private readonly uiRuntimeText: HTMLElement;
 	private lastUiStartHints: DevServerSuggestedCommands | undefined;
+	private autoStartAppAttempted = false;
 	private readonly uiRuntimeLogs: string[] = [];
 	private readonly uiClickOverlayScript = createUiClickOverlayScript();
 	private readonly startHintActionDisposables = this._register(new DisposableStore());
@@ -165,8 +168,15 @@ class ModeShellContribution extends Disposable {
 	private readonly processNotesPromptInput: HTMLInputElement;
 	private readonly processNotesGenerateButton: HTMLButtonElement;
 	private readonly processNotesBackButton: HTMLButtonElement;
-	private readonly processNotesRegenerateButton: HTMLButtonElement;
+	private readonly processNotesDeleteButton: HTMLButtonElement;
+	private readonly processNotesTypeahead: HTMLElement;
+	private readonly processNotesOutputTab: HTMLButtonElement;
+	private readonly processNotesLogsTab: HTMLButtonElement;
+	private processNotesDetailTab: 'output' | 'logs' = 'output';
+	private readonly processNotesLogs: HTMLElement;
 	private readonly processNotesMarkdown: HTMLElement;
+	private readonly processNotesCards: HTMLElement;
+	private processNotesSuggestions: readonly ProcessNoteSuggestion[] = [];
 	private processNotesGraphLayer: 'overview' | 'detail' = 'overview';
 	private processNotesMergedTopicIds: ProcessNoteId[] = mergeProcessNoteTopicIds(undefined);
 	private processNotesCachedFile: ProcessNotesFile | undefined;
@@ -178,6 +188,7 @@ class ModeShellContribution extends Disposable {
 	private readonly processIxPipeline: HTMLElement;
 	private readonly processIxPipelineGlobalRow: HTMLElement;
 	private readonly processIxPipelineWorkspaceRows: HTMLElement;
+	private readonly ixPipelineOpenOutput = new Set<string>();
 	private lastIxPipelineState: IxIntegrationState | undefined;
 	private readonly ixPipelineDurationTicker = this._register(new MutableDisposable<IDisposable>());
 
@@ -203,6 +214,7 @@ class ModeShellContribution extends Disposable {
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IIxIntegrationService private readonly ixIntegrationService: IIxIntegrationService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super();
 
@@ -210,7 +222,14 @@ class ModeShellContribution extends Disposable {
 		this._uiChatDismissed = this.storageService.get(STORAGE_UI_CHAT_DISMISSED, StorageScope.PROFILE) === '1';
 
 		this.chatSessionManager = new ModeShellChatSessionManager(this.chatService, this.chatWidgetService, this.storageService);
-		this.processNotesStore = this._register(new ProcessNotesStore(this.fileService, this.workspaceContextService));
+		this.processNotesStore = this._register(new ProcessNotesStore(this.fileService, this.workspaceContextService, this.configurationService));
+		void this.loadProcessNotesSuggestions();
+
+		this._register(this.configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration('custom.ix.preferredWorkspaceFolder')) {
+				void this.loadProcessNotesSuggestions();
+			}
+		}));
 
 		this.container = this.layoutService.getContainer(mainWindow);
 		this.container.classList.add('custom-mode-shell-enabled');
@@ -870,6 +889,20 @@ class ModeShellContribution extends Disposable {
 				gap: 8px;
 			}
 
+			.monaco-workbench .custom-mode-ix-pipeline-workspace-head {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 10px;
+				position: relative; /* anchor ix popovers */
+			}
+
+			.monaco-workbench .custom-mode-ix-pipeline-controls {
+				display: flex;
+				align-items: center;
+				gap: 6px;
+			}
+
 			.monaco-workbench .custom-mode-ix-pipeline-workspace-label {
 				font-size: 11px;
 				font-weight: 600;
@@ -1239,6 +1272,8 @@ class ModeShellContribution extends Disposable {
 				font-size: 12px;
 				line-height: 1.45;
 				color: var(--vscode-descriptionForeground);
+				user-select: text;
+				-webkit-user-select: text;
 				white-space: pre-wrap;
 				word-break: break-word;
 				max-height: min(180px, 24vh);
@@ -1249,6 +1284,115 @@ class ModeShellContribution extends Disposable {
 				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
 			}
 
+			.monaco-workbench .custom-mode-process-notes-logs {
+				font-family: var(--monaco-monospace-font);
+				font-size: 10px;
+				line-height: 1.4;
+				user-select: text;
+				-webkit-user-select: text;
+				white-space: pre-wrap;
+				word-break: break-word;
+				max-height: min(120px, 18vh);
+				overflow: auto;
+				padding: 6px 8px;
+				border-radius: 6px;
+				background: var(--vscode-textBlockQuote-background, rgba(127, 127, 127, 0.08));
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-process-notes-detail-tabs {
+				display: flex;
+				gap: 6px;
+				align-items: center;
+				padding: 2px 0;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-detail-tab {
+				height: 22px;
+				padding: 0 10px;
+				border-radius: 999px;
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+				background: transparent;
+				color: var(--vscode-descriptionForeground);
+				cursor: pointer;
+				font-size: 11px;
+				font-weight: 600;
+				-webkit-app-region: no-drag;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-detail-tab.active {
+				background: var(--vscode-toolbar-hoverBackground);
+				color: var(--vscode-foreground);
+				border-color: var(--vscode-focusBorder);
+			}
+
+			.monaco-workbench .custom-mode-process-notes-cards {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+				gap: 8px;
+				min-height: 120px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-cards.hidden,
+			.monaco-workbench .custom-mode-process-notes-markdown.hidden,
+			.monaco-workbench .custom-mode-process-notes-graph.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-card {
+				text-align: left;
+				border-radius: 8px;
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+				background: var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
+				color: var(--vscode-foreground);
+				padding: 10px;
+				cursor: pointer;
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+				min-height: 104px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-card:hover {
+				background: var(--vscode-list-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-process-notes-card-title {
+				font-size: 13px;
+				font-weight: 700;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-card-meta,
+			.monaco-workbench .custom-mode-process-notes-card-summary {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-process-notes-card-chips {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-card-chip {
+				border-radius: 999px;
+				padding: 2px 6px;
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+				color: var(--vscode-descriptionForeground);
+				font-size: 10px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-section-title {
+				grid-column: 1 / -1;
+				font-size: 11px;
+				font-weight: 700;
+				letter-spacing: 0.02em;
+				color: var(--vscode-foreground);
+				opacity: 0.92;
+				padding: 2px 2px 0;
+			}
+
 			.monaco-workbench .custom-mode-process-notes-graph {
 				position: relative;
 				height: min(320px, 36vh);
@@ -1256,6 +1400,48 @@ class ModeShellContribution extends Disposable {
 				overflow: hidden;
 				background: var(--vscode-editorBackground);
 				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+			}
+
+			.monaco-workbench .custom-mode-process-notes-typeahead {
+				position: absolute;
+				top: calc(100% + 6px);
+				left: 0;
+				right: 0;
+				z-index: 2500;
+				background: var(--vscode-editorWidget-background);
+				border: 1px solid var(--vscode-editorWidget-border);
+				border-radius: 8px;
+				box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+				max-height: min(240px, 35vh);
+				overflow: auto;
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-typeahead.visible {
+				display: block;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-typeahead-item {
+				padding: 8px 10px;
+				cursor: pointer;
+				display: flex;
+				flex-direction: column;
+				gap: 2px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-typeahead-item:hover {
+				background: var(--vscode-list-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-process-notes-typeahead-title {
+				font-size: 12px;
+				font-weight: 700;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-process-notes-typeahead-meta {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
 			}
 
 			.monaco-workbench.custom-mode-web .custom-mode-process-notes {
@@ -1586,6 +1772,8 @@ class ModeShellContribution extends Disposable {
 
 		// Process notes (generated via Ix + AI) with an interactive Cytoscape graph canvas.
 		this.processNotesTopicSelect = $('select.custom-mode-process-notes-topic') as HTMLSelectElement;
+		// Topic selection is driven by the card grid; keep the select offscreen as an internal state holder.
+		this.processNotesTopicSelect.style.display = 'none';
 		this.rebuildProcessNotesTopicSelectOptions(undefined);
 		const backToTopicsLabel = localize('customMode.processNotes.backToTopics', 'Back to topics');
 		this.processNotesBackButton = $('button.custom-mode-process-notes-back.hidden', {
@@ -1598,28 +1786,39 @@ class ModeShellContribution extends Disposable {
 			placeholder: localize('customMode.processNotes.promptPlaceholder', 'Ask about a process in this workspace…'),
 			'aria-label': localize('customMode.processNotes.promptAria', 'Question about a process in the open workspace'),
 		}) as HTMLInputElement;
+		this.processNotesTypeahead = $('div.custom-mode-process-notes-typeahead');
 		const generateLabel = localize('customMode.processNotes.generate', 'Generate');
 		this.processNotesGenerateButton = $('button.custom-mode-process-notes-generate', {
 			type: 'button',
 			'aria-label': generateLabel,
 			title: generateLabel,
 		}, generateLabel) as HTMLButtonElement;
-		this.processNotesRegenerateButton = $('button.custom-mode-process-notes-regenerate', { type: 'button' }, localize('customMode.processNotes.regenerate', 'Regenerate')) as HTMLButtonElement;
+		const deleteLabel = localize('customMode.processNotes.delete', 'Delete');
+		this.processNotesDeleteButton = $('button.custom-mode-process-notes-regenerate', {
+			type: 'button',
+			'aria-label': deleteLabel,
+			title: deleteLabel,
+		}, deleteLabel) as HTMLButtonElement;
+		this.processNotesDeleteButton.disabled = true;
+		this.processNotesOutputTab = $('button.custom-mode-process-notes-detail-tab', { type: 'button' }, localize('customMode.processNotes.tab.output', 'Output')) as HTMLButtonElement;
+		this.processNotesLogsTab = $('button.custom-mode-process-notes-detail-tab', { type: 'button' }, localize('customMode.processNotes.tab.logs', 'Logs')) as HTMLButtonElement;
+		const tabsRow = $('div.custom-mode-process-notes-detail-tabs', undefined, this.processNotesOutputTab, this.processNotesLogsTab);
+		this.processNotesCards = $('div.custom-mode-process-notes-cards');
+		this.processNotesLogs = $('pre.custom-mode-process-notes-logs');
 		this.processNotesMarkdown = $('div.custom-mode-process-notes-markdown');
 		this.processNotesGraphAnchor = $('div.custom-mode-process-notes-graph');
 		this.processNotesPanel = $('div.custom-mode-process-notes', undefined,
 			$('div.custom-mode-process-notes-header', undefined,
 				$('span', undefined, localize('customMode.processNotesTitle', 'Process notes')),
-				this.processNotesTopicSelect,
 				this.processNotesBackButton,
 				this.processNotesPromptInput,
 				this.processNotesGenerateButton,
-				this.processIxCommandsButton,
-				this.processIxLogsButton,
-				this.processNotesRegenerateButton,
-				this.processIxCommandsPopover,
-				this.processIxLogsPopover,
+				this.processNotesDeleteButton,
+				this.processNotesTypeahead,
 			),
+			this.processNotesCards,
+			tabsRow,
+			this.processNotesLogs,
 			this.processNotesMarkdown,
 			this.processNotesGraphAnchor
 		);
@@ -1628,10 +1827,11 @@ class ModeShellContribution extends Disposable {
 			? URI.file(this.nativeEnvironmentService.appRoot)
 			: URI.file(process.cwd());
 		const cytoscapeRoot = URI.joinPath(appRoot, 'node_modules', 'cytoscape', 'dist');
+		const coseBaseRoot = URI.joinPath(appRoot, 'node_modules', 'cose-base');
 		const fcoseRoot = URI.joinPath(appRoot, 'node_modules', 'cytoscape-fcose');
 		this.processNotesGraphView = this._register(new ProcessNotesCytoscapeView(
 			this.webviewService,
-			[cytoscapeRoot, fcoseRoot],
+			[cytoscapeRoot, coseBaseRoot, fcoseRoot],
 			(msg: ProcessNotesGraphWebviewMessage) => this.onProcessNotesGraphMessage(msg),
 		));
 
@@ -1639,12 +1839,12 @@ class ModeShellContribution extends Disposable {
 		this.processNotesGraphView.attach(this.processNotesGraphAnchor, this.processMainColumn);
 
 		const cytoscapeUri = this.processNotesGraphView.asWebviewUri(URI.joinPath(cytoscapeRoot, 'cytoscape.min.js'));
+		const coseBaseUri = this.processNotesGraphView.asWebviewUri(URI.joinPath(coseBaseRoot, 'cose-base.js'));
 		const fcoseUri = this.processNotesGraphView.asWebviewUri(URI.joinPath(fcoseRoot, 'cytoscape-fcose.js'));
-		this.processNotesGraphView.setHtml(cytoscapeUri, fcoseUri);
+		this.processNotesGraphView.setHtml(cytoscapeUri, coseBaseUri, fcoseUri);
 		this.processNotesGraphView.setGraph({ nodes: [], edges: [] } satisfies ProcessNoteGraph);
 
 		this.processMainColumn.appendChild(this.processCallout);
-		this.processMainColumn.appendChild(this.processSetup);
 		this.processMainColumn.appendChild(this.processIxWebHint);
 		this.processMainColumn.appendChild(this.processIxPipeline);
 		this.processMainColumn.appendChild(this.processNotesPanel);
@@ -1670,8 +1870,14 @@ class ModeShellContribution extends Disposable {
 
 		this._register(addDisposableListener(processCloseBtn, 'click', () => this.setProcessChatDismissed(true)));
 		this._register(addDisposableListener(this.processChatReopenBtn, 'click', () => this.setProcessChatDismissed(false)));
-		this._register(addDisposableListener(this.processNotesRegenerateButton, 'click', () => void this.regenerateSelectedProcessNote()));
 		this._register(addDisposableListener(this.processNotesGenerateButton, 'click', () => void this.generateProcessNoteFromPrompt()));
+		this._register(addDisposableListener(this.processNotesDeleteButton, 'click', () => void this.deleteSelectedProcessNote()));
+		this._register(addDisposableListener(this.processNotesOutputTab, 'click', () => this.setProcessNotesDetailTab('output')));
+		this._register(addDisposableListener(this.processNotesLogsTab, 'click', () => this.setProcessNotesDetailTab('logs')));
+		this._register(addDisposableListener(this.processNotesPromptInput, 'input', () => this.updateProcessNotesTypeahead()));
+		this._register(addDisposableListener(this.processNotesPromptInput, 'focus', () => this.updateProcessNotesTypeahead()));
+		this._register(addDisposableListener(this.processNotesPromptInput, 'blur', () => mainWindow.setTimeout(() => this.hideProcessNotesTypeahead(), 120)));
+		// Dropdown removed from UI (selection happens via cards), but keep change handler for safety.
 		this._register(addDisposableListener(this.processNotesTopicSelect, 'change', () => void this.loadSelectedProcessNote()));
 		this._register(addDisposableListener(this.processNotesBackButton, 'click', () => this.showProcessNotesOverview()));
 		this._register(addDisposableListener(this.processIxCommandsButton, 'click', () => {
@@ -1699,7 +1905,7 @@ class ModeShellContribution extends Disposable {
 
 		// Create embedded chat widgets for UI/Process.
 		this.uiChatWidget = this.createEmbeddedChatWidget(this.uiChatContainer, 'customModeShellUI');
-		this.processChatWidget = this.createEmbeddedChatWidget(this.processChatContainer, 'customModeShellProcess');
+		this.processChatWidget = this.createEmbeddedChatWidget(this.processChatContainer, 'customModeShellProcess', 'how does the scrape videos process work');
 
 		this.updateMode(this.modeService.getMode());
 		this._register(this.modeService.onDidChange(mode => this.updateMode(mode)));
@@ -2031,7 +2237,7 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
-	private createEmbeddedChatWidget(container: HTMLElement, viewId: string): ChatWidget {
+	private createEmbeddedChatWidget(container: HTMLElement, viewId: string, defaultInput?: string): ChatWidget {
 		const scopedContextKeyService = this._register(this.contextKeyService.createScoped(container)) as IScopedContextKeyService;
 		const scopedInstantiationService = this._register(this.instantiationService.createChild(
 			new ServiceCollection([
@@ -2067,6 +2273,9 @@ class ModeShellContribution extends Disposable {
 		);
 
 		widget.render(container);
+		if (defaultInput && widget.getInput().trim().length === 0) {
+			widget.setInput(defaultInput);
+		}
 
 		const defaultStripHeightPx = 120;
 		const layoutEmbeddedChat = () => {
@@ -2213,6 +2422,7 @@ class ModeShellContribution extends Disposable {
 			? localize('customMode.startAppSubtitleRun', 'Runs: {0}.{1}', cmd, urlPart)
 			: localize('customMode.startAppSubtitleInstallRun', 'Installs dependencies if needed, then runs: {0}.{1}', cmd, urlPart);
 		this.updateStartAppControl();
+		this.maybeAutoStartApp();
 	}
 
 	private updateStartAppControl(): void {
@@ -2240,6 +2450,27 @@ class ModeShellContribution extends Disposable {
 				message: String((e as Error)?.message ?? e)
 			});
 		}
+	}
+
+	private maybeAutoStartApp(): void {
+		if (this.autoStartAppAttempted) {
+			return;
+		}
+
+		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
+		const hints = this.lastUiStartHints;
+		if (!hasProject || !hints?.primaryRunCommand) {
+			return;
+		}
+
+		const state = this.devServerService.getState();
+		if (state.phase !== 'idle') {
+			this.autoStartAppAttempted = true;
+			return;
+		}
+
+		this.autoStartAppAttempted = true;
+		queueMicrotask(() => void this.onStartAppClicked());
 	}
 
 	private renderStartHintsInto(root: HTMLElement, hints: DevServerSuggestedCommands | undefined): void {
@@ -2393,6 +2624,14 @@ class ModeShellContribution extends Disposable {
 			wrap.appendChild($('div.custom-mode-ix-pipeline-err', undefined, step.error));
 		}
 		const details = document.createElement('details');
+		details.open = this.ixPipelineOpenOutput.has(step.id);
+		this._register(addDisposableListener(details, 'toggle', () => {
+			if (details.open) {
+				this.ixPipelineOpenOutput.add(step.id);
+			} else {
+				this.ixPipelineOpenOutput.delete(step.id);
+			}
+		}));
 		const summary = document.createElement('summary');
 		summary.textContent = localize('customMode.ixPipeline.output', 'Output');
 		details.appendChild(summary);
@@ -2424,8 +2663,18 @@ class ModeShellContribution extends Disposable {
 		}
 
 		if (workspaces.length > 0) {
+			// Workspace steps header row + Ix controls (moved here from Process Notes header).
+			const controls = $('div.custom-mode-ix-pipeline-controls', undefined,
+				this.processIxCommandsButton,
+				this.processIxLogsButton,
+				this.processIxCommandsPopover,
+				this.processIxLogsPopover,
+			);
 			this.processIxPipelineWorkspaceRows.appendChild(
-				$('div.custom-mode-ix-pipeline-workspace-label', undefined, localize('customMode.ixPipeline.workspaceSteps', 'Workspace steps')));
+				$('div.custom-mode-ix-pipeline-workspace-head', undefined,
+					$('div.custom-mode-ix-pipeline-workspace-label', undefined, localize('customMode.ixPipeline.workspaceSteps', 'Workspace steps')),
+					controls,
+				));
 			const rowWrap = $('div.custom-mode-ix-pipeline-global-row');
 			for (const s of workspaces) {
 				this.appendPipelineStep(rowWrap, s);
@@ -2520,12 +2769,7 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private localizeProcessTopicTitle(id: ProcessNoteId): string {
-		switch (id) {
-			case 'webview-selection':
-				return localize('customMode.processNotes.topic.webviewSelection', 'Webview selection');
-			default:
-				return id;
-		}
+		return id;
 	}
 
 	private rebuildProcessNotesTopicSelectOptions(file: ProcessNotesFile | undefined, preferredTopicId?: string): void {
@@ -2556,29 +2800,171 @@ class ModeShellContribution extends Disposable {
 
 	private updateProcessNotesGraphLayerUi(): void {
 		this.processNotesBackButton.classList.toggle('hidden', this.processNotesGraphLayer !== 'detail');
+		this.processNotesCards.classList.toggle('hidden', this.processNotesGraphLayer !== 'overview');
+		const detail = this.processNotesGraphLayer === 'detail';
+		this.processNotesOutputTab.classList.toggle('hidden', !detail);
+		this.processNotesLogsTab.classList.toggle('hidden', !detail);
+		this.processNotesGraphAnchor.classList.toggle('hidden', !detail);
+		this.processNotesLogs.classList.toggle('hidden', !detail || this.processNotesDetailTab !== 'logs');
+		this.processNotesMarkdown.classList.toggle('hidden', !detail || this.processNotesDetailTab !== 'output');
+		this.processNotesDeleteButton.disabled = this.processNotesGraphLayer !== 'detail';
+	}
+
+	private setProcessNotesDetailTab(tab: 'output' | 'logs'): void {
+		this.processNotesDetailTab = tab;
+		this.processNotesOutputTab.classList.toggle('active', tab === 'output');
+		this.processNotesLogsTab.classList.toggle('active', tab === 'logs');
+		this.updateProcessNotesGraphLayerUi();
 	}
 
 	private showProcessNotesOverview(): void {
 		this.processNotesGraphLayer = 'overview';
-		this.processNotesGraphView.setGraph(buildProcessTopicsOverviewGraph(this.getProcessTopicLabelEntries()));
+		this.renderProcessNotesCards();
+		this.processNotesGraphView.setGraph({ nodes: [], edges: [] });
 		this.updateProcessNotesGraphLayerUi();
+	}
+
+	private renderProcessNotesCards(): void {
+		this.processNotesCards.replaceChildren();
+		if (this.processNotesSuggestions.length) {
+			this.processNotesCards.appendChild($('div.custom-mode-process-notes-section-title', undefined, localize('customMode.processNotes.suggestedTitle', 'Suggested processes')));
+			for (const s of this.processNotesSuggestions.slice(0, 12)) {
+				const summary = s.probe
+					? localize('customMode.processNotes.suggestion.probe', '{0} targets', String(s.probe.resolvedTargets))
+					: localize('customMode.processNotes.suggestion.kind', String(s.kind));
+				const card = $('button.custom-mode-process-notes-card', { type: 'button' },
+					$('div.custom-mode-process-notes-card-title', undefined, s.label),
+					$('div.custom-mode-process-notes-card-summary', undefined, s.promptTemplates[0] ?? ''),
+					$('div.custom-mode-process-notes-card-meta', undefined, summary),
+					$('div.custom-mode-process-notes-card-chips', undefined,
+						...(s.signals?.slice(0, 3).map(sig => $('span.custom-mode-process-notes-card-chip', undefined, sig)) ?? [])
+					),
+				) as HTMLButtonElement;
+				card.title = s.label;
+				this._register(addDisposableListener(card, 'click', () => {
+					this.processNotesPromptInput.value = s.promptTemplates[0] ?? `How does ${s.label} work?`;
+					this.hideProcessNotesTypeahead();
+					this.processNotesPromptInput.focus();
+				}));
+				this.processNotesCards.appendChild(card);
+			}
+			this.processNotesCards.appendChild($('div.custom-mode-process-notes-section-title', undefined, localize('customMode.processNotes.savedTitle', 'Saved notes')));	
+		}
+		for (const entry of this.getProcessTopicLabelEntries()) {
+			const note = this.processNotesCachedFile?.notes.find(n => n.id === entry.id);
+			const generated = note?.meta.generatedAt ? new Date(note.meta.generatedAt).toLocaleString() : localize('customMode.processNotes.card.never', 'Not generated');
+			const binding = note?.meta.binding;
+			const card = $('button.custom-mode-process-notes-card', { type: 'button' },
+				$('div.custom-mode-process-notes-card-title', undefined, entry.label),
+				$('div.custom-mode-process-notes-card-summary', undefined, note?.meta.userPrompt ?? ''),
+				$('div.custom-mode-process-notes-card-meta', undefined, generated),
+				$('div.custom-mode-process-notes-card-meta', undefined, localize(
+					'customMode.processNotes.card.stats',
+					'{0} targets · {1} subsystems',
+					String(binding?.resolvedTargets.length ?? note?.graph.nodes.length ?? 0),
+					String(binding?.selection.length ?? 0),
+				)),
+				$('div.custom-mode-process-notes-card-chips', undefined,
+					...(binding?.selection.slice(0, 3).map(s => $('span.custom-mode-process-notes-card-chip', undefined, s.label)) ?? [])
+				),
+			) as HTMLButtonElement;
+			card.title = entry.label;
+			this._register(addDisposableListener(card, 'click', () => void this.drillIntoProcessTopic(entry.id)));
+			this.processNotesCards.appendChild(card);
+		}
+	}
+
+	private hideProcessNotesTypeahead(): void {
+		this.processNotesTypeahead.classList.remove('visible');
+		this.processNotesTypeahead.replaceChildren();
+	}
+
+	private updateProcessNotesTypeahead(): void {
+		const q = this.processNotesPromptInput.value.trim();
+		if (!q || this.processNotesGraphLayer !== 'detail') {
+			this.hideProcessNotesTypeahead();
+			return;
+		}
+		const qLower = q.toLowerCase();
+		const scored = this.processNotesSuggestions.map(s => {
+			const label = s.label.toLowerCase();
+			let score = 0;
+			if (label === qLower) { score += 5; }
+			if (label.includes(qLower) || qLower.includes(label)) { score += 3; }
+			for (const t of qLower.split(/[^a-z0-9]+/g).filter(Boolean)) {
+				if (label.includes(t)) { score += 1; }
+			}
+			score += (s.confidence ?? 0) * 0.25;
+			return { s, score };
+		}).filter(x => x.score > 0.6).sort((a, b) => b.score - a.score).slice(0, 8);
+
+		if (!scored.length) {
+			this.hideProcessNotesTypeahead();
+			return;
+		}
+		this.processNotesTypeahead.replaceChildren();
+		for (const { s } of scored) {
+			const meta = s.probe
+				? localize('customMode.processNotes.typeahead.probe', '{0} targets', String(s.probe.resolvedTargets))
+				: localize('customMode.processNotes.typeahead.kind', String(s.kind));
+			const item = $('div.custom-mode-process-notes-typeahead-item', { role: 'button', tabindex: '0' },
+				$('div.custom-mode-process-notes-typeahead-title', undefined, s.label),
+				$('div.custom-mode-process-notes-typeahead-meta', undefined, meta),
+			);
+			this._register(addDisposableListener(item, 'mousedown', (e) => {
+				e.preventDefault();
+				this.processNotesPromptInput.value = s.promptTemplates[0] ?? `How does ${s.label} work?`;
+				this.hideProcessNotesTypeahead();
+				this.processNotesPromptInput.focus();
+			}));
+			this.processNotesTypeahead.appendChild(item);
+		}
+		this.processNotesTypeahead.classList.add('visible');
 	}
 
 	private formatProcessNoteMarkdownWithProvenance(
 		synth: ProcessNotesSynthesisResult,
 		raw: readonly { readonly label: string }[],
+		commandPhases?: readonly { readonly phase: string; readonly labels: readonly string[] }[],
+		selection?: {
+			readonly reason: string;
+			readonly systemPrompt: string;
+			readonly userPrompt: string;
+			readonly modelId?: string;
+		},
 	): string {
 		return formatSavedProcessNoteMarkdown({
 			bodyMarkdown: synth.markdown,
 			ixCommandLabels: ixCommandLabelsFromEvidenceRaw(raw),
+			ixCommandPhases: commandPhases,
+			selectionReason: selection?.reason,
+			selectionPrompt: selection ? `${selection.systemPrompt}\n\n${selection.userPrompt}` : undefined,
+			selectionModelId: selection?.modelId,
 			systemPrompt: synth.systemPrompt,
 			userPrompt: synth.userPrompt,
 			modelId: synth.modelId,
 		});
 	}
 
+	private createProcessCandidateSelector() {
+		return (
+			userQuestion: string,
+			candidates: Parameters<typeof selectProcessCandidatesFromIxMap>[2],
+			fallbackKeywords: readonly string[],
+			fallbackReason: string,
+		) => selectProcessCandidatesFromIxMap(
+			this.languageModelsService,
+			userQuestion,
+			candidates,
+			fallbackKeywords,
+			fallbackReason,
+			this.chatSessionsCts.token,
+		);
+	}
+
 	private async drillIntoProcessTopic(topicId: ProcessNoteId): Promise<void> {
 		this.processNotesGraphLayer = 'detail';
+		this.setProcessNotesDetailTab('output');
 		this.processNotesTopicSelect.value = topicId;
 		await this.loadSelectedProcessNote();
 		this.updateProcessNotesGraphLayerUi();
@@ -2592,7 +2978,8 @@ class ModeShellContribution extends Disposable {
 		const topic = this.processNotesTopicSelect.value;
 		const note = file?.notes.find(n => n.id === topic);
 		this.processNotesPromptInput.value = note?.meta?.userPrompt ?? '';
-		this.processNotesMarkdown.textContent = note?.markdown ?? localize('customMode.processNotes.empty', 'No saved note yet. Click Regenerate to create one.');
+		this.processNotesMarkdown.textContent = note?.markdown ?? localize('customMode.processNotes.empty', 'No saved note yet. Use Generate to create one.');
+		this.processNotesLogs.textContent = note?.meta?.generationLog ?? '';
 		if (this.processNotesGraphLayer === 'detail') {
 			this.processNotesGraphView.setGraph(note?.graph ?? { nodes: [], edges: [] });
 		}
@@ -2604,7 +2991,7 @@ class ModeShellContribution extends Disposable {
 			this.notificationService.notify({ severity: Severity.Info, message: localize('customMode.processNotes.custom.needPrompt', 'Enter a question about this workspace.') });
 			return;
 		}
-		const folder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		const folder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
 		if (!folder) {
 			this.notificationService.notify({ severity: Severity.Warning, message: localize('customMode.processNotes.noWorkspace', 'Open a workspace folder to generate process notes.') });
 			return;
@@ -2615,96 +3002,74 @@ class ModeShellContribution extends Disposable {
 
 		this.processNotesGenerateButton.disabled = true;
 		try {
-			const evidence = await buildCustomPromptEvidencePack(this.ixIntegrationService, folder, prompt);
+			this.processNotesGraphLayer = 'detail';
+			this.updateProcessNotesGraphLayerUi();
+			this.processNotesLogs.textContent = '';
+			this.processNotesMarkdown.textContent = localize('customMode.processNotes.generating', 'Generating process note…');
+			this.setProcessNotesDetailTab('logs');
+
+			const logLine = (line: string) => {
+				this.processNotesLogs.textContent += (this.processNotesLogs.textContent ? '\n' : '') + line;
+				this.processNotesLogs.scrollTop = this.processNotesLogs.scrollHeight;
+			};
+			const onProgress = (e: ProcessNotesGenerationProgressEvent) => {
+				const tag = e.status === 'start' ? '…' : e.status === 'success' ? '✓' : e.status === 'error' ? '✗' : '•';
+				const detail = e.detail ? ` — ${e.detail}` : '';
+				logLine(`[${e.phase}] ${tag} ${e.label}${detail}`);
+			};
+
+			const evidence = await buildCustomPromptEvidencePack(
+				this.ixIntegrationService,
+				folder,
+				prompt,
+				this.createProcessCandidateSelector(),
+				onProgress
+			);
+			onProgress({ phase: 'synthesis', label: 'AI synthesis', status: 'start' });
 			const synth = await synthesizeCustomPromptNote(this.languageModelsService, evidence, this.chatSessionsCts.token);
+			onProgress({ phase: 'synthesis', label: 'AI synthesis', status: 'success' });
 			const now = Date.now();
+			const generationLog = this.processNotesLogs.textContent;
 			await this.processNotesStore.upsertNote({
 				id: noteId,
 				title,
-				markdown: this.formatProcessNoteMarkdownWithProvenance(synth, evidence.raw),
+				markdown: this.formatProcessNoteMarkdownWithProvenance(synth, evidence.raw, evidence.commandPhases, evidence.selection),
 				graph: synth.graph,
 				meta: {
 					generatedAt: now,
 					workspaceUri: folder.toString(),
 					userPrompt: prompt,
 					recipeId: RECIPE_CUSTOM_PROMPT,
+					binding: evidence.binding,
+					generationLog,
 				},
 			});
-			this.processNotesGraphLayer = 'detail';
 			await this.loadSelectedProcessNote(noteId);
+			this.setProcessNotesDetailTab('output');
 			this.updateProcessNotesGraphLayerUi();
 		} finally {
 			this.processNotesGenerateButton.disabled = false;
 		}
 	}
 
-	private async regenerateSelectedProcessNote(): Promise<void> {
-		const folder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
-		if (!folder) {
-			this.notificationService.notify({ severity: Severity.Warning, message: localize('customMode.processNotes.noWorkspace', 'Open a workspace folder to generate process notes.') });
+	private async deleteSelectedProcessNote(): Promise<void> {
+		const topic = this.processNotesTopicSelect.value;
+		if (!topic) {
 			return;
 		}
-
-		const topic = this.processNotesTopicSelect.value;
 		const existing = await this.processNotesStore.load();
 		const note = existing?.notes.find(n => n.id === topic);
-		const recipe =
-			note?.meta.recipeId ??
-			(topic === 'webview-selection' ? RECIPE_WEBVIEW_SELECTION : RECIPE_CUSTOM_PROMPT);
-
-		if (recipe === RECIPE_WEBVIEW_SELECTION) {
-			this.processNotesRegenerateButton.disabled = true;
-			try {
-				const evidence = await buildWebviewSelectionEvidencePack(this.ixIntegrationService, folder);
-				const synth = await synthesizeWebviewSelectionNote(this.languageModelsService, evidence, this.chatSessionsCts.token);
-				const now = Date.now();
-				await this.processNotesStore.upsertNote({
-					id: 'webview-selection',
-					title: localize('customMode.processNotes.topic.webviewSelection', 'Webview selection'),
-					markdown: this.formatProcessNoteMarkdownWithProvenance(synth, evidence.raw),
-					graph: synth.graph,
-					meta: {
-						generatedAt: now,
-						workspaceUri: folder.toString(),
-						recipeId: RECIPE_WEBVIEW_SELECTION,
-					},
-				});
-				await this.loadSelectedProcessNote();
-			} finally {
-				this.processNotesRegenerateButton.disabled = false;
-			}
+		if (!note) {
 			return;
 		}
-
-		const prompt = note?.meta.userPrompt?.trim() ?? '';
-		if (!prompt.length) {
-			this.notificationService.notify({
-				severity: Severity.Warning,
-				message: localize('customMode.processNotes.custom.noStoredPrompt', 'This note has no saved question. Use Generate with a prompt, or pick another topic.'),
-			});
-			return;
-		}
-
-		this.processNotesRegenerateButton.disabled = true;
+		this.processNotesDeleteButton.disabled = true;
 		try {
-			const evidence = await buildCustomPromptEvidencePack(this.ixIntegrationService, folder, prompt);
-			const synth = await synthesizeCustomPromptNote(this.languageModelsService, evidence, this.chatSessionsCts.token);
-			const now = Date.now();
-			await this.processNotesStore.upsertNote({
-				id: topic as ProcessNoteId,
-				title: note?.title ?? topic,
-				markdown: this.formatProcessNoteMarkdownWithProvenance(synth, evidence.raw),
-				graph: synth.graph,
-				meta: {
-					generatedAt: now,
-					workspaceUri: folder.toString(),
-					userPrompt: prompt,
-					recipeId: RECIPE_CUSTOM_PROMPT,
-				},
-			});
+			await this.processNotesStore.deleteNote(topic);
+			this.processNotesGraphLayer = 'overview';
 			await this.loadSelectedProcessNote();
+			this.showProcessNotesOverview();
 		} finally {
-			this.processNotesRegenerateButton.disabled = false;
+			this.processNotesDeleteButton.disabled = this.processNotesGraphLayer !== 'detail';
 		}
 	}
 
@@ -2739,6 +3104,127 @@ class ModeShellContribution extends Disposable {
 			span.textContent = url ?? '';
 		}
 		this.uiUrlPill.classList.toggle('has-url', Boolean(url));
+	}
+
+	private workspaceKeyForSuggestions(): string | undefined {
+		const folder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
+		return folder ? folder.toString() : undefined;
+	}
+
+	private readCachedSuggestions(workspaceKey: string): ProcessTopicsFile | undefined {
+		const raw = this.storageService.get(STORAGE_PROCESS_NOTES_SUGGESTIONS_CACHE, StorageScope.PROFILE);
+		if (!raw) {
+			return undefined;
+		}
+		try {
+			const parsed = JSON.parse(raw) as { byWorkspace?: Record<string, ProcessTopicsFile> };
+			const entry = parsed?.byWorkspace?.[workspaceKey];
+			return entry && entry.version === 1 && Array.isArray(entry.suggestions) ? entry : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private writeCachedSuggestions(workspaceKey: string, file: ProcessTopicsFile): void {
+		let byWorkspace: Record<string, ProcessTopicsFile> = {};
+		const raw = this.storageService.get(STORAGE_PROCESS_NOTES_SUGGESTIONS_CACHE, StorageScope.PROFILE);
+		if (raw) {
+			try {
+				const parsed = JSON.parse(raw) as { byWorkspace?: Record<string, ProcessTopicsFile> };
+				if (parsed?.byWorkspace && typeof parsed.byWorkspace === 'object') {
+					byWorkspace = parsed.byWorkspace;
+				}
+			} catch {
+				// ignore
+			}
+		}
+		byWorkspace[workspaceKey] = file;
+		this.storageService.store(
+			STORAGE_PROCESS_NOTES_SUGGESTIONS_CACHE,
+			JSON.stringify({ byWorkspace }),
+			StorageScope.PROFILE,
+			StorageTarget.USER
+		);
+	}
+
+	private async loadProcessNotesSuggestions(): Promise<void> {
+		const workspaceKey = this.workspaceKeyForSuggestions();
+		if (!workspaceKey || isWeb) {
+			this.processNotesSuggestions = [];
+			if (this.processNotesGraphLayer === 'overview') {
+				this.renderProcessNotesCards();
+			}
+			return;
+		}
+
+		// 1) Fast path: storage cache
+		const cached = this.readCachedSuggestions(workspaceKey);
+		if (cached) {
+			this.processNotesSuggestions = cached.suggestions;
+			if (this.processNotesGraphLayer === 'overview') {
+				this.renderProcessNotesCards();
+			}
+			return;
+		}
+
+		// 2) Workspace file
+		const topics = await this.processNotesStore.loadTopics();
+		if (topics?.suggestions?.length) {
+			this.processNotesSuggestions = topics.suggestions;
+			this.writeCachedSuggestions(workspaceKey, topics);
+			if (this.processNotesGraphLayer === 'overview') {
+				this.renderProcessNotesCards();
+			}
+			return;
+		}
+
+		// 3) Compute from Ix discovery
+		const discoveryFolder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
+		if (!discoveryFolder) {
+			this.processNotesSuggestions = [];
+			if (this.processNotesGraphLayer === 'overview') {
+				this.renderProcessNotesCards();
+			}
+			return;
+		}
+
+		await this.ixIntegrationService.ensureIxMappedIfEmpty(discoveryFolder);
+
+		const subsystems = await this.ixIntegrationService.runJsonQuery(['subsystems', '--format', 'json', '.'], discoveryFolder, 90_000);
+		const map = await this.ixIntegrationService.runJsonQuery(['map', '--format', 'json', '.'], discoveryFolder, 90_000);
+		const discoveryJsons: unknown[] = [];
+		if (subsystems.ok) { discoveryJsons.push(subsystems.value); }
+		if (map.ok) { discoveryJsons.push(map.value); }
+
+		const computed = computeProcessSuggestionsFromIxDiscovery({
+			workspaceUri: discoveryFolder.toString(),
+			mapRev: (subsystems.ok && typeof (subsystems.value as any)?.map_rev === 'string') ? (subsystems.value as any).map_rev : (map.ok && typeof (map.value as any)?.map_rev === 'string') ? (map.value as any).map_rev : undefined,
+			discoveryJsons,
+			generatedAt: Date.now(),
+		});
+		// Optional light probe budget: validate top suggestions by running `ix search <label>`.
+		const probes: Array<{ label: string; ok: boolean; json?: unknown; ranAt: number }> = [];
+		let budget = 8;
+		for (const s of computed.suggestions.slice(0, 12)) {
+			if (budget <= 0) {
+				break;
+			}
+			budget--;
+			const ranAt = Date.now();
+			const res = await this.ixIntegrationService.runJsonQuery(['search', s.label, '--format', 'json'], discoveryFolder, 30_000);
+			if (res.ok) {
+				probes.push({ label: s.label, ok: true, json: res.value, ranAt });
+			} else {
+				probes.push({ label: s.label, ok: false, ranAt });
+			}
+		}
+		const probed = probes.length ? applyProbeResults(computed, probes) : computed;
+		this.processNotesSuggestions = probed.suggestions;
+		this.writeCachedSuggestions(workspaceKey, probed);
+		await this.processNotesStore.saveTopics(probed);
+		if (this.processNotesGraphLayer === 'overview') {
+			this.renderProcessNotesCards();
+		}
 	}
 
 	private updateReachabilityFromState(state: DevServerState): void {

@@ -5,14 +5,14 @@
 
 import { Emitter, Event } from '../../vs/base/common/event.js';
 import { Disposable } from '../../vs/base/common/lifecycle.js';
-import { joinPath } from '../../vs/base/common/resources.js';
+import { basename, joinPath } from '../../vs/base/common/resources.js';
 import { URI } from '../../vs/base/common/uri.js';
 import { isWindows } from '../../vs/base/common/platform.js';
 import { createDecorator } from '../../vs/platform/instantiation/common/instantiation.js';
 import { InstantiationType, registerSingleton } from '../../vs/platform/instantiation/common/extensions.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../vs/platform/workspace/common/workspace.js';
-import { ITerminalService } from '../../vs/workbench/contrib/terminal/browser/terminal.js';
+import { ITerminalInstance, ITerminalService } from '../../vs/workbench/contrib/terminal/browser/terminal.js';
 
 export type DevServerPackageManager = 'npm' | 'yarn' | 'pnpm';
 
@@ -77,6 +77,7 @@ export class DevServerService extends Disposable implements IDevServerService {
 	private script: string | undefined;
 	private command: string | undefined;
 	private lastError: string | undefined;
+	private attachedTerminalId: number | undefined;
 
 	constructor(
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
@@ -176,20 +177,26 @@ export class DevServerService extends Disposable implements IDevServerService {
 		const inferredUrl = this.inferDevUrl(packageJson, startScript);
 		this.setActiveUrl(inferredUrl);
 
-		const instance = await this.terminalService.createTerminal({
-			cwd: folder,
-			config: isWindows ? undefined : { executable: '/bin/bash' }
-		});
+		const { instance, isExisting } = await this.getOrCreateDevServerTerminal(folder);
 		instance.focus();
 
 		// Parse output to learn the actual URL/port once the dev server prints it.
-		this._register(instance.onData(data => this.tryExtractUrlFromTerminalData(data)));
+		this.attachTerminalDataListener(instance);
 
 		const packageManager = await this.detectPackageManager(folder, packageJson);
 		const startCommand = this.formatRunCommand(packageManager, startScript);
 		const installCommand = this.formatInstallCommand(packageManager);
 		const fullCommand = needsInstall ? `${installCommand} && ${startCommand}` : startCommand;
 		this.command = fullCommand;
+
+		// If we found an existing dev server terminal and it's still "busy", assume it is already running.
+		// This avoids re-sending the start command on reload which would spawn duplicate processes.
+		if (isExisting && instance.hasChildProcesses) {
+			this.setPhase('running');
+			this.started = true;
+			return this.activeUrl;
+		}
+
 		this.setPhase(needsInstall ? 'installing' : 'starting');
 
 		// Best-effort: free only the inferred port(s) before starting.
@@ -202,6 +209,48 @@ export class DevServerService extends Disposable implements IDevServerService {
 
 		this.started = true;
 		return this.activeUrl;
+	}
+
+	private getDevServerTerminalTitle(folder: URI): string {
+		return `Dev Server — ${basename(folder)}`;
+	}
+
+	private async getOrCreateDevServerTerminal(folder: URI): Promise<{ instance: ITerminalInstance; isExisting: boolean }> {
+		const expectedTitle = this.getDevServerTerminalTitle(folder);
+		const existing = this.terminalService.instances.find(i => i.title === expectedTitle || this.terminalLaunchCwdMatches(i, folder));
+		if (existing) {
+			return { instance: existing, isExisting: true };
+		}
+
+		const instance = await this.terminalService.createTerminal({
+			cwd: folder,
+			config: isWindows ? undefined : { executable: '/bin/bash' }
+		});
+		// Make it discoverable across reloads.
+		await instance.rename(expectedTitle);
+		return { instance, isExisting: false };
+	}
+
+	private terminalLaunchCwdMatches(instance: ITerminalInstance, folder: URI): boolean {
+		const cwd = instance.shellLaunchConfig.cwd;
+		if (!cwd) {
+			return false;
+		}
+		if (typeof cwd === 'string') {
+			return cwd === folder.fsPath || cwd === folder.toString();
+		}
+		return cwd.toString() === folder.toString();
+	}
+
+	private attachTerminalDataListener(instance: ITerminalInstance): void {
+		const instanceId = instance?.instanceId;
+		if (typeof instanceId === 'number' && this.attachedTerminalId === instanceId) {
+			return;
+		}
+		if (typeof instanceId === 'number') {
+			this.attachedTerminalId = instanceId;
+		}
+		this._register(instance.onData((data: string) => this.tryExtractUrlFromTerminalData(data)));
 	}
 
 	private setActiveUrl(url: string | undefined): void {
@@ -420,7 +469,7 @@ export class DevServerService extends Disposable implements IDevServerService {
 	}
 
 	private async tryRunWithFreedPorts(
-		instance: { freePortKillProcess: (port: string, commandToRun: string) => Promise<void> },
+		instance: { freePortKillProcess: (port: string, commandToRun: string) => Promise<void>; sendText: (text: string, shouldExecute: boolean, bracketedPasteMode?: boolean) => Promise<void> },
 		inferredUrl: string,
 		commandToRun: string
 	): Promise<boolean> {
@@ -433,6 +482,8 @@ export class DevServerService extends Disposable implements IDevServerService {
 		// fall back to plain sendText with no extra notifications.
 		try {
 			await instance.freePortKillProcess(String(inferredPort), commandToRun);
+			// freePortKillProcess places the command on the prompt; ensure it's actually executed.
+			await instance.sendText('', true);
 			return true;
 		} catch {
 			// ignore
@@ -441,6 +492,8 @@ export class DevServerService extends Disposable implements IDevServerService {
 		// Expo often suggests the next port; try that as a secondary option.
 		try {
 			await instance.freePortKillProcess(String(inferredPort + 1), commandToRun);
+			// freePortKillProcess places the command on the prompt; ensure it's actually executed.
+			await instance.sendText('', true);
 			return true;
 		} catch {
 			// ignore
