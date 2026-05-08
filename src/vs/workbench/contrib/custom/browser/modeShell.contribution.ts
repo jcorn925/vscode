@@ -1933,6 +1933,9 @@ class ModeShellContribution extends Disposable {
 		// Dropdown removed from UI (selection happens via cards), but keep change handler for safety.
 		this._register(addDisposableListener(this.processNotesTopicSelect, 'change', () => void this.loadSelectedProcessNote()));
 		this._register(addDisposableListener(this.processNotesBackButton, 'click', () => this.showProcessNotesOverview()));
+		this._register(addDisposableListener(this.processNotesDiscoveryTab, 'click', () => this.setProcessNotesLogView('discovery')));
+		this._register(addDisposableListener(this.processNotesGenerateTab, 'click', () => this.setProcessNotesLogView('generate')));
+		this.setProcessNotesLogView('discovery');
 		this._register(addDisposableListener(this.processIxCommandsButton, 'click', () => {
 			const show = !this.processIxCommandsPopover.classList.contains('visible');
 			this.processIxCommandsPopover.classList.toggle('visible', show);
