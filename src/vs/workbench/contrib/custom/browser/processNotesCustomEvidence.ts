@@ -486,26 +486,44 @@ export async function buildCustomPromptEvidencePack(
 	onProgress?.({ phase: 'discovery', label: 'Starting discovery', status: 'info' });
 	onProgress?.({ phase: 'discovery', label: localize('customMode.processNotes.ixStats', 'ix stats'), status: 'start' });
 	const hydrate = await ix.ensureIxMappedIfEmpty(cwd);
+	const statsHeadline = hydrate.statsPreview.split(/\r?\n/).map(l => l.trim()).filter(Boolean)[0];
 	onProgress?.({
 		phase: 'discovery',
 		label: localize('customMode.processNotes.ixStats', 'ix stats'),
 		status: 'success',
-		detail: hydrate.statsPreview.split(/\r?\n/).map(l => l.trim()).filter(Boolean)[0],
+		detail: statsHeadline,
 	});
 	if (hydrate.ranMap) {
 		onProgress?.({
 			phase: 'discovery',
-			label: localize('customMode.processNotes.ixMapHydrate', 'ix map . (graph was empty)'),
+			label: localize('customMode.processNotes.ixMapHydrate', 'ix map --all-items . (graph was empty)'),
 			status: 'info',
 		});
 	}
-	await run('discovery', 'ix subsystems --format json .', ['subsystems', '--format', 'json', '.'], 90_000, 'subsystems');
-	await run('discovery', 'ix map --format json .', ['map', '--format', 'json', '.'], 90_000, 'map');
+
+	// 1) Prefer rich subsystem view first: importance-ranked, all items.
+	const subsystems = await run(
+		'discovery',
+		'ix subsystems --sort importance --all-items --format json .',
+		['subsystems', '--sort', 'importance', '--all-items', '--format', 'json', '.'],
+		90_000,
+		'subsystems',
+	);
 
 	let regions: NormalizedIxRegion[] = [];
 	for (const discovery of results.filter(r => r.phase === 'discovery' && r.ok)) {
 		collectRegions(discovery.json, regions);
 	}
+
+	// 2) Fall back to ix map only if subsystem discovery could not provide any regions.
+	if (!regions.length) {
+		await run('discovery', 'ix map --format json .', ['map', '--format', 'json', '.'], 90_000, 'map');
+		regions = [];
+		for (const discovery of results.filter(r => r.phase === 'discovery' && r.ok)) {
+			collectRegions(discovery.json, regions);
+		}
+	}
+
 	if (!regions.length) {
 		await run('discovery', 'ix inventory --format json', ['inventory', '--format', 'json'], 90_000, 'inventory');
 		const inventory = firstJsonResult(results, 'ix inventory');
@@ -586,6 +604,11 @@ export async function buildCustomPromptEvidencePack(
 		const overviewArgs = ['overview', target.target, '--format', 'json'];
 		await run('deepening', `ix explain ${target.target} --format json`, explainArgs, 60_000, target.target);
 		await run('deepening', `ix overview ${target.target} --format json`, overviewArgs, 60_000, target.target);
+		// If the Ix target still looks like a subsystem/region label, try the richer subsystem explain view as well.
+		if (!target.path && target.kind === 'region') {
+			const subsystemsExplainArgs = ['subsystems', '--target', target.target, '--explain', '--format', 'json'];
+			await run('deepening', `ix subsystems --target ${target.target} --explain --format json`, subsystemsExplainArgs, 60_000, target.target);
+		}
 	}
 	if (targets.length) {
 		onProgress?.({ phase: 'deepening', label: 'Deepening evidence', status: 'success' });

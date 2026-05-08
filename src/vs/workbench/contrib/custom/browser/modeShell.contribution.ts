@@ -59,7 +59,6 @@ import { buildCustomPromptEvidencePack, type ProcessNotesGenerationProgressEvent
 import { formatSavedProcessNoteMarkdown, ixCommandLabelsFromEvidenceRaw } from './processNotesProvenance.js';
 import type { ProcessNotesSynthesisResult } from './processNotesSynthesis.js';
 import { synthesizeCustomPromptNote } from './processNotesSynthesis.js';
-import { selectProcessCandidatesFromIxMap } from './processNotesSynthesis.js';
 // Suggested “system processes” are derived directly from ix subsystems output.
 import { resolveIxEvidenceWorkspaceFolderUri } from './processNotesIxFolder.js';
 
@@ -148,6 +147,7 @@ class ModeShellContribution extends Disposable {
 	private readonly startHintActionDisposables = this._register(new DisposableStore());
 	private reachabilityAbort: AbortController | undefined;
 	private reachabilityUrl: string | undefined;
+	private appReachable = false;
 	private readonly chatSessionsCts = this._register(new CancellationTokenSource());
 	private readonly chatSessionManager: ModeShellChatSessionManager;
 	private readonly embeddedChatRefs = {
@@ -169,15 +169,16 @@ class ModeShellContribution extends Disposable {
 	private readonly processNotesBackButton: HTMLButtonElement;
 	private readonly processNotesDeleteButton: HTMLButtonElement;
 	private readonly processNotesTypeahead: HTMLElement;
-	private readonly processNotesOutputTab: HTMLButtonElement;
-	private readonly processNotesLogsTab: HTMLButtonElement;
-	private processNotesDetailTab: 'output' | 'logs' = 'output';
+	private readonly processNotesDiscoveryTab: HTMLButtonElement;
+	private readonly processNotesGenerateTab: HTMLButtonElement;
+	private processNotesLogView: 'discovery' | 'generate' = 'discovery';
+	private readonly processNotesLogTabsRow: HTMLElement;
 	private readonly processNotesLogs: HTMLElement;
 	private readonly processNotesMarkdown: HTMLElement;
 	private readonly processNotesCards: HTMLElement;
 	private processNotesSuggestions: readonly ProcessNoteSuggestion[] = [];
-	private processNotesSuggestionsLoadState: 'idle' | 'running' | 'success' | 'error' = 'idle';
 	private processNotesSuggestionsLoadLog: string[] = [];
+	private processNotesGenerateLog: string[] = [];
 	private processNotesGraphLayer: 'overview' | 'detail' = 'overview';
 	private processNotesMergedTopicIds: ProcessNoteId[] = mergeProcessNoteTopicIds(undefined);
 	// Saved notes list is removed; keep latest file only if needed later.
@@ -1857,10 +1858,10 @@ class ModeShellContribution extends Disposable {
 			title: deleteLabel,
 		}, deleteLabel) as HTMLButtonElement;
 		this.processNotesDeleteButton.disabled = true;
-		this.processNotesOutputTab = $('button.custom-mode-process-notes-detail-tab', { type: 'button' }, localize('customMode.processNotes.tab.output', 'Output')) as HTMLButtonElement;
-		this.processNotesLogsTab = $('button.custom-mode-process-notes-detail-tab', { type: 'button' }, localize('customMode.processNotes.tab.logs', 'Logs')) as HTMLButtonElement;
-		const tabsRow = $('div.custom-mode-process-notes-detail-tabs', undefined, this.processNotesOutputTab, this.processNotesLogsTab);
 		this.processNotesCards = $('div.custom-mode-process-notes-cards');
+		this.processNotesDiscoveryTab = $('button.custom-mode-process-notes-detail-tab', { type: 'button' }, localize('customMode.processNotes.tab.discovery', 'Discovery')) as HTMLButtonElement;
+		this.processNotesGenerateTab = $('button.custom-mode-process-notes-detail-tab', { type: 'button' }, localize('customMode.processNotes.tab.generate', 'Generate')) as HTMLButtonElement;
+		this.processNotesLogTabsRow = $('div.custom-mode-process-notes-detail-tabs', undefined, this.processNotesDiscoveryTab, this.processNotesGenerateTab);
 		this.processNotesLogs = $('pre.custom-mode-process-notes-logs');
 		this.processNotesMarkdown = $('div.custom-mode-process-notes-markdown');
 		this.processNotesGraphAnchor = $('div.custom-mode-process-notes-graph');
@@ -1873,8 +1874,8 @@ class ModeShellContribution extends Disposable {
 				this.processNotesDeleteButton,
 				this.processNotesTypeahead,
 			),
+			this.processNotesLogTabsRow,
 			this.processNotesCards,
-			tabsRow,
 			this.processNotesLogs,
 			this.processNotesMarkdown,
 			this.processNotesGraphAnchor
@@ -1929,11 +1930,6 @@ class ModeShellContribution extends Disposable {
 		this._register(addDisposableListener(this.processChatReopenBtn, 'click', () => this.setProcessChatDismissed(false)));
 		this._register(addDisposableListener(this.processNotesGenerateButton, 'click', () => void this.generateProcessNoteFromPrompt()));
 		this._register(addDisposableListener(this.processNotesDeleteButton, 'click', () => void this.deleteSelectedProcessNote()));
-		this._register(addDisposableListener(this.processNotesOutputTab, 'click', () => this.setProcessNotesDetailTab('output')));
-		this._register(addDisposableListener(this.processNotesLogsTab, 'click', () => this.setProcessNotesDetailTab('logs')));
-		this._register(addDisposableListener(this.processNotesPromptInput, 'input', () => this.updateProcessNotesTypeahead()));
-		this._register(addDisposableListener(this.processNotesPromptInput, 'focus', () => this.updateProcessNotesTypeahead()));
-		this._register(addDisposableListener(this.processNotesPromptInput, 'blur', () => mainWindow.setTimeout(() => this.hideProcessNotesTypeahead(), 120)));
 		// Dropdown removed from UI (selection happens via cards), but keep change handler for safety.
 		this._register(addDisposableListener(this.processNotesTopicSelect, 'change', () => void this.loadSelectedProcessNote()));
 		this._register(addDisposableListener(this.processNotesBackButton, 'click', () => this.showProcessNotesOverview()));
@@ -2917,22 +2913,26 @@ class ModeShellContribution extends Disposable {
 
 	private updateProcessNotesGraphLayerUi(): void {
 		this.processNotesBackButton.classList.toggle('hidden', this.processNotesGraphLayer !== 'detail');
-		// Keep the card grid visible in both overview and detail so suggested processes are always discoverable.
-		this.processNotesCards.classList.toggle('hidden', false);
 		const detail = this.processNotesGraphLayer === 'detail';
-		this.processNotesOutputTab.classList.toggle('hidden', !detail);
-		this.processNotesLogsTab.classList.toggle('hidden', !detail);
+		this.processNotesCards.classList.toggle('hidden', detail);
 		this.processNotesGraphAnchor.classList.toggle('hidden', !detail);
-		this.processNotesLogs.classList.toggle('hidden', !detail || this.processNotesDetailTab !== 'logs');
-		this.processNotesMarkdown.classList.toggle('hidden', !detail || this.processNotesDetailTab !== 'output');
+		this.processNotesLogs.classList.toggle('hidden', !detail);
+		this.processNotesMarkdown.classList.toggle('hidden', !detail);
 		this.processNotesDeleteButton.disabled = this.processNotesGraphLayer !== 'detail';
 	}
 
-	private setProcessNotesDetailTab(tab: 'output' | 'logs'): void {
-		this.processNotesDetailTab = tab;
-		this.processNotesOutputTab.classList.toggle('active', tab === 'output');
-		this.processNotesLogsTab.classList.toggle('active', tab === 'logs');
-		this.updateProcessNotesGraphLayerUi();
+	private setProcessNotesLogView(view: 'discovery' | 'generate'): void {
+		this.processNotesLogView = view;
+		this.processNotesDiscoveryTab.classList.toggle('active', view === 'discovery');
+		this.processNotesGenerateTab.classList.toggle('active', view === 'generate');
+		this.updateProcessNotesLogText();
+	}
+
+	private updateProcessNotesLogText(): void {
+		const lines = this.processNotesLogView === 'discovery'
+			? this.processNotesSuggestionsLoadLog
+			: this.processNotesGenerateLog;
+		this.processNotesLogs.textContent = lines.join('\n');
 	}
 
 	private showProcessNotesOverview(): void {
@@ -2945,18 +2945,6 @@ class ModeShellContribution extends Disposable {
 	private renderProcessNotesCards(): void {
 		this.processNotesCards.replaceChildren();
 		this.processNotesCards.appendChild($('div.custom-mode-process-notes-section-title', undefined, localize('customMode.processNotes.systemTitle', 'System processes')));
-		if (this.processNotesSuggestionsLoadState === 'running' || this.processNotesSuggestionsLoadLog.length) {
-			const title = this.processNotesSuggestionsLoadState === 'running'
-				? localize('customMode.processNotes.discoveryLogs.running', 'Discovery logs (running)')
-				: localize('customMode.processNotes.discoveryLogs', 'Discovery logs');
-			const details = document.createElement('details');
-			details.open = this.processNotesSuggestionsLoadState === 'running';
-			const summary = document.createElement('summary');
-			summary.textContent = title;
-			details.appendChild(summary);
-			details.appendChild($('pre.custom-mode-process-notes-discovery-logs', undefined, this.processNotesSuggestionsLoadLog.join('\n')));
-			this.processNotesCards.appendChild(details);
-		}
 		if (this.processNotesSuggestions.length) {
 			for (const s of this.processNotesSuggestions.slice(0, 12)) {
 				const summary = s.probe
@@ -2972,12 +2960,9 @@ class ModeShellContribution extends Disposable {
 				) as HTMLButtonElement;
 				card.title = s.label;
 				this._register(addDisposableListener(card, 'click', () => {
-					// Select the system process so Generate saves into it.
-					this.processNotesTopicSelect.value = this.systemProcessNoteId(s.label);
-					void this.loadSelectedProcessNote(this.processNotesTopicSelect.value);
-					this.processNotesPromptInput.value = s.promptTemplates[0] ?? `How does ${s.label} work?`;
-					this.hideProcessNotesTypeahead();
-					this.processNotesPromptInput.focus();
+					// Select this process so Generate saves into it.
+					this.processNotesTopicSelect.value = this.processNoteIdForSuggestionId(s.id);
+					void this.drillIntoProcessTopic(this.processNotesTopicSelect.value);
 				}));
 				this.processNotesCards.appendChild(card);
 			}
@@ -2989,53 +2974,7 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
-	private hideProcessNotesTypeahead(): void {
-		this.processNotesTypeahead.classList.remove('visible');
-		this.processNotesTypeahead.replaceChildren();
-	}
-
-	private updateProcessNotesTypeahead(): void {
-		const q = this.processNotesPromptInput.value.trim();
-		if (!q || this.processNotesGraphLayer !== 'detail') {
-			this.hideProcessNotesTypeahead();
-			return;
-		}
-		const qLower = q.toLowerCase();
-		const scored = this.processNotesSuggestions.map(s => {
-			const label = s.label.toLowerCase();
-			let score = 0;
-			if (label === qLower) { score += 5; }
-			if (label.includes(qLower) || qLower.includes(label)) { score += 3; }
-			for (const t of qLower.split(/[^a-z0-9]+/g).filter(Boolean)) {
-				if (label.includes(t)) { score += 1; }
-			}
-			score += (s.confidence ?? 0) * 0.25;
-			return { s, score };
-		}).filter(x => x.score > 0.6).sort((a, b) => b.score - a.score).slice(0, 8);
-
-		if (!scored.length) {
-			this.hideProcessNotesTypeahead();
-			return;
-		}
-		this.processNotesTypeahead.replaceChildren();
-		for (const { s } of scored) {
-			const meta = s.probe
-				? localize('customMode.processNotes.typeahead.probe', '{0} targets', String(s.probe.resolvedTargets))
-				: localize('customMode.processNotes.typeahead.kind', String(s.kind));
-			const item = $('div.custom-mode-process-notes-typeahead-item', { role: 'button', tabindex: '0' },
-				$('div.custom-mode-process-notes-typeahead-title', undefined, s.label),
-				$('div.custom-mode-process-notes-typeahead-meta', undefined, meta),
-			);
-			this._register(addDisposableListener(item, 'mousedown', (e) => {
-				e.preventDefault();
-				this.processNotesPromptInput.value = s.promptTemplates[0] ?? `How does ${s.label} work?`;
-				this.hideProcessNotesTypeahead();
-				this.processNotesPromptInput.focus();
-			}));
-			this.processNotesTypeahead.appendChild(item);
-		}
-		this.processNotesTypeahead.classList.add('visible');
-	}
+	// Typeahead removed (no freeform prompt input).
 
 	private formatProcessNoteMarkdownWithProvenance(
 		synth: ProcessNotesSynthesisResult,
@@ -3061,25 +3000,8 @@ class ModeShellContribution extends Disposable {
 		});
 	}
 
-	private createProcessCandidateSelector() {
-		return (
-			userQuestion: string,
-			candidates: Parameters<typeof selectProcessCandidatesFromIxMap>[2],
-			fallbackKeywords: readonly string[],
-			fallbackReason: string,
-		) => selectProcessCandidatesFromIxMap(
-			this.languageModelsService,
-			userQuestion,
-			candidates,
-			fallbackKeywords,
-			fallbackReason,
-			this.chatSessionsCts.token,
-		);
-	}
-
 	private async drillIntoProcessTopic(topicId: ProcessNoteId): Promise<void> {
 		this.processNotesGraphLayer = 'detail';
-		this.setProcessNotesDetailTab('output');
 		this.processNotesTopicSelect.value = topicId;
 		await this.loadSelectedProcessNote();
 		this.updateProcessNotesGraphLayerUi();
@@ -3094,17 +3016,26 @@ class ModeShellContribution extends Disposable {
 		const note = topic ? file?.notes.find(n => n.id === topic) : undefined;
 		this.processNotesMarkdown.textContent = note?.markdown ?? localize('customMode.processNotes.empty', 'No note generated for this system yet. Select a system process card and use Generate.');
 		this.processNotesLogs.textContent = note?.meta?.generationLog ?? '';
+		this.processNotesDeleteButton.disabled = !note;
 		if (this.processNotesGraphLayer === 'detail') {
 			this.processNotesGraphView.setGraph(note?.graph ?? { nodes: [], edges: [] });
 		}
 	}
 
 	private async generateProcessNoteFromPrompt(): Promise<void> {
-		const prompt = this.processNotesPromptInput.value.trim();
-		if (!prompt.length) {
-			this.notificationService.notify({ severity: Severity.Info, message: localize('customMode.processNotes.custom.needPrompt', 'Enter a question about this workspace.') });
+		const selectedNoteId = this.processNotesTopicSelect.value;
+		const selectedSuggestionId = selectedNoteId ? this.suggestionIdFromProcessNoteId(selectedNoteId) : undefined;
+		const selectedSuggestion = selectedSuggestionId
+			? this.processNotesSuggestions.find(s => s.id === selectedSuggestionId)
+			: undefined;
+		if (!selectedSuggestion) {
+			this.notificationService.notify({ severity: Severity.Info, message: localize('customMode.processNotes.custom.needSelection', 'Select a system/module card to generate a note.') });
 			return;
 		}
+
+		// We generate based on the selected subsystem/module card. The text input can be used to tweak the question,
+		// but we do not use it for candidate selection or keyword resolution.
+		const prompt = selectedSuggestion.promptTemplates[0] ?? `Explain "${selectedSuggestion.label}" (use \`ix subsystems --target "${selectedSuggestion.label}" --explain\`).`;
 		const folder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
 		if (!folder) {
 			this.notificationService.notify({ severity: Severity.Warning, message: localize('customMode.processNotes.noWorkspace', 'Open a workspace folder to generate process notes.') });
@@ -3112,9 +3043,8 @@ class ModeShellContribution extends Disposable {
 		}
 
 		// Save generated output into the currently selected system process (if present).
-		const noteId = this.processNotesTopicSelect.value || stableCustomNoteId(prompt);
-		const systemLabel = this.systemLabelFromProcessNoteId(noteId);
-		const title = systemLabel ?? (prompt.length > 80 ? `${prompt.slice(0, 77)}…` : prompt);
+		const noteId = selectedNoteId || stableCustomNoteId(prompt);
+		const title = selectedSuggestion.label;
 
 		this.processNotesGenerateButton.disabled = true;
 		try {
@@ -3122,7 +3052,6 @@ class ModeShellContribution extends Disposable {
 			this.updateProcessNotesGraphLayerUi();
 			this.processNotesLogs.textContent = '';
 			this.processNotesMarkdown.textContent = localize('customMode.processNotes.generating', 'Generating process note…');
-			this.setProcessNotesDetailTab('logs');
 
 			const logLine = (line: string) => {
 				this.processNotesLogs.textContent += (this.processNotesLogs.textContent ? '\n' : '') + line;
@@ -3134,11 +3063,33 @@ class ModeShellContribution extends Disposable {
 				logLine(`[${e.phase}] ${tag} ${e.label}${detail}`);
 			};
 
+			const forcedSelector = async (
+				_userQuestion: string,
+				candidates: readonly { id: string; label: string; labelKind?: string; level?: number; score: number; keywords: readonly string[] }[],
+				_fallbackKeywords: readonly string[],
+				fallbackReason: string,
+			) => {
+				const labelLower = selectedSuggestion.label.toLowerCase();
+				const wantKind = selectedSuggestion.kind.toLowerCase();
+				const chosen = candidates.find(c => c.label.toLowerCase() === labelLower && (c.labelKind?.toLowerCase() ?? wantKind) === wantKind)
+					?? candidates.find(c => c.label.toLowerCase() === labelLower)
+					?? candidates[0];
+				return {
+					candidateIds: chosen ? [chosen.id] : [],
+					keywords: [],
+					reason: localize('customMode.processNotes.forcedSelection', 'Forced selection from card: {0}', selectedSuggestion.label),
+					systemPrompt: localize('customMode.processNotes.forcedSelection.systemPrompt', 'Select the already-chosen subsystem/module from the UI card.'),
+					userPrompt: JSON.stringify({ selected: selectedSuggestion.label }),
+					modelId: undefined,
+					selectedBy: 'deterministic' as const,
+				};
+			};
+
 			const evidence = await buildCustomPromptEvidencePack(
 				this.ixIntegrationService,
 				folder,
 				prompt,
-				this.createProcessCandidateSelector(),
+				forcedSelector,
 				onProgress
 			);
 			onProgress({ phase: 'synthesis', label: 'AI synthesis', status: 'start' });
@@ -3161,7 +3112,6 @@ class ModeShellContribution extends Disposable {
 				},
 			});
 			await this.loadSelectedProcessNote(noteId);
-			this.setProcessNotesDetailTab('output');
 			this.updateProcessNotesGraphLayerUi();
 		} finally {
 			this.processNotesGenerateButton.disabled = false;
@@ -3231,7 +3181,6 @@ class ModeShellContribution extends Disposable {
 		const workspaceKey = this.workspaceKeyForSuggestions();
 		if (!workspaceKey || isWeb) {
 			this.processNotesSuggestions = [];
-			this.processNotesSuggestionsLoadState = 'idle';
 			this.processNotesSuggestionsLoadLog = [];
 			if (this.processNotesGraphLayer === 'overview') {
 				this.renderProcessNotesCards();
@@ -3242,12 +3191,13 @@ class ModeShellContribution extends Disposable {
 		const log = (line: string) => {
 			this.processNotesSuggestionsLoadLog.push(line);
 			// Keep the UI responsive while discovery is running.
+			this.updateProcessNotesLogText();
 			this.renderProcessNotesCards();
 		};
 
-		this.processNotesSuggestionsLoadState = 'running';
 		this.processNotesSuggestionsLoadLog = [];
 		log(`[discovery] • Starting discovery`);
+		this.setProcessNotesLogView('discovery');
 
 		// Always recompute suggestions on each app load when Ix runs again.
 		// Suggested processes are intentionally NOT persisted across reloads.
@@ -3258,7 +3208,6 @@ class ModeShellContribution extends Disposable {
 		const discoveryFolder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
 		if (!discoveryFolder) {
 			this.processNotesSuggestions = [];
-			this.processNotesSuggestionsLoadState = 'error';
 			log(`[discovery] ✗ No workspace folder for Ix evidence.`);
 			if (this.processNotesGraphLayer === 'overview') {
 				this.renderProcessNotesCards();
@@ -3279,35 +3228,40 @@ class ModeShellContribution extends Disposable {
 		log(subsystems.ok ? `[discovery] ✓ ix subsystems --sort importance --all-items --format json` : `[discovery] ✗ ix subsystems --sort importance --all-items --format json\n${subsystems.error}`);
 
 		if (!subsystems.ok) {
-			this.processNotesSuggestionsLoadState = 'error';
 			log(`[discovery] ✗ No discovery JSON available.`);
 			return;
 		}
 
-		const systemLabels = this.extractSystemLabelsFromIxSubsystems(subsystems.value);
-		// Populate the hidden "topic" select with system note ids so Generate/Delete operate on the selected system.
-		if (this.processNotesTopicSelect.options.length === 0) {
-			for (const label of systemLabels) {
-				this.processNotesTopicSelect.appendChild(new Option(label, this.systemProcessNoteId(label)));
-			}
-			if (this.processNotesTopicSelect.options.length > 0) {
-				this.processNotesTopicSelect.value = this.processNotesTopicSelect.options[0].value;
-			}
-		}
-		this.processNotesSuggestions = systemLabels.map(label => ({
-			id: this.stableHash(`system|${label}`),
-			label,
-			subsystemKey: this.stableHash(`system|${label}`),
-			kind: 'system',
-			promptTemplates: [
-				`How does ${label} work?`,
-				`What is the ${label} pipeline?`,
-				`How does ${label} run end-to-end (UI → API → core logic)?`,
-			],
-		}));
-		log(`[selection] ✓ systems=${systemLabels.length}`);
+		const cards = this.extractDiscoveryCardsFromIxSubsystems(subsystems.value);
 
-		this.processNotesSuggestionsLoadState = 'success';
+		// Populate the hidden "topic" select with note ids so Generate/Delete operate on the selected card.
+		while (this.processNotesTopicSelect.options.length > 0) {
+			this.processNotesTopicSelect.remove(0);
+		}
+		for (const c of cards) {
+			const id = this.stableHash(`${c.kind}|${c.label}|${c.prompt}`);
+			this.processNotesTopicSelect.appendChild(new Option(c.label, this.processNoteIdForSuggestionId(id)));
+		}
+		if (this.processNotesTopicSelect.options.length > 0) {
+			this.processNotesTopicSelect.value = this.processNotesTopicSelect.options[0].value;
+		}
+
+		this.processNotesSuggestions = cards.map(c => {
+			const id = this.stableHash(`${c.kind}|${c.label}|${c.prompt}`);
+			return {
+				id,
+				label: c.label,
+				subsystemKey: this.stableHash(`${c.kind}|${c.label}`),
+				kind: c.kind,
+				promptTemplates: [
+					c.prompt,
+					`What is the ${c.label} pipeline?`,
+					`How does ${c.label} run end-to-end (UI → API → core logic)?`,
+				],
+			} satisfies ProcessNoteSuggestion;
+		});
+		log(`[selection] ✓ cards=${cards.length}`);
+
 		log(`[done] ✓ suggestions=${this.processNotesSuggestions.length}`);
 	}
 
@@ -3320,45 +3274,97 @@ class ModeShellContribution extends Disposable {
 		return (h >>> 0).toString(16);
 	}
 
-	private extractSystemLabelsFromIxSubsystems(json: unknown): string[] {
-		const out: string[] = [];
+	// Legacy: system-only extraction replaced by ordered hierarchy discovery cards.
+
+	private extractDiscoveryCardsFromIxSubsystems(json: unknown): Array<{ label: string; kind: ProcessNoteSuggestion['kind']; prompt: string }> {
+		type Node = { label?: unknown; name?: unknown; title?: unknown; kind?: unknown; label_kind?: unknown; type?: unknown; children?: unknown };
+		const out: Array<{ label: string; kind: ProcessNoteSuggestion['kind']; prompt: string }> = [];
 		const seen = new Set<string>();
-		const visit = (v: unknown) => {
-			if (Array.isArray(v)) {
-				for (const item of v) { visit(item); }
+
+		const toLabel = (v: Node): string | undefined => {
+			const raw = (typeof v.label === 'string' ? v.label : typeof v.name === 'string' ? v.name : typeof v.title === 'string' ? v.title : undefined);
+			const t = raw?.trim();
+			return t?.length ? t : undefined;
+		};
+		const toKind = (v: Node): ProcessNoteSuggestion['kind'] => {
+			const k = (typeof v.label_kind === 'string' ? v.label_kind : typeof v.kind === 'string' ? v.kind : typeof v.type === 'string' ? v.type : '')?.toLowerCase();
+			if (k === 'system') { return 'system'; }
+			if (k === 'subsystem') { return 'subsystem'; }
+			return 'module';
+		};
+
+		const push = (label: string, kind: ProcessNoteSuggestion['kind'], parent?: string) => {
+			const key = `${kind}:${parent ?? ''}:${label}`.toLowerCase().replace(/\s+/g, ' ').trim();
+			if (seen.has(key)) {
 				return;
 			}
+			seen.add(key);
+			// Keep the label quoted so deterministic scoring can still match it reliably,
+			// while steering toward Ix's richer subsystem explain view.
+			const base = `Explain "${label}" (use \`ix subsystems --target "${label}" --explain\`)`;
+			const prompt = parent ? `${base} in the context of "${parent}".` : `${base}.`;
+			out.push({ label, kind, prompt });
+		};
+
+		const visitHierarchy = (v: unknown, parentSystem?: string) => {
 			if (!v || typeof v !== 'object') { return; }
-			const rec = v as Record<string, unknown>;
-			const label = typeof rec.label === 'string' ? rec.label : typeof rec.name === 'string' ? rec.name : typeof rec.title === 'string' ? rec.title : undefined;
-			const kind = typeof rec.label_kind === 'string' ? rec.label_kind : typeof rec.kind === 'string' ? rec.kind : typeof rec.type === 'string' ? rec.type : undefined;
-			if (label && kind && kind.toLowerCase() === 'system') {
-				const key = label.toLowerCase().trim();
-				if (!seen.has(key)) {
-					seen.add(key);
-					out.push(label.trim());
+			const n = v as Node;
+			const label = toLabel(n);
+			const kind = toKind(n);
+			if (label) {
+				if (kind === 'system') {
+					push(label, kind);
+					parentSystem = label;
+				} else {
+					push(label, kind, parentSystem);
 				}
 			}
-			for (const k of ['children', 'items', 'modules', 'subsystems', 'systems', 'regions', 'branches', 'map', 'architecture', 'architectural_map']) {
-				if (k in rec) {
-					visit(rec[k]);
+			if (Array.isArray(n.children)) {
+				for (const c of n.children) {
+					visitHierarchy(c, parentSystem);
 				}
 			}
 		};
-		visit(json);
+
+		// Prefer the structured hierarchy when present: it matches CLI ordering (systems then their modules).
+		if (json && typeof json === 'object' && 'hierarchy' in (json as any)) {
+			visitHierarchy((json as any).hierarchy, undefined);
+		}
+
+		// Fallback: walk the whole object if hierarchy is missing.
+		if (!out.length) {
+			const visitAny = (v: unknown, parentSystem?: string) => {
+				if (Array.isArray(v)) { for (const i of v) { visitAny(i, parentSystem); } return; }
+				if (!v || typeof v !== 'object') { return; }
+				const n = v as Node;
+				const label = toLabel(n);
+				const kind = toKind(n);
+				if (label) {
+					if (kind === 'system') {
+						push(label, kind);
+						parentSystem = label;
+					} else {
+						push(label, kind, parentSystem);
+					}
+				}
+				for (const k of ['children', 'items', 'modules', 'subsystems', 'systems', 'regions', 'branches']) {
+					if (k in (n as any)) {
+						visitAny((n as any)[k], parentSystem);
+					}
+				}
+			};
+			visitAny(json, undefined);
+		}
+
 		return out;
 	}
 
-	private systemProcessNoteId(label: string): string {
-		return `system:${label}`;
+	private processNoteIdForSuggestionId(id: string): string {
+		return `ix:${id}`;
 	}
 
-	private systemLabelFromProcessNoteId(id: string): string | undefined {
-		if (!id.startsWith('system:')) {
-			return undefined;
-		}
-		const label = id.slice('system:'.length).trim();
-		return label.length ? label : undefined;
+	private suggestionIdFromProcessNoteId(id: string): string | undefined {
+		return id.startsWith('ix:') ? id.slice('ix:'.length) : undefined;
 	}
 
 	private updateReachabilityFromState(state: DevServerState): void {
@@ -3383,7 +3389,50 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private setAppReachable(reachable: boolean): void {
+		const wasReachable = this.appReachable;
+		this.appReachable = reachable;
 		this.container.classList.toggle('custom-mode-app-reachable', reachable);
+
+		// When the dev server transitions from unreachable to reachable, the embedded UI is
+		// almost certainly showing an ERR_CONNECTION_REFUSED page from the initial load attempt
+		// (we set the iframe src early, before the server is actually serving). Force a reload
+		// so the user sees the running app without manually refreshing.
+		if (reachable && !wasReachable) {
+			this.reloadEmbeddedUi();
+		}
+	}
+
+	private reloadEmbeddedUi(): void {
+		const url = this.devServerService.getActiveUrl();
+		if (!url) {
+			return;
+		}
+
+		if (!isWeb && this.isWebviewElement(this.uiBrowser)) {
+			// Electron <webview> exposes `reload()`. This avoids the ERR_ABORTED-from-double-navigation
+			// pitfall we'd hit by toggling `src` rapidly.
+			const webview = this.uiBrowser as unknown as { reload?: () => void };
+			if (typeof webview.reload === 'function') {
+				try {
+					webview.reload();
+					return;
+				} catch {
+					// Fall through to src-toggle fallback.
+				}
+			}
+		}
+
+		// Cross-platform fallback: blank the frame, then re-set the URL on the next tick so the
+		// browser/webview treats it as a fresh navigation (assigning the same src is a no-op).
+		const setSrc = (value: string) => {
+			if (isWeb) {
+				this.uiBrowser.src = value;
+			} else {
+				(this.uiBrowser as unknown as HTMLElement).setAttribute('src', value);
+			}
+		};
+		setSrc('about:blank');
+		mainWindow.setTimeout(() => setSrc(url), 0);
 	}
 
 	private async checkUrlReachable(url: string): Promise<void> {

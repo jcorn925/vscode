@@ -94,7 +94,7 @@ function isIxErrorPayload(json: unknown): boolean {
 }
 
 function isDeepEvidenceLabel(label: string): boolean {
-	return /^ix (?:explain|overview) /i.test(label);
+	return /^ix (?:explain|overview|subsystems) /i.test(label);
 }
 
 function pickDeepEvidence(raw: readonly { readonly label: string; readonly json: unknown }[]): { label: string; json: unknown }[] {

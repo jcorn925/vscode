@@ -177,38 +177,59 @@ export class DevServerService extends Disposable implements IDevServerService {
 		const inferredUrl = this.inferDevUrl(packageJson, startScript);
 		this.setActiveUrl(inferredUrl);
 
-		const { instance, isExisting } = await this.getOrCreateDevServerTerminal(folder);
-		instance.focus();
-
-		// Parse output to learn the actual URL/port once the dev server prints it.
-		this.attachTerminalDataListener(instance);
-
 		const packageManager = await this.detectPackageManager(folder, packageJson);
 		const startCommand = this.formatRunCommand(packageManager, startScript);
 		const installCommand = this.formatInstallCommand(packageManager);
 		const fullCommand = needsInstall ? `${installCommand} && ${startCommand}` : startCommand;
 		this.command = fullCommand;
 
-		// If we found an existing dev server terminal and it's still "busy", assume it is already running.
-		// This avoids re-sending the start command on reload which would spawn duplicate processes.
-		if (isExisting && instance.hasChildProcesses) {
+		// If a dev server is already serving the inferred URL (e.g. user started it externally,
+		// or it survived a window reload), do not inject the start command at all.
+		if (await this.isUrlReachable(inferredUrl)) {
 			this.setPhase('running');
+			this.started = true;
+			return this.activeUrl;
+		}
+
+		const { instance, isExisting } = await this.getOrCreateDevServerTerminal(folder);
+		instance.focus();
+
+		// Parse output to learn the actual URL/port once the dev server prints it.
+		this.attachTerminalDataListener(instance);
+
+		// If we found an existing dev server terminal and it's still "busy", a previous session is
+		// already running the command. Don't re-send it.
+		if (isExisting && instance.hasChildProcesses) {
+			this.setPhase(needsInstall ? 'installing' : 'starting');
 			this.started = true;
 			return this.activeUrl;
 		}
 
 		this.setPhase(needsInstall ? 'installing' : 'starting');
 
-		// Best-effort: free only the inferred port(s) before starting.
-		// Note: freePortKillProcess can surface notifications when it cannot enumerate processes;
-		// to avoid noisy warnings, keep this scoped to ports that matter for the active project.
-		const ranViaFreePort = await this.tryRunWithFreedPorts(instance, inferredUrl, fullCommand);
-		if (!ranViaFreePort) {
-			instance.sendText(fullCommand, true);
-		}
+		// Inject the start command exactly once for this session.
+		instance.sendText(fullCommand, true);
 
 		this.started = true;
 		return this.activeUrl;
+	}
+
+	private async isUrlReachable(url: string | undefined): Promise<boolean> {
+		if (!url || typeof fetch !== 'function') {
+			return false;
+		}
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 800);
+		try {
+			// `no-cors` lets the promise resolve even when the dev server doesn't allow our origin —
+			// we only care whether something is accepting connections on the port.
+			await fetch(url, { method: 'GET', mode: 'no-cors', cache: 'no-store', signal: controller.signal });
+			return true;
+		} catch {
+			return false;
+		} finally {
+			clearTimeout(timeout);
+		}
 	}
 
 	private getDevServerTerminalTitle(folder: URI): string {
@@ -487,48 +508,6 @@ export class DevServerService extends Disposable implements IDevServerService {
 		}
 	}
 
-	private async tryRunWithFreedPorts(
-		instance: { freePortKillProcess: (port: string, commandToRun: string) => Promise<void>; sendText: (text: string, shouldExecute: boolean, bracketedPasteMode?: boolean) => Promise<void> },
-		inferredUrl: string,
-		commandToRun: string
-	): Promise<boolean> {
-		const inferredPort = this.tryParsePortFromUrl(inferredUrl);
-		if (typeof inferredPort !== 'number') {
-			return false;
-		}
-
-		// Try primary inferred port. If this fails (e.g. cannot enumerate processes),
-		// fall back to plain sendText with no extra notifications.
-		try {
-			await instance.freePortKillProcess(String(inferredPort), commandToRun);
-			// freePortKillProcess places the command on the prompt; ensure it's actually executed.
-			await instance.sendText('', true);
-			return true;
-		} catch {
-			// ignore
-		}
-
-		// Expo often suggests the next port; try that as a secondary option.
-		try {
-			await instance.freePortKillProcess(String(inferredPort + 1), commandToRun);
-			// freePortKillProcess places the command on the prompt; ensure it's actually executed.
-			await instance.sendText('', true);
-			return true;
-		} catch {
-			// ignore
-		}
-
-		return false;
-	}
-
-	private tryParsePortFromUrl(url: string): number | undefined {
-		const match = /:(\d{2,5})(?:\/|$)/.exec(url);
-		if (!match) {
-			return undefined;
-		}
-		const port = Number(match[1]);
-		return Number.isFinite(port) ? port : undefined;
-	}
 }
 
 registerSingleton(IDevServerService, DevServerService, InstantiationType.Delayed);
