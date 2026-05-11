@@ -37,6 +37,13 @@ export interface IDevServerService {
 	getState(): DevServerState;
 	ensureRunning(): Promise<string | undefined>;
 	getSuggestedStartCommands(): Promise<DevServerSuggestedCommands | undefined>;
+	/**
+	 * Probes `preferredUrl` (and a couple of fallback ports such as `port+1`, `port+2`) to see
+	 * whether something is already accepting connections. Returns the first URL that responded,
+	 * or `undefined` if nothing is listening. Intended to be the single source of truth for
+	 * "is the dev server already running?".
+	 */
+	findRunningDevServerUrl(preferredUrl: string | undefined): Promise<string | undefined>;
 }
 
 export const IDevServerService = createDecorator<IDevServerService>('devServerService');
@@ -183,29 +190,42 @@ export class DevServerService extends Disposable implements IDevServerService {
 		const fullCommand = needsInstall ? `${installCommand} && ${startCommand}` : startCommand;
 		this.command = fullCommand;
 
-		// If a dev server is already serving the inferred URL (e.g. user started it externally,
-		// or it survived a window reload), do not inject the start command at all.
-		if (await this.isUrlReachable(inferredUrl)) {
+		// The URL probe is the single source of truth for "is the dev server already running?".
+		// We deliberately don't trust signals like `terminal.hasChildProcesses` here — a persistent
+		// terminal across a window reload still has a shell process attached, which would lead us
+		// to skip injection even when nothing is actually serving on the port.
+		const reachableUrl = await this.findRunningDevServerUrl(inferredUrl);
+		if (reachableUrl) {
+			if (reachableUrl !== inferredUrl) {
+				this.setActiveUrl(reachableUrl);
+			}
 			this.setPhase('running');
 			this.started = true;
 			return this.activeUrl;
 		}
 
-		const { instance, isExisting } = await this.getOrCreateDevServerTerminal(folder);
-		instance.focus();
+		const { instance } = await this.getOrCreateDevServerTerminal(folder);
+
+		// Make our terminal the active instance in its group — `revealTerminal` only opens the
+		// panel, it does NOT switch the visible terminal. Without this our newly-created Dev
+		// Server terminal can stay hidden behind whatever was active before, xterm never attaches
+		// to it, and the PTY stays stuck at its tiny default column count.
+		this.terminalService.setActiveInstance(instance);
+
+		// Reveal the terminal in the panel so its xterm view attaches to a real container and
+		// triggers a PTY resize. Without this `npm` / Next.js banner output wraps at ~16 chars.
+		await this.terminalService.revealTerminal(instance, true);
 
 		// Parse output to learn the actual URL/port once the dev server prints it.
 		this.attachTerminalDataListener(instance);
 
-		// If we found an existing dev server terminal and it's still "busy", a previous session is
-		// already running the command. Don't re-send it.
-		if (isExisting && instance.hasChildProcesses) {
-			this.setPhase(needsInstall ? 'installing' : 'starting');
-			this.started = true;
-			return this.activeUrl;
-		}
-
 		this.setPhase(needsInstall ? 'installing' : 'starting');
+
+		// Defer sending the start command until xterm has attached and the PTY has resized to a
+		// real column count. Otherwise `npm run dev` prints its multi-line banner into a 16-col
+		// buffer and the wrapped lines stay wrapped forever, even after the panel reaches its
+		// real width.
+		await this.waitForReasonableTerminalWidth(instance);
 
 		// Inject the start command exactly once for this session.
 		instance.sendText(fullCommand, true);
@@ -214,15 +234,69 @@ export class DevServerService extends Disposable implements IDevServerService {
 		return this.activeUrl;
 	}
 
-	private async isUrlReachable(url: string | undefined): Promise<boolean> {
-		if (!url || typeof fetch !== 'function') {
+	/**
+	 * Resolves once `instance.cols` reports a sane terminal width (≥40 cols), or after a short
+	 * timeout. Combined with `setActiveInstance` + `revealTerminal`, this is what guarantees the
+	 * dev server's first output is wrapped at the panel's real width instead of the PTY default.
+	 */
+	private waitForReasonableTerminalWidth(instance: ITerminalInstance, minCols = 40, timeoutMs = 1500): Promise<void> {
+		if (instance.cols >= minCols) {
+			return Promise.resolve();
+		}
+		return new Promise<void>(resolve => {
+			let settled = false;
+			const finish = () => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				dimDisposable.dispose();
+				clearTimeout(timer);
+				resolve();
+			};
+			const dimDisposable = instance.onDimensionsChanged(() => {
+				if (instance.cols >= minCols) {
+					finish();
+				}
+			});
+			const timer = setTimeout(finish, timeoutMs);
+		});
+	}
+
+	async findRunningDevServerUrl(preferredUrl: string | undefined): Promise<string | undefined> {
+		if (!preferredUrl) {
+			return undefined;
+		}
+		for (const candidate of this.expandCandidateUrls(preferredUrl)) {
+			if (await this.probeUrl(candidate, 1500)) {
+				return candidate;
+			}
+		}
+		return undefined;
+	}
+
+	private expandCandidateUrls(url: string): string[] {
+		const port = this.tryParsePortFromUrl(url);
+		if (typeof port !== 'number') {
+			return [url];
+		}
+		// Frameworks like Vite/Next.js bump to the next available port if the configured one is
+		// busy, so we probe a small window of ports above the inferred one.
+		const replace = (p: number) => url.replace(`:${port}`, `:${p}`);
+		return [replace(port), replace(port + 1), replace(port + 2)];
+	}
+
+	private async probeUrl(url: string, timeoutMs: number): Promise<boolean> {
+		if (typeof fetch !== 'function') {
 			return false;
 		}
 		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), 800);
+		const timeout = setTimeout(() => controller.abort(), timeoutMs);
 		try {
-			// `no-cors` lets the promise resolve even when the dev server doesn't allow our origin —
-			// we only care whether something is accepting connections on the port.
+			// `no-cors` lets the promise resolve when the server is up even if it doesn't allow
+			// our origin — we only care whether something is accepting connections on the port.
+			// `cache: 'no-store'` defends against a stale 200 from a prior load surviving on the
+			// HTTP cache after the dev server has been killed.
 			await fetch(url, { method: 'GET', mode: 'no-cors', cache: 'no-store', signal: controller.signal });
 			return true;
 		} catch {
@@ -232,16 +306,27 @@ export class DevServerService extends Disposable implements IDevServerService {
 		}
 	}
 
+	private tryParsePortFromUrl(url: string): number | undefined {
+		const match = /:(\d{2,5})(?:\/|$)/.exec(url);
+		if (!match) {
+			return undefined;
+		}
+		const port = Number(match[1]);
+		return Number.isFinite(port) ? port : undefined;
+	}
+
 	private getDevServerTerminalTitle(folder: URI): string {
 		return `Dev Server — ${basename(folder)}`;
 	}
 
 	private async getOrCreateDevServerTerminal(folder: URI): Promise<{ instance: ITerminalInstance; isExisting: boolean }> {
 		const expectedTitle = this.getDevServerTerminalTitle(folder);
+		// Match strictly: only a terminal we previously labelled "Dev Server …". The looser
+		// "any terminal whose cwd is the workspace folder" match would pick up the user's
+		// regular shell terminals and cause us to send `npm run dev` into them.
 		const existing = this.terminalService.instances.find(i =>
 			i.title === expectedTitle
 			|| (typeof i.title === 'string' && i.title.startsWith('Dev Server') && this.terminalLaunchCwdMatches(i, folder))
-			|| this.terminalLaunchCwdMatches(i, folder)
 		);
 		if (existing) {
 			return { instance: existing, isExisting: true };

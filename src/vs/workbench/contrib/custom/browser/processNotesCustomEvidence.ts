@@ -8,6 +8,7 @@ import { localize } from '../../../../nls.js';
 import type { IIxIntegrationService } from '../../../../../custom/ix/IxIntegrationService.js';
 import type { ProcessGraphCitation, ProcessGraphEdge, ProcessGraphNode, ProcessNoteBinding, ProcessNoteGraph } from './processNotesTypes.js';
 import type { ProcessCandidateForSelection, ProcessCandidateSelectionResult } from './processNotesSynthesis.js';
+import { runIxSubsystemExplainWithDisambiguation } from './ixSubsystemExplain.js';
 
 export interface CustomPromptEvidencePack {
 	readonly userPrompt: string;
@@ -71,13 +72,14 @@ function isLowSignalResolutionTerm(term: string): boolean {
 	return false;
 }
 
-function isDeepenCandidate(t: ResolvedIxTarget): boolean {
-	// Only deepen when we have at least some evidence that it is an Ix-resolvable entity.
-	// Heuristics: explicit path/kind or was produced by search/locate/text extraction.
-	if (t.source === 'subsystem') {
-		return false;
-	}
+function isDeepenCandidate(_t: ResolvedIxTarget): boolean {
+	// Subsystem regions use `ix subsystems --target … --explain` (not `ix explain <label>`).
+	// Search/locate/file paths use entity-oriented explain/overview in the deepening loop.
 	return true;
+}
+
+function subsystemRegionOnly(t: ResolvedIxTarget): boolean {
+	return t.source === 'subsystem' && !t.path;
 }
 
 function ixCitation(command: string, ref: string): ProcessGraphCitation {
@@ -379,13 +381,74 @@ function uniqueTargets(targets: readonly ResolvedIxTarget[]): ResolvedIxTarget[]
 	const seen = new Set<string>();
 	const out: ResolvedIxTarget[] = [];
 	for (const t of [...targets].sort((a, b) => b.score - a.score)) {
-		const key = `${t.target}|${t.kind ?? ''}|${t.path ?? ''}`;
+		const key = `${t.source}|${t.target}|${t.kind ?? ''}|${t.path ?? ''}`;
 		if (!seen.has(key)) {
 			seen.add(key);
 			out.push(t);
 		}
 	}
 	return out;
+}
+
+/** Pull repo-relative path hints embedded in `ix subsystems` region JSON (interfaces, paths, children, etc.). */
+function collectPathHintsFromSubsystemRaw(raw: unknown, depth = 0, seen = new Set<string>()): string[] {
+	const out: string[] = [];
+	if (depth > 12) {
+		return out;
+	}
+	const maybePath = (s: string) => {
+		const t = s.trim();
+		if (t.length < 4 || seen.has(t)) {
+			return;
+		}
+		// Heuristic: looks like a source path (not a bare subsystem name).
+		if ((/[\\/][^\\/]+\.[a-z0-9]{1,8}$/i.test(t) || /^[@.\w][\w./@-]+\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt)$/i.test(t)) && /[\\/]/.test(t)) {
+			seen.add(t);
+			out.push(t);
+		}
+	};
+
+	if (typeof raw === 'string') {
+		maybePath(raw);
+		return out;
+	}
+	if (!raw || typeof raw !== 'object') {
+		return out;
+	}
+	if (Array.isArray(raw)) {
+		for (const item of raw.slice(0, 80)) {
+			out.push(...collectPathHintsFromSubsystemRaw(item, depth + 1, seen));
+		}
+		return out.slice(0, 16);
+	}
+	const o = raw as Record<string, unknown>;
+	for (const key of ['path', 'file', 'rel_path', 'relpath', 'paths', 'roots', 'files', 'interfaces', 'members', 'children']) {
+		if (!(key in o)) {
+			continue;
+		}
+		const v = o[key];
+		if (typeof v === 'string') {
+			maybePath(v);
+		} else if (Array.isArray(v)) {
+			for (const item of v.slice(0, 40)) {
+				if (typeof item === 'string') {
+					maybePath(item);
+				} else {
+					out.push(...collectPathHintsFromSubsystemRaw(item, depth + 1, seen));
+				}
+			}
+		} else if (v && typeof v === 'object') {
+			out.push(...collectPathHintsFromSubsystemRaw(v, depth + 1, seen));
+		}
+	}
+	if (depth < 5) {
+		for (const v of Object.values(o).slice(0, 48)) {
+			if (v && typeof v === 'object') {
+				out.push(...collectPathHintsFromSubsystemRaw(v, depth + 1, seen));
+			}
+		}
+	}
+	return out.slice(0, 16);
 }
 
 function makeBinding(
@@ -441,7 +504,7 @@ export async function buildCustomPromptEvidencePack(
 	const raw: Array<{ label: string; json: unknown }> = [];
 	const citations: ProcessGraphCitation[] = [];
 	const results: IxEvidenceCommandResult[] = [];
-	let commandBudget = 12;
+	let commandBudget = 20;
 
 	const run = async (phase: IxEvidencePhase, label: string, args: readonly string[], timeoutMs: number, ref: string): Promise<IxEvidenceCommandResult | undefined> => {
 		if (commandBudget <= 0) {
@@ -502,10 +565,13 @@ export async function buildCustomPromptEvidencePack(
 	}
 
 	// 1) Prefer rich subsystem view first: importance-ranked, all items.
-	const subsystems = await run(
+	// Do not pass "." here: `ix subsystems --format json .` switches to the scoped
+	// target/children JSON shape, while the global command returns the regions list.
+	// (Result is read out of `results` below, not kept locally.)
+	await run(
 		'discovery',
-		'ix subsystems --sort importance --all-items --format json .',
-		['subsystems', '--sort', 'importance', '--all-items', '--format', 'json', '.'],
+		'ix subsystems --sort importance --all-items --format json',
+		['subsystems', '--sort', 'importance', '--all-items', '--format', 'json'],
 		90_000,
 		'subsystems',
 	);
@@ -561,37 +627,76 @@ export async function buildCustomPromptEvidencePack(
 
 	const candidateById = new Map(deterministic.candidates.map(c => [c.id, c]));
 	const selectedRegions = selection.candidateIds.map(id => candidateById.get(id)).filter((r): r is NormalizedIxRegion => Boolean(r)).slice(0, 5);
-	const resolutionTerms = selectedRegions.length
-		? selectedRegions.map(r => r.label)
-		: selection.keywords.slice(0, 5);
 
 	const resolved: ResolvedIxTarget[] = [];
 	onProgress?.({ phase: 'resolution', label: 'Resolving targets', status: 'start' });
-	for (const term of resolutionTerms.slice(0, 3)) {
-		if (isLowSignalResolutionTerm(term)) {
-			continue;
+
+	if (selectedRegions.length) {
+		// Forced selection from a system/subsystem card — these labels (e.g. "Channels", "Ast",
+		// "Graphify Out") are architectural region names, not graph entity names. `ix search` /
+		// `ix locate` operate on real entities (files, symbols, functions) and reliably return
+		// nothing for region labels, so we'd just be paying for two doomed CLI calls per term and
+		// falling through to the subsystem-region path anyway. Skip straight to that path.
+		onProgress?.({
+			phase: 'resolution',
+			label: 'Subsystem region resolution',
+			status: 'info',
+			detail: localize(
+				'customMode.processNotes.subsystemPath',
+				'Selected from card: skipping ix search/locate (those operate on graph entities, not region labels) and using subsystem labels + path hints from ix subsystems JSON.',
+			),
+		});
+		for (const r of selectedRegions.slice(0, 3)) {
+			resolved.push({
+				target: r.label,
+				kind: r.labelKind ?? 'region',
+				source: 'subsystem',
+				score: 12,
+			});
+			for (const p of collectPathHintsFromSubsystemRaw(r.raw)) {
+				resolved.push({
+					target: p,
+					kind: 'file',
+					path: p,
+					source: 'subsystem',
+					score: 8,
+				});
+			}
 		}
-		const search = await run('resolution', `ix search ${term} --format json`, ['search', term, '--format', 'json'], 30_000, term);
-		if (search?.ok) {
-			resolved.push(...extractTargets(search.json, 'search', term, 3));
-		}
-		const locate = await run('resolution', `ix locate ${term} --format json`, ['locate', term, '--format', 'json'], 30_000, term);
-		if (locate?.ok) {
-			resolved.push(...extractTargets(locate.json, 'locate', term, 4));
-		}
-	}
-	if (!resolved.length) {
-		for (const kw of selection.keywords.slice(0, 3)) {
-			if (isLowSignalResolutionTerm(kw)) {
+	} else {
+		// Free-form prompt with no card selection — keywords from the user's prompt are real-ish
+		// search terms, so the entity-level CLIs are useful here.
+		for (const term of selection.keywords.slice(0, 3)) {
+			if (isLowSignalResolutionTerm(term)) {
 				continue;
 			}
-			const text = await run('resolution', `ix text ${kw} --format json`, ['text', kw, '--format', 'json'], 30_000, kw);
-			if (text?.ok) {
-				resolved.push(...extractTargets(text.json, 'text', kw, 1.5));
+			const search = await run('resolution', `ix search ${term} --format json`, ['search', term, '--format', 'json'], 30_000, term);
+			if (search?.ok) {
+				resolved.push(...extractTargets(search.json, 'search', term, 3));
+			}
+			const locate = await run('resolution', `ix locate ${term} --format json`, ['locate', term, '--format', 'json'], 30_000, term);
+			if (locate?.ok) {
+				resolved.push(...extractTargets(locate.json, 'locate', term, 4));
+			}
+		}
+		if (!resolved.length) {
+			for (const kw of selection.keywords.slice(0, 3)) {
+				if (isLowSignalResolutionTerm(kw)) {
+					continue;
+				}
+				const text = await run('resolution', `ix text ${kw} --format json`, ['text', kw, '--format', 'json'], 30_000, kw);
+				if (text?.ok) {
+					resolved.push(...extractTargets(text.json, 'text', kw, 1.5));
+				}
 			}
 		}
 	}
-	onProgress?.({ phase: 'resolution', label: 'Resolving targets', status: 'success', detail: `resolved=${resolved.length}` });
+	onProgress?.({
+		phase: 'resolution',
+		label: 'Resolving targets',
+		status: 'success',
+		detail: `resolved=${resolved.length}`,
+	});
 
 	const targets = uniqueTargets(resolved).filter(isDeepenCandidate).slice(0, 2);
 	if (!targets.length) {
@@ -600,15 +705,35 @@ export async function buildCustomPromptEvidencePack(
 		onProgress?.({ phase: 'deepening', label: 'Deepening evidence', status: 'start', detail: targets.map(t => t.target).join(', ') });
 	}
 	for (const target of targets) {
-		const explainArgs = ['explain', target.target, '--format', 'json'];
-		const overviewArgs = ['overview', target.target, '--format', 'json'];
-		await run('deepening', `ix explain ${target.target} --format json`, explainArgs, 60_000, target.target);
-		await run('deepening', `ix overview ${target.target} --format json`, overviewArgs, 60_000, target.target);
-		// If the Ix target still looks like a subsystem/region label, try the richer subsystem explain view as well.
-		if (!target.path && target.kind === 'region') {
-			const subsystemsExplainArgs = ['subsystems', '--target', target.target, '--explain', '--format', 'json'];
-			await run('deepening', `ix subsystems --target ${target.target} --explain --format json`, subsystemsExplainArgs, 60_000, target.target);
+		const subsystemRegionOnly = target.source === 'subsystem' && !target.path;
+		if (subsystemRegionOnly) {
+			if (commandBudget <= 0) {
+				break;
+			}
+			commandBudget--;
+			onProgress?.({ phase: 'deepening', label: `ix subsystems ${target.target} --explain`, status: 'start' });
+			const res = await runIxSubsystemExplainWithDisambiguation(ix, cwd, target.target, target.kind, 90_000);
+			onProgress?.({
+				phase: 'deepening',
+				label: `ix subsystems ${target.target} --explain`,
+				status: res.ok ? 'success' : 'error',
+				detail: res.ok ? undefined : res.error,
+			});
+			const logLabel = `ix subsystems ${target.target} --explain --format json`;
+			if (res.ok) {
+				raw.push({ label: logLabel, json: res.value });
+				citations.push(ixCitation(logLabel, target.target));
+				results.push({ phase: 'deepening', label: logLabel, args: [], ok: true, json: res.value, ref: target.target });
+			} else {
+				const json = { error: res.error, exitCode: res.exitCode, raw: res.raw };
+				raw.push({ label: logLabel, json });
+				results.push({ phase: 'deepening', label: logLabel, args: [], ok: false, json, error: res.error, ref: target.target });
+			}
+			continue;
 		}
+		const explainTarget = target.path ?? target.target;
+		await run('deepening', `ix explain ${explainTarget} --format json`, ['explain', explainTarget, '--format', 'json'], 60_000, explainTarget);
+		await run('deepening', `ix overview ${explainTarget} --format json`, ['overview', explainTarget, '--format', 'json'], 60_000, explainTarget);
 	}
 	if (targets.length) {
 		onProgress?.({ phase: 'deepening', label: 'Deepening evidence', status: 'success' });
@@ -645,9 +770,13 @@ export async function buildCustomPromptEvidencePack(
 	const targetNodes = targets.map((t, i): ProcessGraphNode => ({
 		id: `target:${i}`,
 		label: t.target,
-		kind: t.kind === 'file' || t.path ? 'file' : 'symbol',
+		kind: subsystemRegionOnly(t) ? 'phase' : t.kind === 'file' || t.path ? 'file' : 'symbol',
 		lane: 'Host',
-		citations: [ixCitation(`ix ${t.source} ${t.target} --format json`, t.target)],
+		citations: [
+			subsystemRegionOnly(t)
+				? ixCitation(`ix subsystems --target ${t.target} --explain --format json`, t.target)
+				: ixCitation(`ix ${t.source} ${t.target} --format json`, t.target),
+		],
 	}));
 	nodes.push(...selectedNodes, ...targetNodes);
 	for (const n of selectedNodes) {

@@ -145,7 +145,6 @@ class ModeShellContribution extends Disposable {
 	private readonly uiRuntimeLogs: string[] = [];
 	private readonly uiClickOverlayScript = createUiClickOverlayScript();
 	private readonly startHintActionDisposables = this._register(new DisposableStore());
-	private reachabilityAbort: AbortController | undefined;
 	private reachabilityUrl: string | undefined;
 	private appReachable = false;
 	private readonly chatSessionsCts = this._register(new CancellationTokenSource());
@@ -164,15 +163,11 @@ class ModeShellContribution extends Disposable {
 	private readonly processNotesGraphView: ProcessNotesCytoscapeView;
 	private readonly processNotesStore: ProcessNotesStore;
 	private readonly processNotesTopicSelect: HTMLSelectElement;
-	private readonly processNotesPromptInput: HTMLInputElement;
 	private readonly processNotesGenerateButton: HTMLButtonElement;
 	private readonly processNotesBackButton: HTMLButtonElement;
 	private readonly processNotesDeleteButton: HTMLButtonElement;
-	private readonly processNotesTypeahead: HTMLElement;
-	private readonly processNotesDiscoveryTab: HTMLButtonElement;
-	private readonly processNotesGenerateTab: HTMLButtonElement;
-	private processNotesLogView: 'discovery' | 'generate' = 'discovery';
-	private readonly processNotesLogTabsRow: HTMLElement;
+	private readonly processNotesExpandedChrome: HTMLElement;
+	private readonly processNotesExpandedActions: HTMLElement;
 	private readonly processNotesLogs: HTMLElement;
 	private readonly processNotesMarkdown: HTMLElement;
 	private readonly processNotesCards: HTMLElement;
@@ -182,11 +177,8 @@ class ModeShellContribution extends Disposable {
 	private processNotesGraphLayer: 'overview' | 'detail' = 'overview';
 	private processNotesMergedTopicIds: ProcessNoteId[] = mergeProcessNoteTopicIds(undefined);
 	// Saved notes list is removed; keep latest file only if needed later.
-	private readonly processIxDebugText: HTMLElement;
 	private readonly processIxCommandsButton: HTMLButtonElement;
-	private readonly processIxLogsButton: HTMLButtonElement;
 	private readonly processIxCommandsPopover: HTMLElement;
-	private readonly processIxLogsPopover: HTMLElement;
 	private readonly processIxPipeline: HTMLElement;
 	private readonly processIxPipelineGlobalRow: HTMLElement;
 	private readonly processIxPipelineWorkspaceRows: HTMLElement;
@@ -471,6 +463,9 @@ class ModeShellContribution extends Disposable {
 				min-height: 0 !important;
 				max-height: none !important;
 				height: auto !important;
+				max-width: none !important;
+				width: 100% !important;
+				margin: 0 !important;
 			}
 
 			.monaco-workbench .custom-mode-ui-chat-column .custom-mode-ui-side-chat.visible .interactive-list {
@@ -478,6 +473,29 @@ class ModeShellContribution extends Disposable {
 				min-height: 0 !important;
 				max-height: none !important;
 				overflow: auto !important;
+			}
+
+			/* Lock side-panel chat input back to the standard "editor on top, toolbar below"
+			 * stacking. Compact inputs use display:flex on .chat-input-container which can
+			 * leak in via cached styles or hot-reload state and squeeze the editor onto the
+			 * same row as the toolbar; force block + column flex to defend against that. */
+			.monaco-workbench .custom-mode-ui-side-chat .interactive-input-part:not(.compact) .chat-input-container,
+			.monaco-workbench .custom-mode-process-side-chat .interactive-input-part:not(.compact) .chat-input-container {
+				display: flex !important;
+				flex-direction: column !important;
+				justify-content: flex-start !important;
+				align-items: stretch !important;
+			}
+			.monaco-workbench .custom-mode-ui-side-chat .interactive-input-part:not(.compact) .chat-editor-container,
+			.monaco-workbench .custom-mode-process-side-chat .interactive-input-part:not(.compact) .chat-editor-container {
+				width: 100% !important;
+				min-width: 0 !important;
+				flex: 0 0 auto !important;
+			}
+			.monaco-workbench .custom-mode-ui-side-chat .interactive-input-part:not(.compact) .chat-input-toolbars,
+			.monaco-workbench .custom-mode-process-side-chat .interactive-input-part:not(.compact) .chat-input-toolbars {
+				width: 100% !important;
+				flex: 0 0 auto !important;
 			}
 
 			.monaco-workbench .custom-mode-process-container.visible {
@@ -593,6 +611,9 @@ class ModeShellContribution extends Disposable {
 				min-height: 0 !important;
 				max-height: none !important;
 				height: auto !important;
+				max-width: none !important;
+				width: 100% !important;
+				margin: 0 !important;
 			}
 
 			.monaco-workbench .custom-mode-process-chat-column .custom-mode-process-side-chat.visible .interactive-list {
@@ -770,7 +791,7 @@ class ModeShellContribution extends Disposable {
 				padding-right: 8px;
 			}
 
-			.monaco-workbench .custom-mode-embedded-chat .chat-input-container {
+			.monaco-workbench .custom-mode-embedded-chat:not(.custom-mode-ui-side-chat):not(.custom-mode-process-side-chat) .chat-input-container {
 				background-color: transparent !important;
 				border: none !important;
 				padding: 0 !important;
@@ -1199,20 +1220,6 @@ class ModeShellContribution extends Disposable {
 				gap: 8px;
 			}
 
-			.monaco-workbench .custom-mode-process-notes-header {
-				position: relative;
-				display: flex;
-				align-items: center;
-				gap: 8px;
-			}
-
-			.monaco-workbench .custom-mode-process-notes-header span {
-				font-size: 12px;
-				font-weight: 700;
-				color: var(--vscode-foreground);
-				margin-right: 6px;
-			}
-
 			.monaco-workbench .custom-mode-process-notes-topic {
 				height: 26px;
 				padding: 0 8px;
@@ -1221,19 +1228,6 @@ class ModeShellContribution extends Disposable {
 				background-color: var(--vscode-input-background);
 				color: var(--vscode-input-foreground);
 				font-size: 12px;
-			}
-
-			.monaco-workbench .custom-mode-process-notes-prompt {
-				flex: 1 1 160px;
-				min-width: 120px;
-				height: 26px;
-				padding: 0 8px;
-				border-radius: 6px;
-				border: 1px solid var(--vscode-input-border, transparent);
-				background-color: var(--vscode-input-background);
-				color: var(--vscode-input-foreground);
-				font-size: 12px;
-				box-sizing: border-box;
 			}
 
 			.monaco-workbench .custom-mode-process-notes-generate {
@@ -1289,7 +1283,6 @@ class ModeShellContribution extends Disposable {
 				cursor: pointer;
 				font-size: 12px;
 				font-weight: 600;
-				margin-left: auto;
 			}
 
 			.monaco-workbench .custom-mode-process-notes-regenerate:hover:not(:disabled) {
@@ -1351,30 +1344,30 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-descriptionForeground);
 			}
 
-			.monaco-workbench .custom-mode-process-notes-detail-tabs {
+			.monaco-workbench .custom-mode-process-notes-expanded-chrome {
 				display: flex;
-				gap: 6px;
+				flex-wrap: wrap;
 				align-items: center;
+				gap: 8px;
 				padding: 2px 0;
 			}
 
-			.monaco-workbench .custom-mode-process-notes-detail-tab {
-				height: 22px;
-				padding: 0 10px;
-				border-radius: 999px;
-				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
-				background: transparent;
-				color: var(--vscode-descriptionForeground);
-				cursor: pointer;
-				font-size: 11px;
-				font-weight: 600;
-				-webkit-app-region: no-drag;
+			.monaco-workbench .custom-mode-process-notes-expanded-spacer {
+				flex: 1 1 auto;
+				min-width: 8px;
 			}
 
-			.monaco-workbench .custom-mode-process-notes-detail-tab.active {
-				background: var(--vscode-toolbar-hoverBackground);
-				color: var(--vscode-foreground);
-				border-color: var(--vscode-focusBorder);
+			.monaco-workbench .custom-mode-process-notes-expanded-actions {
+				display: flex;
+				justify-content: flex-end;
+				align-items: center;
+				gap: 8px;
+				flex-shrink: 0;
+				padding: 4px 0 2px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-expanded-actions.hidden {
+				display: none;
 			}
 
 			.monaco-workbench .custom-mode-process-notes-cards {
@@ -1450,48 +1443,6 @@ class ModeShellContribution extends Disposable {
 				overflow: hidden;
 				background: var(--vscode-editorBackground);
 				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
-			}
-
-			.monaco-workbench .custom-mode-process-notes-typeahead {
-				position: absolute;
-				top: calc(100% + 6px);
-				left: 0;
-				right: 0;
-				z-index: 2500;
-				background: var(--vscode-editorWidget-background);
-				border: 1px solid var(--vscode-editorWidget-border);
-				border-radius: 8px;
-				box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
-				max-height: min(240px, 35vh);
-				overflow: auto;
-				display: none;
-			}
-
-			.monaco-workbench .custom-mode-process-notes-typeahead.visible {
-				display: block;
-			}
-
-			.monaco-workbench .custom-mode-process-notes-typeahead-item {
-				padding: 8px 10px;
-				cursor: pointer;
-				display: flex;
-				flex-direction: column;
-				gap: 2px;
-			}
-
-			.monaco-workbench .custom-mode-process-notes-typeahead-item:hover {
-				background: var(--vscode-list-hoverBackground);
-			}
-
-			.monaco-workbench .custom-mode-process-notes-typeahead-title {
-				font-size: 12px;
-				font-weight: 700;
-				color: var(--vscode-foreground);
-			}
-
-			.monaco-workbench .custom-mode-process-notes-typeahead-meta {
-				font-size: 11px;
-				color: var(--vscode-descriptionForeground);
 			}
 
 			.monaco-workbench.custom-mode-web .custom-mode-process-notes {
@@ -1793,9 +1744,8 @@ class ModeShellContribution extends Disposable {
 		this.processIxPipeline.appendChild(this.processIxPipelineGlobalRow);
 		this.processIxPipeline.appendChild(this.processIxPipelineWorkspaceRows);
 
-		// Ix buttons + popovers (shown next to the topic picker).
+		// Ix commands button + popover (shown next to the topic picker).
 		this.processIxCommandsButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('customMode.processIxCommandsBtn', 'Ix commands')) as HTMLButtonElement;
-		this.processIxLogsButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('customMode.processIxLogsBtn', 'Ix process')) as HTMLButtonElement;
 
 		const ixCommandsDocsLink2 = document.createElement('a');
 		ixCommandsDocsLink2.href = IX_DOCS_COMMANDS_URL;
@@ -1811,40 +1761,18 @@ class ModeShellContribution extends Disposable {
 			$('pre', undefined, getIxCliCommandReferenceText())
 		);
 
-		// Shared Ix log content element (used inside the popover).
-		this.processIxDebugText = $('pre', { style: 'margin: 0; user-select: text; -webkit-user-select: text;' });
-		const ixCopyLabel = localize('customMode.ixDebugCopy', 'Copy');
-		const ixCopyButton = $('button.custom-mode-process-ix-button', { type: 'button', title: ixCopyLabel, 'aria-label': ixCopyLabel }, ixCopyLabel) as HTMLButtonElement;
-		this.processIxLogsPopover = $('div.custom-mode-process-ix-popover', undefined,
-			$('div.custom-mode-process-ix-popover-title', undefined,
-				localize('customMode.ixDebugTitle', 'Ix'),
-				ixCopyButton
-			),
-			this.processIxDebugText
-		);
-		this._register(addDisposableListener(ixCopyButton, 'click', e => {
-			e.preventDefault();
-			e.stopPropagation();
-			void this.copyTextToClipboard(this.processIxDebugText.textContent ?? '');
-		}));
-
 		// Process notes (generated via Ix + AI) with an interactive Cytoscape graph canvas.
 		this.processNotesTopicSelect = $('select.custom-mode-process-notes-topic') as HTMLSelectElement;
 		// Topic selection is driven by the card grid; keep the select offscreen as an internal state holder.
 		this.processNotesTopicSelect.style.display = 'none';
 		this.rebuildProcessNotesTopicSelectOptions(undefined);
-		const backToTopicsLabel = localize('customMode.processNotes.backToTopics', 'Back to topics');
+		const backLabel = localize('customMode.processNotes.back', 'Back');
+		const backDetailLabel = localize('customMode.processNotes.backDetail', 'Return to the system process list');
 		this.processNotesBackButton = $('button.custom-mode-process-notes-back.hidden', {
 			type: 'button',
-			'aria-label': backToTopicsLabel,
-			title: backToTopicsLabel,
-		}, localize('customMode.processNotes.backToTopicsShort', 'Topics')) as HTMLButtonElement;
-		this.processNotesPromptInput = $('input.custom-mode-process-notes-prompt', {
-			type: 'text',
-			placeholder: localize('customMode.processNotes.promptPlaceholder', 'Ask about a process in this workspace…'),
-			'aria-label': localize('customMode.processNotes.promptAria', 'Question about a process in the open workspace'),
-		}) as HTMLInputElement;
-		this.processNotesTypeahead = $('div.custom-mode-process-notes-typeahead');
+			'aria-label': backDetailLabel,
+			title: backDetailLabel,
+		}, backLabel) as HTMLButtonElement;
 		const generateLabel = localize('customMode.processNotes.generate', 'Generate');
 		this.processNotesGenerateButton = $('button.custom-mode-process-notes-generate', {
 			type: 'button',
@@ -1859,23 +1787,22 @@ class ModeShellContribution extends Disposable {
 		}, deleteLabel) as HTMLButtonElement;
 		this.processNotesDeleteButton.disabled = true;
 		this.processNotesCards = $('div.custom-mode-process-notes-cards');
-		this.processNotesDiscoveryTab = $('button.custom-mode-process-notes-detail-tab', { type: 'button' }, localize('customMode.processNotes.tab.discovery', 'Discovery')) as HTMLButtonElement;
-		this.processNotesGenerateTab = $('button.custom-mode-process-notes-detail-tab', { type: 'button' }, localize('customMode.processNotes.tab.generate', 'Generate')) as HTMLButtonElement;
-		this.processNotesLogTabsRow = $('div.custom-mode-process-notes-detail-tabs', undefined, this.processNotesDiscoveryTab, this.processNotesGenerateTab);
+		this.processNotesExpandedActions = $('div.custom-mode-process-notes-expanded-actions.hidden', undefined,
+			this.processNotesGenerateButton,
+			this.processNotesDeleteButton,
+		);
+		this.processNotesExpandedChrome = $('div.custom-mode-process-notes-expanded-chrome', undefined,
+			this.processNotesBackButton,
+			$('div.custom-mode-process-notes-expanded-spacer'),
+		);
 		this.processNotesLogs = $('pre.custom-mode-process-notes-logs');
 		this.processNotesMarkdown = $('div.custom-mode-process-notes-markdown');
 		this.processNotesGraphAnchor = $('div.custom-mode-process-notes-graph');
 		this.processNotesPanel = $('div.custom-mode-process-notes', undefined,
-			$('div.custom-mode-process-notes-header', undefined,
-				$('span', undefined, localize('customMode.processNotesTitle', 'Process notes')),
-				this.processNotesBackButton,
-				this.processNotesPromptInput,
-				this.processNotesGenerateButton,
-				this.processNotesDeleteButton,
-				this.processNotesTypeahead,
-			),
-			this.processNotesLogTabsRow,
+			this.processNotesTopicSelect,
+			this.processNotesExpandedChrome,
 			this.processNotesCards,
+			this.processNotesExpandedActions,
 			this.processNotesLogs,
 			this.processNotesMarkdown,
 			this.processNotesGraphAnchor
@@ -1933,18 +1860,10 @@ class ModeShellContribution extends Disposable {
 		// Dropdown removed from UI (selection happens via cards), but keep change handler for safety.
 		this._register(addDisposableListener(this.processNotesTopicSelect, 'change', () => void this.loadSelectedProcessNote()));
 		this._register(addDisposableListener(this.processNotesBackButton, 'click', () => this.showProcessNotesOverview()));
-		this._register(addDisposableListener(this.processNotesDiscoveryTab, 'click', () => this.setProcessNotesLogView('discovery')));
-		this._register(addDisposableListener(this.processNotesGenerateTab, 'click', () => this.setProcessNotesLogView('generate')));
-		this.setProcessNotesLogView('discovery');
+		this.updateProcessNotesLogText();
 		this._register(addDisposableListener(this.processIxCommandsButton, 'click', () => {
 			const show = !this.processIxCommandsPopover.classList.contains('visible');
 			this.processIxCommandsPopover.classList.toggle('visible', show);
-			this.processIxLogsPopover.classList.remove('visible');
-		}));
-		this._register(addDisposableListener(this.processIxLogsButton, 'click', () => {
-			const show = !this.processIxLogsPopover.classList.contains('visible');
-			this.processIxLogsPopover.classList.toggle('visible', show);
-			this.processIxCommandsPopover.classList.remove('visible');
 		}));
 		this._register(addDisposableListener(mainWindow, 'mousedown', (e: MouseEvent) => {
 			const target = e.target as Node | null;
@@ -1952,7 +1871,6 @@ class ModeShellContribution extends Disposable {
 				return;
 			}
 			this.processIxCommandsPopover.classList.remove('visible');
-			this.processIxLogsPopover.classList.remove('visible');
 		}));
 
 		this.modeSurface.appendChild(this.uiContainer);
@@ -2312,7 +2230,6 @@ class ModeShellContribution extends Disposable {
 				{
 					autoScroll: mode => mode !== ChatModeKind.Ask,
 					renderFollowups: true,
-					renderStyle: 'compact',
 					inputEditorMinLines: 1,
 					supportsFileReferences: true,
 					enableImplicitContext: true,
@@ -2782,9 +2699,7 @@ class ModeShellContribution extends Disposable {
 		// Workspace steps header row + Ix controls (moved here from Process Notes header).
 		const controls = $('div.custom-mode-ix-pipeline-controls', undefined,
 			this.processIxCommandsButton,
-			this.processIxLogsButton,
 			this.processIxCommandsPopover,
-			this.processIxLogsPopover,
 		);
 
 		// Put everything into one combined row so the user sees a single "pipeline" line.
@@ -2834,21 +2749,6 @@ class ModeShellContribution extends Disposable {
 	private updateIxDebug(state: IxIntegrationState): void {
 		this.lastIxPipelineState = state;
 		this.renderIxPipeline(state);
-
-		const lines: string[] = [];
-		lines.push(`phase: ${state.phase}`);
-		lines.push(`pipelineGen: ${state.pipelineGeneration}`);
-		if (state.lastCommand) {
-			lines.push(`command: ${state.lastCommand}`);
-		}
-		if (state.lastError) {
-			lines.push(`error: ${state.lastError}`);
-		}
-		if (state.lastOutput) {
-			lines.push('');
-			lines.push(state.lastOutput);
-		}
-		this.processIxDebugText.textContent = lines.join('\n');
 	}
 
 	private onProcessNotesGraphMessage(message: ProcessNotesGraphWebviewMessage): void {
@@ -2919,20 +2819,14 @@ class ModeShellContribution extends Disposable {
 		const detail = this.processNotesGraphLayer === 'detail';
 		this.processNotesCards.classList.toggle('hidden', detail);
 		this.processNotesGraphAnchor.classList.toggle('hidden', !detail);
-		this.processNotesLogs.classList.toggle('hidden', !detail);
 		this.processNotesMarkdown.classList.toggle('hidden', !detail);
+		this.processNotesExpandedActions.classList.toggle('hidden', !detail);
 		this.processNotesDeleteButton.disabled = this.processNotesGraphLayer !== 'detail';
-	}
-
-	private setProcessNotesLogView(view: 'discovery' | 'generate'): void {
-		this.processNotesLogView = view;
-		this.processNotesDiscoveryTab.classList.toggle('active', view === 'discovery');
-		this.processNotesGenerateTab.classList.toggle('active', view === 'generate');
 		this.updateProcessNotesLogText();
 	}
 
 	private updateProcessNotesLogText(): void {
-		const lines = this.processNotesLogView === 'discovery'
+		const lines = this.processNotesGraphLayer === 'overview'
 			? this.processNotesSuggestionsLoadLog
 			: this.processNotesGenerateLog;
 		this.processNotesLogs.textContent = lines.join('\n');
@@ -2972,12 +2866,10 @@ class ModeShellContribution extends Disposable {
 		} else {
 			this.processNotesCards.appendChild($('div.custom-mode-placeholder', undefined, localize(
 				'customMode.processNotes.noSuggestions',
-				'No system processes yet. Ix discovery runs on load; expand Discovery logs for details.'
+				'No system processes yet. Ix discovery runs on load; see the logs below for details.'
 			)));
 		}
 	}
-
-	// Typeahead removed (no freeform prompt input).
 
 	private formatProcessNoteMarkdownWithProvenance(
 		synth: ProcessNotesSynthesisResult,
@@ -3018,7 +2910,8 @@ class ModeShellContribution extends Disposable {
 		const file = await this.processNotesStore.load();
 		const note = topic ? file?.notes.find(n => n.id === topic) : undefined;
 		this.processNotesMarkdown.textContent = note?.markdown ?? localize('customMode.processNotes.empty', 'No note generated for this system yet. Select a system process card and use Generate.');
-		this.processNotesLogs.textContent = note?.meta?.generationLog ?? '';
+		this.processNotesGenerateLog = (note?.meta?.generationLog ?? '').split(/\r?\n/).filter(line => line.length > 0);
+		this.updateProcessNotesLogText();
 		this.processNotesDeleteButton.disabled = !note;
 		if (this.processNotesGraphLayer === 'detail') {
 			this.processNotesGraphView.setGraph(note?.graph ?? { nodes: [], edges: [] });
@@ -3036,9 +2929,8 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 
-		// We generate based on the selected subsystem/module card. The text input can be used to tweak the question,
-		// but we do not use it for candidate selection or keyword resolution.
-		const prompt = selectedSuggestion.promptTemplates[0] ?? `Explain "${selectedSuggestion.label}" (use \`ix subsystems --target "${selectedSuggestion.label}" --explain\`).`;
+		// Generate from the selected subsystem/module card (grid selection; no separate prompt field).
+		const prompt = selectedSuggestion.promptTemplates[0] ?? `Explain the "${selectedSuggestion.label}" ${selectedSuggestion.kind} end-to-end.`;
 		const folder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
 		if (!folder) {
 			this.notificationService.notify({ severity: Severity.Warning, message: localize('customMode.processNotes.noWorkspace', 'Open a workspace folder to generate process notes.') });
@@ -3052,12 +2944,13 @@ class ModeShellContribution extends Disposable {
 		this.processNotesGenerateButton.disabled = true;
 		try {
 			this.processNotesGraphLayer = 'detail';
+			this.processNotesGenerateLog = [];
 			this.updateProcessNotesGraphLayerUi();
-			this.processNotesLogs.textContent = '';
 			this.processNotesMarkdown.textContent = localize('customMode.processNotes.generating', 'Generating process note…');
 
 			const logLine = (line: string) => {
-				this.processNotesLogs.textContent += (this.processNotesLogs.textContent ? '\n' : '') + line;
+				this.processNotesGenerateLog.push(line);
+				this.updateProcessNotesLogText();
 				this.processNotesLogs.scrollTop = this.processNotesLogs.scrollHeight;
 			};
 			const onProgress = (e: ProcessNotesGenerationProgressEvent) => {
@@ -3099,7 +2992,7 @@ class ModeShellContribution extends Disposable {
 			const synth = await synthesizeCustomPromptNote(this.languageModelsService, evidence, this.chatSessionsCts.token);
 			onProgress({ phase: 'synthesis', label: 'AI synthesis', status: 'success' });
 			const now = Date.now();
-			const generationLog = this.processNotesLogs.textContent;
+			const generationLog = this.processNotesGenerateLog.join('\n');
 			await this.processNotesStore.upsertNote({
 				id: noteId,
 				title,
@@ -3200,7 +3093,6 @@ class ModeShellContribution extends Disposable {
 
 		this.processNotesSuggestionsLoadLog = [];
 		log(`[discovery] • Starting discovery`);
-		this.setProcessNotesLogView('discovery');
 
 		// Always recompute suggestions on each app load when Ix runs again.
 		// Suggested processes are intentionally NOT persisted across reloads.
@@ -3249,7 +3141,7 @@ class ModeShellContribution extends Disposable {
 			this.processNotesTopicSelect.value = this.processNotesTopicSelect.options[0].value;
 		}
 
-		this.processNotesSuggestions = cards.map(c => {
+		this.processNotesSuggestions = cards.map((c) => {
 			const id = this.stableHash(`${c.kind}|${c.label}|${c.prompt}`);
 			return {
 				id,
@@ -3302,10 +3194,10 @@ class ModeShellContribution extends Disposable {
 				return;
 			}
 			seen.add(key);
-			// Keep the label quoted so deterministic scoring can still match it reliably,
-			// while steering toward Ix's richer subsystem explain view.
-			const base = `Explain "${label}" (use \`ix subsystems --target "${label}" --explain\`)`;
-			const prompt = parent ? `${base} in the context of "${parent}".` : `${base}.`;
+			// Keep the label quoted so deterministic scoring can still match it reliably.
+			const prompt = parent
+				? `Explain the "${label}" ${kind} in the context of the "${parent}" system, end-to-end.`
+				: `Explain the "${label}" ${kind} end-to-end.`;
 			out.push({ label, kind, prompt });
 		};
 
@@ -3381,7 +3273,6 @@ class ModeShellContribution extends Disposable {
 		}
 		if (!url || state.phase === 'idle' || state.phase === 'error') {
 			this.reachabilityUrl = undefined;
-			this.reachabilityAbort?.abort();
 			this.setAppReachable(false);
 			return;
 		}
@@ -3440,27 +3331,20 @@ class ModeShellContribution extends Disposable {
 
 	private async checkUrlReachable(url: string): Promise<void> {
 		this.reachabilityUrl = url;
-		this.reachabilityAbort?.abort();
-		const abort = new AbortController();
-		this.reachabilityAbort = abort;
-
-		// Note: Use `no-cors` so the promise resolves when the server is up even if it doesn't allow our origin.
-		// We only care about reachability, not reading the body.
-		const timeoutHandle = mainWindow.setTimeout(() => abort.abort(), 1200);
-		try {
-			await fetch(url, { method: 'GET', mode: 'no-cors', cache: 'no-store', signal: abort.signal });
-			if (this.reachabilityAbort === abort && this.reachabilityUrl === url) {
-				this.setAppReachable(true);
-			}
-		} catch {
-			if (this.reachabilityAbort === abort && this.reachabilityUrl === url) {
-				// Do not clear when the dev server already reported running (avoids abort/timeout false negatives).
-				if (this.devServerService.getState().phase !== 'running') {
-					this.setAppReachable(false);
-				}
-			}
-		} finally {
-			mainWindow.clearTimeout(timeoutHandle);
+		// Delegate to the dev server service so we share one authoritative probe implementation
+		// (which also tries `port+1`/`port+2` for frameworks that bump when the primary is busy).
+		const reachable = (await this.devServerService.findRunningDevServerUrl(url)) !== undefined;
+		if (this.reachabilityUrl !== url) {
+			return;
+		}
+		if (reachable) {
+			this.setAppReachable(true);
+			return;
+		}
+		// Don't clear when the dev server already reported running (avoids spurious false
+		// negatives from a transiently stalled probe).
+		if (this.devServerService.getState().phase !== 'running') {
+			this.setAppReachable(false);
 		}
 	}
 

@@ -466,7 +466,9 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			return { ok: false, error: 'Could not resolve ix CLI binary.', raw: '', exitCode: 1 };
 		}
 
-		const cmd = `${ixBin} ${args.join(' ')}`;
+		// Shell passes through `bash -c "<cmd>"` / `cmd /c <cmd>` — values with spaces (subsystem labels like
+		// "Graphify Out") must be quoted or they split into wrong argv and ix exits non‑zero, spamming terminal errors.
+		const cmd = `${this.quoteIx(ixBin)} ${args.map(a => this.quoteShellArg(a)).join(' ')}`;
 		const { exitCode, output } = await this.runCommand(folder, cmd, timeoutMs, { ui: 'none' });
 		if (exitCode !== 0) {
 			return { ok: false, error: `ix exited with code ${exitCode}`, raw: output, exitCode };
@@ -760,6 +762,17 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			return `'${ixPath.replace(/'/g, `'\\''`)}'`;
 		}
 		return ixPath;
+	}
+
+	/** Quote one argv token for the platform shell used by {@link runCommand} (bash `-c` or cmd `/c`). */
+	private quoteShellArg(arg: string): string {
+		if (isWindows) {
+			if (/[\s"&<>|^]/.test(arg)) {
+				return `"${arg.replace(/"/g, '\\"')}"`;
+			}
+			return arg;
+		}
+		return `'${arg.replace(/'/g, `'\\''`)}'`;
 	}
 
 	private startWatchers(ix: string, gen: number): void {
