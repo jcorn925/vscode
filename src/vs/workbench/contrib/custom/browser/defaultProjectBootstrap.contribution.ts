@@ -44,6 +44,12 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			description: localize('custom.ix.autoStart', "When enabled and a folder workspace is open, automatically run `ix docker start`, `ix map` for each workspace root, then `ix watch` per root."),
 			scope: ConfigurationScope.APPLICATION
 		},
+		'custom.ix.autoResetOnStart': {
+			type: 'boolean',
+			default: true,
+			description: localize('custom.ix.autoResetOnStart', "When enabled, run `ix reset --code -y` between `ix docker start` and `ix map` on each startup so the architecture graph reflects only the current workspace. Preserves plans, goals, tasks, bugs, and decisions."),
+			scope: ConfigurationScope.APPLICATION
+		},
 		'custom.ix.autoInstall': {
 			type: 'boolean',
 			default: true,

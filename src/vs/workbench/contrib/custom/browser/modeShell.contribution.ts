@@ -61,6 +61,14 @@ import type { ProcessNotesSynthesisResult } from './processNotesSynthesis.js';
 import { synthesizeCustomPromptNote } from './processNotesSynthesis.js';
 // Suggested “system processes” are derived directly from ix subsystems output.
 import { resolveIxEvidenceWorkspaceFolderUri } from './processNotesIxFolder.js';
+import {
+	formatIxDiscoveryFailureHint,
+	formatIxSubsystemsDetailedDiscoveryCommand,
+	LOW_CONFIDENCE_THRESHOLD,
+	parseSubsystemFingerprints,
+	runSubsystemsDetailedDiscovery,
+	type SubsystemFingerprint,
+} from './processNotesSubsystemSnapshot.js';
 
 /** Every `ix` subcommand from https://ix-infra.com/docs/commands/ (grouped like the docs). */
 const IX_DOCS_COMMANDS_URL = 'https://ix-infra.com/docs/commands/';
@@ -135,7 +143,10 @@ class ModeShellContribution extends Disposable {
 	private readonly processStartHints: HTMLElement;
 	private readonly uiSetup: HTMLElement;
 	private readonly processSetup: HTMLElement;
-	private readonly uiUrlPill: HTMLElement;
+	private readonly uiSelectionPill: HTMLElement;
+	private readonly uiSelectionCountEl: HTMLElement;
+	private readonly uiSelectionClearBtn: HTMLButtonElement;
+	private uiSelectionCount = 0;
 	private readonly uiStartAppButton: HTMLButtonElement;
 	private readonly uiStartSubtitle: HTMLElement;
 	private readonly uiStartStatus: HTMLElement;
@@ -184,6 +195,17 @@ class ModeShellContribution extends Disposable {
 	private readonly processIxPipelineWorkspaceRows: HTMLElement;
 	private readonly ixPipelineOpenOutput = new Set<string>();
 	private readonly ixPipelineOutputScrollTops = new Map<string, number>();
+	private readonly ixPipelineStepNodes = new Map<string, {
+		readonly wrap: HTMLElement;
+		readonly statusEl: HTMLElement;
+		readonly labelEl: HTMLElement;
+		readonly durEl: HTMLElement;
+		cmdEl: HTMLElement | undefined;
+		errEl: HTMLElement | undefined;
+		readonly details: HTMLDetailsElement;
+		readonly pre: HTMLElement;
+		currentStatus: IxPipelineStepStatus;
+	}>();
 	private lastIxPipelineState: IxIntegrationState | undefined;
 	private readonly ixPipelineDurationTicker = this._register(new MutableDisposable<IDisposable>());
 
@@ -1401,9 +1423,34 @@ class ModeShellContribution extends Disposable {
 				background: var(--vscode-list-hoverBackground);
 			}
 
+			.monaco-workbench .custom-mode-process-notes-card-title-row {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 6px;
+			}
+
 			.monaco-workbench .custom-mode-process-notes-card-title {
 				font-size: 13px;
 				font-weight: 700;
+				min-width: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-card-path,
+			.monaco-workbench .custom-mode-process-notes-card-coupling,
+			.monaco-workbench .custom-mode-process-notes-card-edge {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-card-path {
+				font-family: var(--monaco-monospace-font, ui-monospace, monospace);
 			}
 
 			.monaco-workbench .custom-mode-process-notes-card-meta,
@@ -1477,10 +1524,9 @@ class ModeShellContribution extends Disposable {
 				display: block;
 			}
 
-			.monaco-workbench .custom-mode-ui-urlPill {
+			.monaco-workbench .custom-mode-ui-selection-pill {
 				/* Inline chip in the top mode bar (inserted before the UI tab). */
 				display: none;
-				max-width: min(420px, calc(100% - 24px));
 				height: 22px;
 				padding: 0 10px;
 				border-radius: 999px;
@@ -1490,21 +1536,54 @@ class ModeShellContribution extends Disposable {
 				font-size: 11px;
 				line-height: 22px;
 				white-space: nowrap;
-				overflow: hidden;
-				text-overflow: ellipsis;
-				user-select: text;
-				-webkit-user-select: text;
+				user-select: none;
+				-webkit-user-select: none;
 				-webkit-app-region: no-drag;
 			}
 
-			.monaco-workbench.custom-mode-shell-hasProject .custom-mode-ui-urlPill.has-url {
-				display: block;
+			.monaco-workbench.custom-mode-shell-hasProject .custom-mode-ui-selection-pill {
+				display: inline-flex;
+				align-items: center;
+				gap: 4px;
 			}
 
-			.monaco-workbench .custom-mode-ui-urlPill strong {
+			.monaco-workbench .custom-mode-ui-selection-pill.has-selection {
 				color: var(--vscode-foreground);
+				border-color: var(--vscode-focusBorder, var(--vscode-editorWidget-border));
+			}
+
+			.monaco-workbench .custom-mode-ui-selection-pill .custom-mode-ui-selection-count {
 				font-weight: 700;
-				margin-right: 6px;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-selection-clear {
+				display: none;
+				height: 22px;
+				padding: 0 10px;
+				border-radius: 999px;
+				border: 1px solid var(--vscode-editorWidget-border);
+				background-color: transparent;
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+				font-weight: 600;
+				line-height: 20px;
+				cursor: pointer;
+				-webkit-app-region: no-drag;
+			}
+
+			.monaco-workbench.custom-mode-shell-hasProject .custom-mode-ui-selection-clear {
+				display: inline-block;
+			}
+
+			.monaco-workbench .custom-mode-ui-selection-clear:not(:disabled):hover {
+				color: var(--vscode-foreground);
+				background-color: var(--vscode-toolbar-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-selection-clear:disabled {
+				opacity: 0.5;
+				cursor: default;
 			}
 
 			.monaco-workbench .custom-mode-setup details {
@@ -1655,9 +1734,18 @@ class ModeShellContribution extends Disposable {
 		}
 		this.uiMainColumn = $('div.custom-mode-ui-main');
 		this.uiSetup = $('div.custom-mode-setup');
-		this.uiUrlPill = $('div.custom-mode-ui-urlPill');
-		this.uiUrlPill.appendChild($('strong', undefined, localize('customMode.urlLabel', 'URL')));
-		this.uiUrlPill.appendChild($('span', undefined, ''));
+		this.uiSelectionCountEl = $('span.custom-mode-ui-selection-count', undefined, '0');
+		this.uiSelectionPill = $('div.custom-mode-ui-selection-pill', undefined,
+			this.uiSelectionCountEl,
+			$('span.custom-mode-ui-selection-label', undefined, localize('customMode.selectedLabel', 'Selected')),
+		);
+		const clearSelectionLabel = localize('customMode.clearSelection', 'Clear selection');
+		this.uiSelectionClearBtn = $('button.custom-mode-ui-selection-clear', {
+			type: 'button',
+			'aria-label': clearSelectionLabel,
+			title: clearSelectionLabel,
+		}, localize('customMode.clearSelectionShort', 'Clear')) as HTMLButtonElement;
+		this.uiSelectionClearBtn.disabled = true;
 		this.uiStartAppButton = $('button.custom-mode-start-app', { type: 'button' }, localize('customMode.startApp', 'Start App')) as HTMLButtonElement;
 		this.uiStartSubtitle = $('div.custom-mode-start-app-subtitle');
 		this.uiStartStatus = $('pre.custom-mode-start-app-status');
@@ -1714,12 +1802,18 @@ class ModeShellContribution extends Disposable {
 		this._register(addDisposableListener(uiCloseBtn, 'click', () => this.setUiChatDismissed(true)));
 		this._register(addDisposableListener(this.uiChatReopenBtn, 'click', () => this.setUiChatDismissed(false)));
 
-		// Show the active URL in the top mode bar, right before the "UI" tab.
+		// Show the selection chip + Clear button in the top mode bar, right before the "UI" tab.
+		// Order in DOM: [Clear] [N Selected] [UI tab].
 		const uiTab = this.topModeButtons.get('UI');
 		if (uiTab) {
-			this.modeTopBar.insertBefore(this.uiUrlPill, uiTab);
-			this._register(toDisposable(() => this.uiUrlPill.remove()));
+			this.modeTopBar.insertBefore(this.uiSelectionPill, uiTab);
+			this.modeTopBar.insertBefore(this.uiSelectionClearBtn, this.uiSelectionPill);
+			this._register(toDisposable(() => {
+				this.uiSelectionPill.remove();
+				this.uiSelectionClearBtn.remove();
+			}));
 		}
+		this._register(addDisposableListener(this.uiSelectionClearBtn, 'click', () => this.clearUiSelection()));
 
 		this.processContainer = $('div.custom-mode-process-container');
 		if (this._processChatDismissed) {
@@ -1895,7 +1989,6 @@ class ModeShellContribution extends Disposable {
 					(this.uiBrowser as unknown as HTMLElement).setAttribute('src', url);
 				}
 			}
-			this.updateUiUrlPill(url);
 		}));
 		this._register(this.devServerService.onDidChangeState(state => this.updateDevServerDebug(state)));
 		this._register(this.ixIntegrationService.onDidChangeState(state => this.updateIxDebug(state)));
@@ -1907,7 +2000,6 @@ class ModeShellContribution extends Disposable {
 		void this.loadProcessNotesSuggestions();
 		void this.loadSelectedProcessNote().then(() => this.showProcessNotesOverview());
 		this.updateReachabilityFromState(this.devServerService.getState());
-		this.updateUiUrlPill(this.devServerService.getActiveUrl());
 
 		this._register(addDisposableListener(this.uiStartAppButton, 'click', () => this.onStartAppClicked()));
 		this._register(addDisposableListener(mainWindow, 'message', (e: MessageEvent) => this.onEmbeddedUiMessage(e)));
@@ -2013,6 +2105,7 @@ class ModeShellContribution extends Disposable {
 		if (data.type === 'vscode-ui-selection') {
 			const items = Array.isArray(data.items) ? data.items : [];
 			this.pushUiRuntimeLog(`[ui-selection] ${items.length} mapped item(s) href=${data.href}`);
+			this.setUiSelectionCount(items.length);
 			void this.injectUiMappedSelectionIntoChat(items);
 			return;
 		}
@@ -2604,60 +2697,172 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private appendPipelineStep(parent: HTMLElement, step: IxPipelineStepSnapshot): void {
+		const cached = this.ixPipelineStepNodes.get(step.id);
+		if (cached) {
+			this.updatePipelineStepNode(cached, step);
+			parent.appendChild(cached.wrap);
+			return;
+		}
+
+		const stepId = step.id;
 		const wrap = $('div.custom-mode-ix-pipeline-step');
 		wrap.classList.add(`status-${step.status}`);
 		const head = $('div.custom-mode-ix-pipeline-step-head');
-		const st = $('span.custom-mode-ix-pipeline-status', { title: step.status, 'aria-label': step.status }, this.ixPipelineStatusGlyph(step.status));
-		const label = $('span.custom-mode-ix-pipeline-label', undefined, step.label);
-		const dur = $('span.custom-mode-ix-pipeline-dur', undefined, this.formatStepDuration(step));
-		dur.dataset['stepId'] = step.id;
-		head.appendChild(st);
-		head.appendChild(label);
-		head.appendChild(dur);
+		const statusEl = $('span.custom-mode-ix-pipeline-status', { title: step.status, 'aria-label': step.status }, this.ixPipelineStatusGlyph(step.status));
+		const labelEl = $('span.custom-mode-ix-pipeline-label', undefined, step.label);
+		const durEl = $('span.custom-mode-ix-pipeline-dur', undefined, this.formatStepDuration(step));
+		durEl.dataset['stepId'] = stepId;
+		head.appendChild(statusEl);
+		head.appendChild(labelEl);
+		head.appendChild(durEl);
 		wrap.appendChild(head);
+
+		let cmdEl: HTMLElement | undefined;
 		if (step.command) {
 			const shown = step.command.length > 96 ? `${step.command.slice(0, 93)}\u2026` : step.command;
-			wrap.appendChild($('div.custom-mode-ix-pipeline-cmd', { title: step.command }, shown));
+			cmdEl = $('div.custom-mode-ix-pipeline-cmd', { title: step.command }, shown);
+			wrap.appendChild(cmdEl);
 		}
+
+		let errEl: HTMLElement | undefined;
 		if (step.error) {
-			wrap.appendChild($('div.custom-mode-ix-pipeline-err', undefined, step.error));
+			errEl = $('div.custom-mode-ix-pipeline-err', undefined, step.error);
+			wrap.appendChild(errEl);
 		}
+
 		const details = document.createElement('details');
-		details.open = this.ixPipelineOpenOutput.has(step.id);
-		this._register(addDisposableListener(details, 'toggle', () => {
-			if (details.open) {
-				this.ixPipelineOpenOutput.add(step.id);
-			} else {
-				this.ixPipelineOpenOutput.delete(step.id);
-			}
-		}));
+		details.open = this.ixPipelineOpenOutput.has(stepId);
 		const summary = document.createElement('summary');
 		summary.textContent = localize('customMode.ixPipeline.output', 'Output');
+		// Track open state synchronously on user intent to survive re-renders mid-toggle.
+		this._register(addDisposableListener(summary, 'click', () => {
+			// Click fires before <details> open flips; predict the post-click state.
+			if (details.open) {
+				this.ixPipelineOpenOutput.delete(stepId);
+			} else {
+				this.ixPipelineOpenOutput.add(stepId);
+			}
+		}));
+		this._register(addDisposableListener(details, 'toggle', () => {
+			if (details.open) {
+				this.ixPipelineOpenOutput.add(stepId);
+			} else {
+				this.ixPipelineOpenOutput.delete(stepId);
+			}
+		}));
 		details.appendChild(summary);
-		const tail = step.outputTail.trim();
+
 		const copyBtn = $('button.custom-mode-ix-pipeline-copy', { type: 'button' }, localize('customMode.ixPipeline.copy', 'Copy')) as HTMLButtonElement;
 		this._register(addDisposableListener(copyBtn, 'click', (e: MouseEvent) => {
 			e.preventDefault();
 			e.stopPropagation();
-			const text = step.outputTail.trim();
-			void this.copyTextToClipboard(text.length > 0 ? text : '');
+			const cachedNode = this.ixPipelineStepNodes.get(stepId);
+			const liveStep = this.lastIxPipelineState?.pipelineSteps.find(s => s.id === stepId);
+			const text = (liveStep?.outputTail ?? cachedNode?.pre.textContent ?? '').trim();
+			void this.copyTextToClipboard(text);
 		}));
 		details.appendChild(copyBtn);
+
+		const tail = step.outputTail.trim();
 		const pre = $('pre.custom-mode-ix-pipeline-pre', undefined,
 			tail.length > 0 ? tail : localize('customMode.ixPipeline.noOutput', '(no output yet)'));
-		pre.dataset['stepId'] = step.id;
-		const restored = this.ixPipelineOutputScrollTops.get(step.id);
+		pre.dataset['stepId'] = stepId;
+		const restored = this.ixPipelineOutputScrollTops.get(stepId);
 		if (typeof restored === 'number' && restored >= 0) {
 			queueMicrotask(() => {
 				try { pre.scrollTop = restored; } catch { /* ignore */ }
 			});
 		}
 		this._register(addDisposableListener(pre, 'scroll', () => {
-			try { this.ixPipelineOutputScrollTops.set(step.id, pre.scrollTop); } catch { /* ignore */ }
+			try { this.ixPipelineOutputScrollTops.set(stepId, pre.scrollTop); } catch { /* ignore */ }
 		}));
 		details.appendChild(pre);
 		wrap.appendChild(details);
 		parent.appendChild(wrap);
+
+		this.ixPipelineStepNodes.set(stepId, {
+			wrap, statusEl, labelEl, durEl, cmdEl, errEl, details, pre,
+			currentStatus: step.status,
+		});
+	}
+
+	private updatePipelineStepNode(
+		node: {
+			readonly wrap: HTMLElement;
+			readonly statusEl: HTMLElement;
+			readonly labelEl: HTMLElement;
+			readonly durEl: HTMLElement;
+			cmdEl: HTMLElement | undefined;
+			errEl: HTMLElement | undefined;
+			readonly details: HTMLDetailsElement;
+			readonly pre: HTMLElement;
+			currentStatus: IxPipelineStepStatus;
+		},
+		step: IxPipelineStepSnapshot,
+	): void {
+		if (node.currentStatus !== step.status) {
+			node.wrap.classList.remove(`status-${node.currentStatus}`);
+			node.wrap.classList.add(`status-${step.status}`);
+			node.statusEl.textContent = this.ixPipelineStatusGlyph(step.status);
+			node.statusEl.setAttribute('title', step.status);
+			node.statusEl.setAttribute('aria-label', step.status);
+			node.currentStatus = step.status;
+		}
+		if (node.labelEl.textContent !== step.label) {
+			node.labelEl.textContent = step.label;
+		}
+		const nextDur = this.formatStepDuration(step);
+		if (node.durEl.textContent !== nextDur) {
+			node.durEl.textContent = nextDur;
+		}
+
+		if (step.command) {
+			const shown = step.command.length > 96 ? `${step.command.slice(0, 93)}\u2026` : step.command;
+			if (!node.cmdEl) {
+				node.cmdEl = $('div.custom-mode-ix-pipeline-cmd', { title: step.command }, shown);
+				// Insert after head (first child).
+				const after = node.wrap.firstChild?.nextSibling ?? null;
+				node.wrap.insertBefore(node.cmdEl, after);
+			} else {
+				if (node.cmdEl.textContent !== shown) {
+					node.cmdEl.textContent = shown;
+				}
+				node.cmdEl.setAttribute('title', step.command);
+			}
+		} else if (node.cmdEl) {
+			node.cmdEl.remove();
+			node.cmdEl = undefined;
+		}
+
+		if (step.error) {
+			if (!node.errEl) {
+				node.errEl = $('div.custom-mode-ix-pipeline-err', undefined, step.error);
+				node.wrap.insertBefore(node.errEl, node.details);
+			} else if (node.errEl.textContent !== step.error) {
+				node.errEl.textContent = step.error;
+			}
+		} else if (node.errEl) {
+			node.errEl.remove();
+			node.errEl = undefined;
+		}
+
+		const tail = step.outputTail.trim();
+		const nextText = tail.length > 0 ? tail : localize('customMode.ixPipeline.noOutput', '(no output yet)');
+		if (node.pre.textContent !== nextText) {
+			// Preserve scroll position; only update text when changed.
+			const prevScroll = node.pre.scrollTop;
+			node.pre.textContent = nextText;
+			try { node.pre.scrollTop = prevScroll; } catch { /* ignore */ }
+		}
+	}
+
+	private pruneStalePipelineStepNodes(activeIds: ReadonlySet<string>): void {
+		for (const [id, node] of this.ixPipelineStepNodes) {
+			if (!activeIds.has(id)) {
+				node.wrap.remove();
+				this.ixPipelineStepNodes.delete(id);
+			}
+		}
 	}
 
 	private updateIxPipelineDurationsOnly(state: IxIntegrationState): void {
@@ -2710,12 +2915,14 @@ class ModeShellContribution extends Disposable {
 				controls,
 			));
 		const combinedRow = $('div.custom-mode-ix-pipeline-combined-row');
-		for (const s of globals) {
+		// Reuse existing per-step DOM nodes; appendChild on an already-parented node moves it without
+		// rebuilding, which keeps native <details> open state and click handlers alive during streaming.
+		const activeIds = new Set<string>();
+		for (const s of [...globals, ...workspaces]) {
+			activeIds.add(s.id);
 			this.appendPipelineStep(combinedRow, s);
 		}
-		for (const s of workspaces) {
-			this.appendPipelineStep(combinedRow, s);
-		}
+		this.pruneStalePipelineStepNodes(activeIds);
 		this.processIxPipelineWorkspaceRows.appendChild(combinedRow);
 
 		this.refreshIxPipelineTicker(state);
@@ -2844,18 +3051,61 @@ class ModeShellContribution extends Disposable {
 		this.processNotesCards.appendChild($('div.custom-mode-process-notes-section-title', undefined, localize('customMode.processNotes.systemTitle', 'System processes')));
 		if (this.processNotesSuggestions.length) {
 			for (const s of this.processNotesSuggestions.slice(0, 12)) {
-				const summary = s.probe
-					? localize('customMode.processNotes.suggestion.probe', '{0} targets', String(s.probe.resolvedTargets))
-					: localize('customMode.processNotes.suggestion.kind', String(s.kind));
-				const card = $('button.custom-mode-process-notes-card', { type: 'button' },
+				const kindChip = $('span.custom-mode-process-notes-card-chip', undefined, s.kind);
+				const titleRow = $('div.custom-mode-process-notes-card-title-row', undefined,
 					$('div.custom-mode-process-notes-card-title', undefined, s.label),
-					$('div.custom-mode-process-notes-card-summary', undefined, s.promptTemplates[0] ?? ''),
-					$('div.custom-mode-process-notes-card-meta', undefined, summary),
-					$('div.custom-mode-process-notes-card-chips', undefined,
-						...(s.signals?.slice(0, 3).map(sig => $('span.custom-mode-process-notes-card-chip', undefined, sig)) ?? [])
-					),
-				) as HTMLButtonElement;
-				card.title = s.label;
+					kindChip,
+				);
+				const pathLine = s.entryPath
+					? s.entryPath
+					: localize('customMode.processNotes.card.noEntry', '—');
+				const couplingLine = s.couplingSummary ?? localize(
+					'customMode.processNotes.card.couplingFallback',
+					'{0} files',
+					String(s.files ?? 0),
+				);
+				const edgeParts: string[] = [];
+				if (s.topDependencyPath) {
+					edgeParts.push(localize('customMode.processNotes.card.dependsOn', '→ {0}', s.topDependencyPath));
+				}
+				if (s.inboundSummary) {
+					edgeParts.push(localize('customMode.processNotes.card.inbound', '← {0}', s.inboundSummary));
+				}
+				const chips: HTMLElement[] = [];
+				if (s.healthScore !== undefined) {
+					const pct = Math.round(s.healthScore * 100);
+					chips.push($('span.custom-mode-process-notes-card-chip', undefined,
+						localize('customMode.processNotes.card.health', 'health {0}%', String(pct))));
+				}
+				if (s.confidence !== undefined && s.confidence < LOW_CONFIDENCE_THRESHOLD) {
+					chips.push($('span.custom-mode-process-notes-card-chip', undefined,
+						localize('customMode.processNotes.card.lowConfidence', 'low confidence')));
+				}
+				for (const sig of s.signals?.slice(0, 2) ?? []) {
+					chips.push($('span.custom-mode-process-notes-card-chip', undefined, sig));
+				}
+				const cardChildren: HTMLElement[] = [
+					titleRow,
+					$('div.custom-mode-process-notes-card-path', undefined, pathLine),
+					$('div.custom-mode-process-notes-card-coupling', undefined, couplingLine),
+				];
+				if (edgeParts.length) {
+					cardChildren.push($('div.custom-mode-process-notes-card-edge', undefined, edgeParts.join(' · ')));
+				}
+				cardChildren.push($('div.custom-mode-process-notes-card-summary', undefined, s.promptTemplates[0] ?? ''));
+				if (chips.length) {
+					cardChildren.push($('div.custom-mode-process-notes-card-chips', undefined, ...chips));
+				}
+				const card = $('button.custom-mode-process-notes-card', { type: 'button' }, ...cardChildren) as HTMLButtonElement;
+				const titleParts = [
+					s.label,
+					s.kind,
+					pathLine,
+					couplingLine,
+					...edgeParts,
+					s.promptTemplates[0] ?? '',
+				].filter(Boolean);
+				card.title = titleParts.join('\n');
 				this._register(addDisposableListener(card, 'click', () => {
 					// Select this process so Generate saves into it.
 					this.processNotesTopicSelect.value = this.processNoteIdForSuggestionId(s.id);
@@ -3060,12 +3310,41 @@ class ModeShellContribution extends Disposable {
 		this.updateReachabilityFromState(state);
 	}
 
-	private updateUiUrlPill(url: string | undefined): void {
-		const span = this.uiUrlPill.querySelector('span');
-		if (span) {
-			span.textContent = url ?? '';
+	private setUiSelectionCount(count: number): void {
+		const normalized = Math.max(0, Math.floor(count));
+		this.uiSelectionCount = normalized;
+		this.uiSelectionCountEl.textContent = String(normalized);
+		this.uiSelectionPill.classList.toggle('has-selection', normalized > 0);
+		this.uiSelectionClearBtn.disabled = normalized === 0;
+	}
+
+	private clearUiSelection(): void {
+		if (this.uiSelectionCount === 0) {
+			return;
 		}
-		this.uiUrlPill.classList.toggle('has-url', Boolean(url));
+		this.setUiSelectionCount(0);
+		this.removeUiMappedInjectedChatAttachments();
+		this.sendClearSelectionToOverlay();
+		this.pushUiRuntimeLog('[ui-selection] cleared via top-bar button');
+	}
+
+	private sendClearSelectionToOverlay(): void {
+		const clearJs = `(function(){ try { document.querySelectorAll('.__vscode_mapped_selected').forEach(function(n){ n.classList.remove('__vscode_mapped_selected'); }); } catch (e) { /* ignore */ } })()`;
+		if (isWeb) {
+			try {
+				const iframe = this.uiBrowser as unknown as HTMLIFrameElement;
+				iframe.contentWindow?.postMessage({ type: 'vscode-clear-selection' }, '*');
+			} catch {
+				// ignore (cross-origin etc.)
+			}
+			return;
+		}
+		try {
+			const webview = this.uiBrowser as unknown as { executeJavaScript?: (code: string, userGesture?: boolean) => Promise<unknown> };
+			void webview.executeJavaScript?.(clearJs);
+		} catch {
+			// ignore
+		}
 	}
 
 	private workspaceKeyForSuggestions(): string | undefined {
@@ -3111,38 +3390,113 @@ class ModeShellContribution extends Disposable {
 		}
 
 		log(`[discovery] … ensure ix mapped`);
-		await this.ixIntegrationService.ensureIxMappedIfEmpty(discoveryFolder);
-		log(`[discovery] ✓ ensure ix mapped`);
+		const hydrate = await this.ixIntegrationService.ensureIxMappedIfEmpty(discoveryFolder);
+		if (!hydrate.statsOk) {
+			const hint = formatIxDiscoveryFailureHint(hydrate.statsPreview, hydrate.statsPreview);
+			log(`[discovery] ✗ ix stats failed${hint ? `\n${hint}` : ''}`);
+			if (hydrate.statsPreview) {
+				log(hydrate.statsPreview.split(/\r?\n/).slice(-6).join('\n'));
+			}
+		} else {
+			log(hydrate.ranMap ? `[discovery] ✓ ix map --all-items . (graph was empty)` : `[discovery] ✓ ensure ix mapped`);
+		}
 
-		// Prefer the "importance" view: this matches what users see in `ix subsystems --sort importance --all-items`.
-		// For the first pass, we only need the system names to render "System processes" cards quickly.
-		log(`[discovery] … ix subsystems --sort importance --all-items --format json`);
-		// IMPORTANT: Do not pass '.' here. Ix returns a different "target/children" JSON shape for a scoped target,
-		// whereas the global command returns the full `regions` list we need for system cards.
-		const subsystems = await this.ixIntegrationService.runJsonQuery(['subsystems', '--sort', 'importance', '--all-items', '--format', 'json'], discoveryFolder, 90_000);
-		log(subsystems.ok ? `[discovery] ✓ ix subsystems --sort importance --all-items --format json` : `[discovery] ✗ ix subsystems --sort importance --all-items --format json\n${subsystems.error}`);
+		const detailedCmd = formatIxSubsystemsDetailedDiscoveryCommand(
+			['subsystems', '--list', '--detailed', '--sort', 'importance', '--format', 'json'],
+		);
+		log(`[discovery] … ${detailedCmd}`);
+		const detailed = await runSubsystemsDetailedDiscovery(this.ixIntegrationService, discoveryFolder, 90_000);
+		if (detailed.ok) {
+			log(`[discovery] ✓ ${formatIxSubsystemsDetailedDiscoveryCommand(detailed.args)}`);
+		} else {
+			const hint = formatIxDiscoveryFailureHint(detailed.error, detailed.raw);
+			log(`[discovery] ✗ ${formatIxSubsystemsDetailedDiscoveryCommand(detailed.args)}\n${detailed.error}${hint ? `\n${hint}` : ''}`);
+		}
 
-		if (!subsystems.ok) {
+		let suggestions: ProcessNoteSuggestion[] = [];
+		if (detailed.ok) {
+			const fingerprints = parseSubsystemFingerprints(detailed.value);
+			if (fingerprints.length) {
+				suggestions = this.processNoteSuggestionsFromFingerprints(fingerprints);
+				log(`[selection] ✓ fingerprints=${fingerprints.length}`);
+			}
+		}
+
+		if (!suggestions.length) {
+			log(`[discovery] … fallback ix subsystems --sort importance --all-items --format json`);
+			const subsystems = await this.ixIntegrationService.runJsonQuery(
+				['subsystems', '--sort', 'importance', '--all-items', '--format', 'json'],
+				discoveryFolder,
+				90_000,
+			);
+			if (subsystems.ok) {
+				log(`[discovery] ✓ ix subsystems --sort importance --all-items --format json`);
+			} else {
+				const hint = formatIxDiscoveryFailureHint(subsystems.error, subsystems.raw);
+				log(`[discovery] ✗ ix subsystems --sort importance --all-items --format json\n${subsystems.error}${hint ? `\n${hint}` : ''}`);
+			}
+			if (subsystems.ok) {
+				suggestions = this.processNoteSuggestionsFromHierarchyCards(
+					this.extractDiscoveryCardsFromIxSubsystems(subsystems.value),
+				);
+				log(`[selection] ✓ hierarchy cards=${suggestions.length}`);
+			}
+		}
+
+		if (!suggestions.length) {
 			log(`[discovery] ✗ No discovery JSON available.`);
 			return;
 		}
-
-		const cards = this.extractDiscoveryCardsFromIxSubsystems(subsystems.value);
 
 		// Populate the hidden "topic" select with note ids so Generate/Delete operate on the selected card.
 		while (this.processNotesTopicSelect.options.length > 0) {
 			this.processNotesTopicSelect.remove(0);
 		}
-		for (const c of cards) {
-			const id = this.stableHash(`${c.kind}|${c.label}|${c.prompt}`);
-			this.processNotesTopicSelect.appendChild(new Option(c.label, this.processNoteIdForSuggestionId(id)));
+		for (const s of suggestions) {
+			this.processNotesTopicSelect.appendChild(new Option(s.label, this.processNoteIdForSuggestionId(s.id)));
 		}
 		if (this.processNotesTopicSelect.options.length > 0) {
 			this.processNotesTopicSelect.value = this.processNotesTopicSelect.options[0].value;
 		}
 
-		this.processNotesSuggestions = cards.map((c) => {
-			const id = this.stableHash(`${c.kind}|${c.label}|${c.prompt}`);
+		this.processNotesSuggestions = suggestions;
+		log(`[done] ✓ suggestions=${this.processNotesSuggestions.length}`);
+	}
+
+	private processNoteSuggestionsFromFingerprints(fingerprints: readonly SubsystemFingerprint[]): ProcessNoteSuggestion[] {
+		return fingerprints.map((f) => {
+			const id = this.stableHash(`${f.labelKind}|${f.name}`);
+			return {
+				id,
+				label: f.name,
+				subsystemKey: f.regionId,
+				kind: f.labelKind,
+				confidence: f.confidence,
+				files: f.fileCount,
+				regionId: f.regionId,
+				entryPath: f.entryPath,
+				topDependencyPath: f.topDependencyPath,
+				couplingSummary: f.couplingSummary,
+				inboundSummary: f.inboundSummary,
+				healthScore: f.healthScore,
+				importsOutTotal: f.importsOutTotal,
+				callsOutTotal: f.callsOutTotal,
+				importsInTotal: f.importsInTotal,
+				callsInTotal: f.callsInTotal,
+				promptTemplates: [
+					f.prompt,
+					`What is the ${f.name} pipeline?`,
+					`How does ${f.name} run end-to-end (UI → API → core logic)?`,
+				],
+			} satisfies ProcessNoteSuggestion;
+		});
+	}
+
+	private processNoteSuggestionsFromHierarchyCards(
+		cards: Array<{ label: string; kind: ProcessNoteSuggestion['kind']; prompt: string }>,
+	): ProcessNoteSuggestion[] {
+		return cards.map((c) => {
+			const id = this.stableHash(`${c.kind}|${c.label}`);
 			return {
 				id,
 				label: c.label,
@@ -3155,9 +3509,6 @@ class ModeShellContribution extends Disposable {
 				],
 			} satisfies ProcessNoteSuggestion;
 		});
-		log(`[selection] ✓ cards=${cards.length}`);
-
-		log(`[done] ✓ suggestions=${this.processNotesSuggestions.length}`);
 	}
 
 	private stableHash(text: string): string {

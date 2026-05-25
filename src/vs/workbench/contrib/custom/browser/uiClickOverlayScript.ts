@@ -392,6 +392,16 @@ function onMarqueeMouseDown(ev) {
 // Capture phase so we see events before apps stopPropagation().
 window.addEventListener('click', onClick, true);
 window.addEventListener('mousedown', onMarqueeMouseDown, true);
+
+// Allow the VS Code host to clear the visual marquee selection (e.g. via the
+// "Clear" button in the top mode bar). The host posts {type:'vscode-clear-selection'}.
+window.addEventListener('message', function (ev) {
+	var d = ev && ev.data;
+	if (d && d.type === 'vscode-clear-selection') {
+		clearMappedSelectionClass();
+	}
+}, false);
+
 emitEnvOnce();
 })();`;
 }

@@ -123,6 +123,21 @@ export interface ProcessNoteSuggestion {
 	readonly files?: number;
 	readonly crosscut?: number;
 	readonly signals?: readonly string[];
+	/** Ix region id from `ix subsystems --list --detailed`. */
+	readonly regionId?: string;
+	/** Preferred entry file for this subsystem (route/page/layout heuristic). */
+	readonly entryPath?: string;
+	/** First outbound import target outside member files. */
+	readonly topDependencyPath?: string;
+	/** Preformatted coupling counts line for cards. */
+	readonly couplingSummary?: string;
+	/** Inbound callers/importers summary when present. */
+	readonly inboundSummary?: string;
+	readonly healthScore?: number;
+	readonly importsOutTotal?: number;
+	readonly callsOutTotal?: number;
+	readonly importsInTotal?: number;
+	readonly callsInTotal?: number;
 	/** Deterministic prompt templates users can pick/fill. */
 	readonly promptTemplates: readonly string[];
 	/** Optional validation probe summary (budgeted). */

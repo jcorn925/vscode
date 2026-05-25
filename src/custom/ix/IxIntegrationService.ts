@@ -60,7 +60,7 @@ export interface IIxIntegrationService {
 	 * Runs `ix stats`; if there are no nodes, runs `ix map .` once to hydrate the workspace graph.
 	 * Use before `ix subsystems` / JSON `ix map` in Process notes flows.
 	 */
-	ensureIxMappedIfEmpty(cwd: URI): Promise<{ readonly statsPreview: string; readonly ranMap: boolean }>;
+	ensureIxMappedIfEmpty(cwd: URI): Promise<{ readonly statsPreview: string; readonly ranMap: boolean; readonly statsOk: boolean }>;
 }
 
 export const IIxIntegrationService = createDecorator<IIxIntegrationService>('ixIntegrationService');
@@ -71,6 +71,7 @@ const OUTPUT_TAIL = 16_384;
 
 const STEP_RESOLVE = 'resolve';
 const STEP_DOCKER = 'docker';
+const STEP_RESET = 'ix-reset';
 const STEP_STATS = 'ix-stats';
 
 function mapStepId(uri: URI): string {
@@ -83,6 +84,37 @@ function watchStepId(uri: URI): string {
 
 function stripAnsi(data: string): string {
 	return data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+}
+
+/**
+ * Appends a PTY-style `chunk` onto `buf` while honoring bare carriage returns the way a
+ * terminal would: a CR without a following LF rewinds to the start of the current line, so
+ * a subsequent write overwrites the previous frame. Without this, spinners like
+ * `ix reset`'s "Wiping code graph..." accumulate as a wall of duplicated lines in our
+ * captured output buffer. The result is still truncated to `OUTPUT_TAIL` like before.
+ */
+function appendOutputCollapsingCr(buf: string, chunk: string): string {
+	let next = buf;
+	let i = 0;
+	while (i < chunk.length) {
+		const cr = chunk.indexOf('\r', i);
+		if (cr === -1) {
+			next += chunk.slice(i);
+			break;
+		}
+		next += chunk.slice(i, cr);
+		// CRLF: keep both as a real newline.
+		if (chunk[cr + 1] === '\n') {
+			next += '\r\n';
+			i = cr + 2;
+			continue;
+		}
+		// Bare CR: drop everything back to the last newline so the next chars overwrite.
+		const lastNl = next.lastIndexOf('\n');
+		next = lastNl === -1 ? '' : next.slice(0, lastNl + 1);
+		i = cr + 1;
+	}
+	return next.slice(-OUTPUT_TAIL);
 }
 
 /** True when `ix stats` reports zero nodes (cold or reset graph). */
@@ -196,7 +228,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		if (stepId) {
 			const s = this.findStep(stepId);
 			if (s) {
-				s.outputBuf = (s.outputBuf + chunk).slice(-OUTPUT_TAIL);
+				s.outputBuf = appendOutputCollapsingCr(s.outputBuf, chunk);
 			}
 		}
 		this.pushAggregateOutput(chunk);
@@ -227,6 +259,15 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			status: 'idle',
 			outputBuf: '',
 		});
+		if (this.isAutoResetOnStartEnabled()) {
+			this.pipelineStepsMutable.push({
+				id: STEP_RESET,
+				kind: 'global',
+				label: localize('ix.pipeline.reset', 'Ix reset (code)'),
+				status: 'idle',
+				outputBuf: '',
+			});
+		}
 		this.pipelineStepsMutable.push({
 			id: STEP_STATS,
 			kind: 'global',
@@ -345,6 +386,10 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		return Boolean(this.configurationService.getValue<boolean>('custom.ix.autoStart') ?? true);
 	}
 
+	private isAutoResetOnStartEnabled(): boolean {
+		return Boolean(this.configurationService.getValue<boolean>('custom.ix.autoResetOnStart') ?? true);
+	}
+
 	private getInstallUrl(): string {
 		const raw = this.configurationService.getValue<string>('custom.ix.installScriptUrl');
 		const url = typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : 'https://ix-infra.com/install.sh';
@@ -434,21 +479,24 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 	}
 
-	async ensureIxMappedIfEmpty(cwd: URI): Promise<{ readonly statsPreview: string; readonly ranMap: boolean }> {
+	async ensureIxMappedIfEmpty(cwd: URI): Promise<{ readonly statsPreview: string; readonly ranMap: boolean; readonly statsOk: boolean }> {
 		if (isWeb) {
-			return { statsPreview: '', ranMap: false };
+			return { statsPreview: '', ranMap: false, statsOk: false };
 		}
 		const ixBin = await this.resolveIxBinary(cwd);
 		if (!ixBin) {
-			return { statsPreview: '', ranMap: false };
+			return { statsPreview: '', ranMap: false, statsOk: false };
 		}
 		const stats = await this.runCommand(cwd, `${this.quoteIx(ixBin)} stats`, 30_000, { ui: 'none' });
 		const statsPreview = stripAnsi(stats.output).trim();
+		if (stats.exitCode !== 0) {
+			return { statsPreview, ranMap: false, statsOk: false };
+		}
 		if (!looksIxGraphEmptyFromStats(stats.output)) {
-			return { statsPreview, ranMap: false };
+			return { statsPreview, ranMap: false, statsOk: true };
 		}
 		const mapped = await this.runCommand(cwd, `${this.quoteIx(ixBin)} map --all-items .`, 600_000, { ui: 'none' });
-		return { statsPreview, ranMap: mapped.exitCode === 0 };
+		return { statsPreview, ranMap: mapped.exitCode === 0, statsOk: mapped.exitCode === 0 };
 	}
 
 	async runJsonQuery(args: readonly string[], cwd?: URI, timeoutMs: number = 60_000): Promise<{ ok: true; value: unknown; raw: string } | { ok: false; error: string; raw: string; exitCode: number }> {
@@ -471,7 +519,13 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		const cmd = `${this.quoteIx(ixBin)} ${args.map(a => this.quoteShellArg(a)).join(' ')}`;
 		const { exitCode, output } = await this.runCommand(folder, cmd, timeoutMs, { ui: 'none' });
 		if (exitCode !== 0) {
-			return { ok: false, error: `ix exited with code ${exitCode}`, raw: output, exitCode };
+			const stripped = stripAnsi(output).trim();
+			const tail = tailOutput(output);
+			const notable = stripped.split(/\r?\n/).find(l =>
+				/error:|unknown option|fetch failed|ECONNREFUSED|connection refused/i.test(l),
+			);
+			const error = notable ?? (tail || `ix exited with code ${exitCode}`);
+			return { ok: false, error, raw: output, exitCode };
 		}
 		try {
 			const normalized = normalizeIxJsonOutput(output);
@@ -693,6 +747,31 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			this.setPhase('error', String(e));
 			this.notificationService.notify({ severity: Severity.Error, message: String(e) });
 			return;
+		}
+
+		if (this.isAutoResetOnStartEnabled()) {
+			this.beginStep(STEP_RESET);
+			try {
+				// --code wipes files/functions/classes/regions only; preserves goals/plans/tasks/bugs/decisions.
+				// Use a generous 5-minute budget: large repos can churn for a while and 60s was tripping the
+				// timeout mid-"Wiping code graph..." spinner.
+				const reset = await this.runCommand(primary, `${this.quoteIx(ix)} reset --code -y`, 300_000, { stepId: STEP_RESET, debounceOutput: true });
+				if (gen !== this.pipelineGeneration) {
+					return;
+				}
+				if (reset.exitCode !== 0) {
+					const err = localize('ix.error.reset', '`ix reset --code` failed (exit {0}).', String(reset.exitCode));
+					this.completeStep(STEP_RESET, 'error', err);
+					// Non-fatal: continue to stats/map so an aging-but-present graph is still usable.
+				} else {
+					this.completeStep(STEP_RESET, 'success');
+				}
+			} catch (e) {
+				if (gen !== this.pipelineGeneration) {
+					return;
+				}
+				this.completeStep(STEP_RESET, 'error', String(e));
+			}
 		}
 
 		this.beginStep(STEP_STATS);
