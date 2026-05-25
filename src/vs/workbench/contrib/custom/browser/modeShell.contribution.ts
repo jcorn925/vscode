@@ -70,52 +70,8 @@ import {
 	type SubsystemFingerprint,
 } from './processNotesSubsystemSnapshot.js';
 
-/** Every `ix` subcommand from https://ix-infra.com/docs/commands/ (grouped like the docs). */
-const IX_DOCS_COMMANDS_URL = 'https://ix-infra.com/docs/commands/';
-
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
-
-function getIxCliCommandReferenceText(): string {
-	const L = (key: string, def: string) => localize(key, def);
-	const sections: Array<{ title: string; commands: readonly string[] }> = [
-		{
-			title: L('customMode.ixCmdSectionSetup', 'Setup'),
-			commands: ['ix map', 'ix status', 'ix watch', 'ix docker', 'ix upgrade']
-		},
-		{
-			title: L('customMode.ixCmdSectionFind', 'Find'),
-			commands: ['ix search', 'ix locate', 'ix inventory', 'ix text']
-		},
-		{
-			title: L('customMode.ixCmdSectionUnderstand', 'Understand'),
-			commands: ['ix explain', 'ix overview', 'ix read']
-		},
-		{
-			title: L('customMode.ixCmdSectionAnalyze', 'Analyze'),
-			commands: ['ix impact', 'ix rank', 'ix smells', 'ix subsystems']
-		},
-		{
-			title: L('customMode.ixCmdSectionNavigate', 'Navigate'),
-			commands: ['ix callers', 'ix callees', 'ix contains', 'ix imports', 'ix imported-by', 'ix depends', 'ix trace']
-		},
-		{
-			title: L('customMode.ixCmdSectionHistory', 'History'),
-			commands: ['ix entity', 'ix history', 'ix diff', 'ix conflicts', 'ix stats']
-		},
-		{
-			title: L('customMode.ixCmdSectionOps', 'Ops'),
-			commands: ['ix reset', 'ix config']
-		},
-	];
-	const lines: string[] = [];
-	for (const { title, commands } of sections) {
-		lines.push(`— ${title} —`);
-		lines.push(...commands);
-		lines.push('');
-	}
-	return lines.join('\n').trimEnd();
-}
 
 class ModeShellContribution extends Disposable {
 
@@ -130,6 +86,7 @@ class ModeShellContribution extends Disposable {
 	private readonly uiContainer: HTMLElement;
 	private readonly processContainer: HTMLElement;
 	private readonly processMainColumn: HTMLElement;
+	private readonly processMainContent: HTMLElement;
 	private readonly processChatColumn: HTMLElement;
 	private readonly processChatReopenBtn: HTMLButtonElement;
 	private readonly uiMainColumn: HTMLElement;
@@ -188,8 +145,8 @@ class ModeShellContribution extends Disposable {
 	private processNotesGraphLayer: 'overview' | 'detail' = 'overview';
 	private processNotesMergedTopicIds: ProcessNoteId[] = mergeProcessNoteTopicIds(undefined);
 	// Saved notes list is removed; keep latest file only if needed later.
-	private readonly processIxCommandsButton: HTMLButtonElement;
-	private readonly processIxCommandsPopover: HTMLElement;
+	private readonly workspaceStepsHideButton: HTMLButtonElement;
+	private workspaceStepsHidden = false;
 	private readonly processIxPipeline: HTMLElement;
 	private readonly processIxPipelineGlobalRow: HTMLElement;
 	private readonly processIxPipelineWorkspaceRows: HTMLElement;
@@ -293,7 +250,9 @@ class ModeShellContribution extends Disposable {
 				left: 0;
 				right: 0;
 				height: var(--custom-mode-shell-height);
-				z-index: 2600;
+				/* Stay below the quick input widget (z-index 2550) so the command palette / Go to File
+				   search input is not obscured by the mode tabs when opened on top of the editor. */
+				z-index: 2500;
 				display: flex;
 				flex-direction: row;
 				align-items: center;
@@ -304,6 +263,17 @@ class ModeShellContribution extends Disposable {
 				border-bottom: 1px solid var(--vscode-panel-border);
 				background-color: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBar-background));
 				-webkit-app-region: no-drag;
+			}
+
+			/*
+			 * The quick input widget (Cmd+P, command palette, etc.) is positioned absolutely against
+			 * the workbench root with an inline 'top' equal to the title bar offset. That offset does
+			 * not know about our mode tab bar, so the input would land underneath the UI/Process/Code
+			 * tabs. Nudge it down by the mode shell height with a transform so we don't fight the
+			 * inline 'top' the quick input controller writes on every layout.
+			 */
+			.monaco-workbench.custom-mode-shell-enabled .quick-input-widget {
+				transform: translateY(var(--custom-mode-shell-height));
 			}
 
 			.monaco-workbench .custom-mode-top-modes .custom-mode-top-tab {
@@ -537,6 +507,14 @@ class ModeShellContribution extends Disposable {
 				flex-direction: column;
 				flex: 1 1 0;
 				min-width: 0;
+				min-height: 0;
+				overflow: hidden;
+			}
+
+			.monaco-workbench .custom-mode-process-main-content {
+				display: flex;
+				flex-direction: column;
+				flex: 1 1 auto;
 				min-height: 0;
 				overflow: auto;
 			}
@@ -949,6 +927,10 @@ class ModeShellContribution extends Disposable {
 				flex-wrap: wrap;
 				gap: 10px;
 				align-items: stretch;
+			}
+
+			.monaco-workbench .custom-mode-ix-pipeline-workspace-rows.workspace-steps-hidden .custom-mode-ix-pipeline-combined-row {
+				display: none;
 			}
 
 			.monaco-workbench .custom-mode-ix-pipeline-controls {
@@ -1739,12 +1721,12 @@ class ModeShellContribution extends Disposable {
 			this.uiSelectionCountEl,
 			$('span.custom-mode-ui-selection-label', undefined, localize('customMode.selectedLabel', 'Selected')),
 		);
-		const clearSelectionLabel = localize('customMode.clearSelection', 'Clear selection');
+		const dragToSelectLabel = localize('customMode.dragToSelect', 'Drag to Select');
 		this.uiSelectionClearBtn = $('button.custom-mode-ui-selection-clear', {
 			type: 'button',
-			'aria-label': clearSelectionLabel,
-			title: clearSelectionLabel,
-		}, localize('customMode.clearSelectionShort', 'Clear')) as HTMLButtonElement;
+			'aria-label': dragToSelectLabel,
+			title: dragToSelectLabel,
+		}, dragToSelectLabel) as HTMLButtonElement;
 		this.uiSelectionClearBtn.disabled = true;
 		this.uiStartAppButton = $('button.custom-mode-start-app', { type: 'button' }, localize('customMode.startApp', 'Start App')) as HTMLButtonElement;
 		this.uiStartSubtitle = $('div.custom-mode-start-app-subtitle');
@@ -1838,22 +1820,8 @@ class ModeShellContribution extends Disposable {
 		this.processIxPipeline.appendChild(this.processIxPipelineGlobalRow);
 		this.processIxPipeline.appendChild(this.processIxPipelineWorkspaceRows);
 
-		// Ix commands button + popover (shown next to the topic picker).
-		this.processIxCommandsButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('customMode.processIxCommandsBtn', 'Ix commands')) as HTMLButtonElement;
-
-		const ixCommandsDocsLink2 = document.createElement('a');
-		ixCommandsDocsLink2.href = IX_DOCS_COMMANDS_URL;
-		ixCommandsDocsLink2.target = '_blank';
-		ixCommandsDocsLink2.rel = 'noopener noreferrer';
-		ixCommandsDocsLink2.textContent = localize('customMode.ixCommandsDocsLink', 'ix-infra.com/docs/commands');
-
-		this.processIxCommandsPopover = $('div.custom-mode-process-ix-popover', undefined,
-			$('div.custom-mode-process-ix-popover-title', undefined,
-				localize('customMode.ixCommandsTitle', 'Ix CLI commands'),
-				ixCommandsDocsLink2
-			),
-			$('pre', undefined, getIxCliCommandReferenceText())
-		);
+		// Hide button: collapses the workspace steps cards (keeps the header visible so the user can re-show them).
+		this.workspaceStepsHideButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('customMode.workspaceStepsHideBtn', 'Hide')) as HTMLButtonElement;
 
 		// Process notes (generated via Ix + AI) with an interactive Cytoscape graph canvas.
 		this.processNotesTopicSelect = $('select.custom-mode-process-notes-topic') as HTMLSelectElement;
@@ -1923,10 +1891,13 @@ class ModeShellContribution extends Disposable {
 		this.processNotesGraphView.setHtml(cytoscapeUri, coseBaseUri, fcoseUri);
 		this.processNotesGraphView.setGraph({ nodes: [], edges: [] } satisfies ProcessNoteGraph);
 
-		this.processMainColumn.appendChild(this.processCallout);
-		this.processMainColumn.appendChild(this.processIxWebHint);
-		this.processMainColumn.appendChild(this.processIxPipeline);
-		this.processMainColumn.appendChild(this.processNotesPanel);
+		this.processMainContent = $('div.custom-mode-process-main-content');
+		this.processMainContent.appendChild(this.processCallout);
+		this.processMainContent.appendChild(this.processIxWebHint);
+		this.processMainContent.appendChild(this.processIxPipeline);
+		this.processMainContent.appendChild(this.processNotesPanel);
+		this.processMainColumn.appendChild(this.processMainContent);
+
 		this.processContainer.appendChild(this.processMainColumn);
 
 		this.processChatContainer = $('div.custom-mode-embedded-chat.custom-mode-process-side-chat');
@@ -1955,16 +1926,8 @@ class ModeShellContribution extends Disposable {
 		this._register(addDisposableListener(this.processNotesTopicSelect, 'change', () => void this.loadSelectedProcessNote()));
 		this._register(addDisposableListener(this.processNotesBackButton, 'click', () => this.showProcessNotesOverview()));
 		this.updateProcessNotesLogText();
-		this._register(addDisposableListener(this.processIxCommandsButton, 'click', () => {
-			const show = !this.processIxCommandsPopover.classList.contains('visible');
-			this.processIxCommandsPopover.classList.toggle('visible', show);
-		}));
-		this._register(addDisposableListener(mainWindow, 'mousedown', (e: MouseEvent) => {
-			const target = e.target as Node | null;
-			if (target && this.processNotesPanel.contains(target)) {
-				return;
-			}
-			this.processIxCommandsPopover.classList.remove('visible');
+		this._register(addDisposableListener(this.workspaceStepsHideButton, 'click', () => {
+			this.setWorkspaceStepsHidden(!this.workspaceStepsHidden);
 		}));
 
 		this.modeSurface.appendChild(this.uiContainer);
@@ -2901,10 +2864,9 @@ class ModeShellContribution extends Disposable {
 		const globals = visibleSteps.filter(s => s.kind === 'global');
 		const workspaces = visibleSteps.filter(s => s.kind === 'workspace');
 
-		// Workspace steps header row + Ix controls (moved here from Process Notes header).
+		// Workspace steps header row + hide toggle (collapses the cards while keeping the header visible).
 		const controls = $('div.custom-mode-ix-pipeline-controls', undefined,
-			this.processIxCommandsButton,
-			this.processIxCommandsPopover,
+			this.workspaceStepsHideButton,
 		);
 
 		// Put everything into one combined row so the user sees a single "pipeline" line.
@@ -2924,8 +2886,25 @@ class ModeShellContribution extends Disposable {
 		}
 		this.pruneStalePipelineStepNodes(activeIds);
 		this.processIxPipelineWorkspaceRows.appendChild(combinedRow);
+		// Re-apply current collapsed state after the DOM is rebuilt.
+		this.applyWorkspaceStepsHiddenState();
 
 		this.refreshIxPipelineTicker(state);
+	}
+
+	private setWorkspaceStepsHidden(hidden: boolean): void {
+		if (this.workspaceStepsHidden === hidden) {
+			return;
+		}
+		this.workspaceStepsHidden = hidden;
+		this.applyWorkspaceStepsHiddenState();
+	}
+
+	private applyWorkspaceStepsHiddenState(): void {
+		this.processIxPipelineWorkspaceRows.classList.toggle('workspace-steps-hidden', this.workspaceStepsHidden);
+		this.workspaceStepsHideButton.textContent = this.workspaceStepsHidden
+			? localize('customMode.workspaceStepsShowBtn', 'Show')
+			: localize('customMode.workspaceStepsHideBtn', 'Hide');
 	}
 
 	private refreshIxPipelineTicker(state: IxIntegrationState): void {
@@ -3316,6 +3295,12 @@ class ModeShellContribution extends Disposable {
 		this.uiSelectionCountEl.textContent = String(normalized);
 		this.uiSelectionPill.classList.toggle('has-selection', normalized > 0);
 		this.uiSelectionClearBtn.disabled = normalized === 0;
+		const label = normalized === 0
+			? localize('customMode.dragToSelect', 'Drag to Select')
+			: localize('customMode.clearSelectionShort', 'Clear');
+		this.uiSelectionClearBtn.textContent = label;
+		this.uiSelectionClearBtn.setAttribute('aria-label', label);
+		this.uiSelectionClearBtn.title = label;
 	}
 
 	private clearUiSelection(): void {

@@ -1724,7 +1724,12 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		} else {
 			if (exitMessage) {
 				const failedDuringLaunch = this._processManager.processState === ProcessState.KilledDuringLaunch;
-				if (failedDuringLaunch || (this._terminalConfigurationService.config.showExitAlert && this.xterm?.lastInputEvent !== /*Ctrl+D*/'\x04')) {
+				// Hidden/feature terminals are spawned by other code (e.g. ix discovery,
+				// task runners) that already surfaces its own errors. Showing the generic
+				// "failed to launch (exit code: N)" popup for them is noise that the user
+				// can't act on, so just log it instead.
+				const isHiddenFeatureTerminal = this._shellLaunchConfig.hideFromUser === true || this._shellLaunchConfig.isFeatureTerminal === true;
+				if (!isHiddenFeatureTerminal && (failedDuringLaunch || (this._terminalConfigurationService.config.showExitAlert && this.xterm?.lastInputEvent !== /*Ctrl+D*/'\x04'))) {
 					// Always show launch failures
 					this._notificationService.notify({
 						message: exitMessage,
@@ -1733,7 +1738,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 					});
 				} else {
 					// Log to help surface the error in case users report issues with showExitAlert
-					// disabled
+					// disabled, or for hidden feature terminals where the popup would be noise.
 					this._logService.warn(exitMessage);
 				}
 			}

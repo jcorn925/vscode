@@ -48,8 +48,16 @@ function code() {
 		DISABLE_TEST_EXTENSION=""
 	fi
 
+	# Disable built-in git extensions by default to avoid the heavy `git status`
+	# polling that pegs CPU on large repos (e.g. when developing vscode itself).
+	# Override by exporting VSCODE_ENABLE_GIT=1.
+	DISABLE_GIT_EXTENSIONS="--disable-extension=vscode.git --disable-extension=vscode.git-base --disable-extension=vscode.github"
+	if [[ -n "${VSCODE_ENABLE_GIT}" ]]; then
+		DISABLE_GIT_EXTENSIONS=""
+	fi
+
 	# Launch Code
-	exec "$CODE" . $DISABLE_TEST_EXTENSION "$@"
+	exec "$CODE" . $DISABLE_TEST_EXTENSION $DISABLE_GIT_EXTENSIONS "$@"
 }
 
 function code-wsl()

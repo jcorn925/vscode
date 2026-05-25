@@ -196,14 +196,41 @@ export function buildStructureAwarePrompt(
 }
 
 function regionRecords(json: unknown): Record<string, unknown>[] {
+	// Accept a bare array at the top level (some ix subcommands return that shape).
+	if (Array.isArray(json)) {
+		return json.filter((r): r is Record<string, unknown> => isRecord(r));
+	}
 	if (!isRecord(json)) {
 		return [];
 	}
-	const raw = json.scores ?? json.regions;
-	if (!Array.isArray(raw)) {
-		return [];
+	// Different ix subcommands/versions wrap region records under different keys.
+	// Probe the well-known ones in priority order and accept the first array we find.
+	const candidates: ReadonlyArray<unknown> = [
+		json.scores,
+		json.regions,
+		json.subsystems,
+		json.items,
+		json.results,
+		json.data,
+	];
+	for (const c of candidates) {
+		if (Array.isArray(c)) {
+			return c.filter((r): r is Record<string, unknown> => isRecord(r));
+		}
 	}
-	return raw.filter((r): r is Record<string, unknown> => isRecord(r));
+	// Last resort: collect any top-level array property whose first element looks
+	// like a region record (has a region_id or label_kind). Avoids needing to
+	// hand-maintain a wrapper-key list as ix evolves.
+	for (const value of Object.values(json)) {
+		if (!Array.isArray(value) || value.length === 0) {
+			continue;
+		}
+		const first = value[0];
+		if (isRecord(first) && (typeof first.region_id === 'string' || typeof first.label_kind === 'string')) {
+			return value.filter((r): r is Record<string, unknown> => isRecord(r));
+		}
+	}
+	return [];
 }
 
 export function parseSubsystemFingerprints(json: unknown): SubsystemFingerprint[] {
