@@ -22,8 +22,10 @@ import { IChatAgentService } from '../../chat/common/participants/chatAgents.js'
 import { ILanguageModelsService } from '../../chat/common/languageModels.js';
 import { ChatAgentLocation, ChatModeKind } from '../../chat/common/constants.js';
 import { nullExtensionDescription } from '../../../services/extensions/common/extensions.js';
+import { ILanguageModelToolsService } from '../../chat/common/tools/languageModelToolsService.js';
 import { CustomAiModelProvider } from '../../../../../custom/ai/browser/customAiModelProvider.js';
 import { CustomAiChatAgent } from '../../../../../custom/ai/browser/customAiChatAgent.js';
+import { CustomAiEditFileTool, CustomAiEditFileToolData } from '../../../../../custom/ai/browser/customAiEditFileTool.js';
 import {
 	CUSTOM_AI_COMMAND_OPEN_OLLAMA_DOWNLOAD,
 	CUSTOM_AI_COMMAND_OPEN_OLLAMA_SETTINGS,
@@ -94,6 +96,17 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			type: 'boolean',
 			default: true,
 			description: localize('custom.ai.tools.enabled', 'When enabled, Custom AI registers built-in chat tools with the model (tool-calling).'),
+			scope: ConfigurationScope.APPLICATION,
+		},
+		'custom.ai.edit.applyMode': {
+			type: 'string',
+			enum: ['review', 'direct'],
+			default: 'review',
+			enumDescriptions: [
+				localize('custom.ai.edit.applyMode.review', 'Show a diff in the chat and require the user to accept the edit (only works in Edit or Agent mode; falls back to direct write otherwise).'),
+				localize('custom.ai.edit.applyMode.direct', 'Apply Custom AI edits to disk immediately without a review step.'),
+			],
+			description: localize('custom.ai.edit.applyMode', 'How file edits from Custom AI are applied to the workspace.'),
 			scope: ConfigurationScope.APPLICATION,
 		},
 		'custom.ai.systemPrompt': {
@@ -167,6 +180,7 @@ export class CustomAiContribution extends Disposable implements IWorkbenchContri
 		@IInstantiationService instantiationService: IInstantiationService,
 		@ILanguageModelsService private readonly _languageModels: ILanguageModelsService,
 		@IChatAgentService private readonly _chatAgents: IChatAgentService,
+		@ILanguageModelToolsService toolsService: ILanguageModelToolsService,
 	) {
 		super();
 		this._register(toDisposable(() => {
@@ -176,6 +190,9 @@ export class CustomAiContribution extends Disposable implements IWorkbenchContri
 
 		const provider = this._register(instantiationService.createInstance(CustomAiModelProvider));
 		this._register(this._languageModels.registerLanguageModelProvider(CUSTOM_AI_VENDOR, provider));
+
+		const editFileTool = instantiationService.createInstance(CustomAiEditFileTool);
+		this._register(toolsService.registerTool(CustomAiEditFileToolData, editFileTool));
 
 		const agentImpl = this._register(instantiationService.createInstance(CustomAiChatAgent));
 		this._register(this._chatAgents.registerAgent('custom.ai', {

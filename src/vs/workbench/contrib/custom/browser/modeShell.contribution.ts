@@ -73,6 +73,41 @@ import {
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
 
+/**
+ * Stringify the shape of an ix JSON response for diagnostic logging when discovery
+ * yields zero cards. We only want enough to identify the wrapper key and the field
+ * names on the first element, not the entire (potentially huge) payload.
+ */
+function describeIxDiscoveryShape(value: unknown): string {
+	if (value === null || value === undefined) {
+		return `[shape] value=${value}`;
+	}
+	if (Array.isArray(value)) {
+		const first = value[0];
+		const firstKeys = first && typeof first === 'object' ? Object.keys(first).slice(0, 12).join(', ') : typeof first;
+		return `[shape] top=array len=${value.length} first.keys=[${firstKeys}]`;
+	}
+	if (typeof value !== 'object') {
+		return `[shape] top=${typeof value}`;
+	}
+	const obj = value as Record<string, unknown>;
+	const entries = Object.entries(obj).slice(0, 10).map(([k, v]) => {
+		if (Array.isArray(v)) {
+			const first = v[0];
+			const firstKeys = first && typeof first === 'object' ? Object.keys(first).slice(0, 8).join(', ') : typeof first;
+			return `${k}: array(len=${v.length}, first.keys=[${firstKeys}])`;
+		}
+		if (v === null) {
+			return `${k}: null`;
+		}
+		if (typeof v === 'object') {
+			return `${k}: object(keys=[${Object.keys(v as object).slice(0, 6).join(', ')}])`;
+		}
+		return `${k}: ${typeof v}`;
+	});
+	return `[shape] top=object entries={ ${entries.join(' | ')} }`;
+}
+
 class ModeShellContribution extends Disposable {
 
 	static readonly ID = 'workbench.contrib.modeShell';
@@ -3404,6 +3439,8 @@ class ModeShellContribution extends Disposable {
 			if (fingerprints.length) {
 				suggestions = this.processNoteSuggestionsFromFingerprints(fingerprints);
 				log(`[selection] ✓ fingerprints=${fingerprints.length}`);
+			} else {
+				log(`[selection] ✗ fingerprints=0 from detailed json\n${describeIxDiscoveryShape(detailed.value)}`);
 			}
 		}
 
@@ -3424,7 +3461,10 @@ class ModeShellContribution extends Disposable {
 				suggestions = this.processNoteSuggestionsFromHierarchyCards(
 					this.extractDiscoveryCardsFromIxSubsystems(subsystems.value),
 				);
-				log(`[selection] ✓ hierarchy cards=${suggestions.length}`);
+				log(`[selection] ${suggestions.length ? '✓' : '✗'} hierarchy cards=${suggestions.length}`);
+				if (!suggestions.length) {
+					log(describeIxDiscoveryShape(subsystems.value));
+				}
 			}
 		}
 

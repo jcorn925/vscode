@@ -6,12 +6,18 @@
 import { CancellationToken } from '../../../vs/base/common/cancellation.js';
 import { MarkdownString } from '../../../vs/base/common/htmlContent.js';
 import { Disposable } from '../../../vs/base/common/lifecycle.js';
+import { basename } from '../../../vs/base/common/resources.js';
+import { URI } from '../../../vs/base/common/uri.js';
 import { IConfigurationService } from '../../../vs/platform/configuration/common/configuration.js';
+import { IFileService } from '../../../vs/platform/files/common/files.js';
 import { ILogService } from '../../../vs/platform/log/common/log.js';
 import { IQuickInputService } from '../../../vs/platform/quickinput/common/quickInput.js';
 import { IRequestService } from '../../../vs/platform/request/common/request.js';
 import { ISecretStorageService } from '../../../vs/platform/secrets/common/secrets.js';
-import { Command } from '../../../vs/editor/common/languages.js';
+import { IRange, Range } from '../../../vs/editor/common/core/range.js';
+import { Command, isLocation } from '../../../vs/editor/common/languages.js';
+import { IModelService } from '../../../vs/editor/common/services/model.js';
+import { IChatRequestVariableEntry } from '../../../vs/workbench/contrib/chat/common/attachments/chatVariableEntries.js';
 import {
 	ChatMessageRole,
 	IChatMessage,
@@ -46,6 +52,8 @@ import {
 import { readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
 
 const MAX_TOOL_ROUNDS = 15;
+const ATTACHMENT_MAX_BYTES_PER_FILE = 64 * 1024;
+const ATTACHMENT_MAX_BYTES_TOTAL = 256 * 1024;
 
 function isFailedToFetchError(err: unknown): boolean {
 	if (!(err instanceof Error)) {
@@ -105,6 +113,8 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 		@ISecretStorageService private readonly _secretStorage: ISecretStorageService,
 		@IQuickInputService private readonly _quickInput: IQuickInputService,
 		@IRequestService private readonly _requestService: IRequestService,
+		@IFileService private readonly _fileService: IFileService,
+		@IModelService private readonly _modelService: IModelService,
 	) {
 		super();
 	}
@@ -178,7 +188,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 				}
 			}
 
-			const messages = this._buildMessages(request, history);
+			const messages = await this._buildMessages(request, history, token);
 			const countTokens: CountTokensCallback = async (input, t) => this._languageModels.computeTokenLength(modelId, input, t);
 
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -370,7 +380,17 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 	}
 
 	private _buildTools(metadata: NonNullable<ReturnType<ILanguageModelsService['lookupLanguageModel']>>, request: IChatAgentRequest) {
-		const defs = toolsToOpenAiFunctions(this._toolsService.getTools(metadata));
+		// Some built-in tools (e.g. the internal edit tool) are registered with empty
+		// `modelDescription` / no `inputSchema` because the upstream chat routes them through
+		// a non-tool-calling channel. Exposing those to a vanilla OpenAI/Ollama backend just
+		// confuses the model — drop them.
+		const rawTools = Array.from(this._toolsService.getTools(metadata)).filter(t => {
+			const description = (t.modelDescription ?? '').trim();
+			const schema = t.inputSchema as { type?: string; properties?: unknown } | undefined;
+			const hasSchema = !!schema && schema.type === 'object' && schema.properties && Object.keys(schema.properties as Record<string, unknown>).length > 0;
+			return description.length > 0 || hasSchema;
+		});
+		const defs = toolsToOpenAiFunctions(rawTools);
 		const selected = request.userSelectedTools;
 		if (!selected) {
 			return defs;
@@ -378,23 +398,321 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 		return defs.filter(d => selected[d.function.name] !== false);
 	}
 
-	private _buildMessages(request: IChatAgentRequest, history: IChatAgentHistoryEntry[]): IChatMessage[] {
+	private async _buildMessages(request: IChatAgentRequest, history: IChatAgentHistoryEntry[], token: CancellationToken): Promise<IChatMessage[]> {
 		const messages: IChatMessage[] = [];
 		const system = this._configurationService.getValue<string>('custom.ai.systemPrompt');
+		const systemParts: string[] = [];
 		if (system?.trim()) {
-			messages.push({ role: ChatMessageRole.System, content: [{ type: 'text', value: system }] });
+			systemParts.push(system);
 		}
+		if (this._configurationService.getValue<boolean>('custom.ai.tools.enabled') !== false) {
+			systemParts.push(
+				'You have a function-calling tool named `editFile` that modifies or creates files in the user\'s workspace. ' +
+				'When the user asks you to change, write, refactor, fix, or create code, you MUST call `editFile` with the new file contents. ' +
+				'Never tell the user to make changes manually if you can call the tool. ' +
+				'When proposing an edit, return the full updated file in the `code` argument and use the workspace-relative path in `uri`.'
+			);
+		}
+		if (systemParts.length) {
+			messages.push({ role: ChatMessageRole.System, content: [{ type: 'text', value: systemParts.join('\n\n') }] });
+		}
+		// Track total bytes across the whole conversation so we never blow up context with attachments.
+		const budget: AttachmentBudget = { remaining: ATTACHMENT_MAX_BYTES_TOTAL };
 		for (const h of history) {
-			if (h.request.message?.trim()) {
-				messages.push({ role: ChatMessageRole.User, content: [{ type: 'text', value: h.request.message }] });
+			if (token.isCancellationRequested) {
+				return messages;
+			}
+			const userText = await this._composeUserMessage(h.request.message, h.request.variables?.variables, budget, token);
+			if (userText.trim()) {
+				messages.push({ role: ChatMessageRole.User, content: [{ type: 'text', value: userText }] });
 			}
 			const assistantText = historyContentToText(h.response);
 			if (assistantText.trim()) {
 				messages.push({ role: ChatMessageRole.Assistant, content: [{ type: 'text', value: assistantText }] });
 			}
 		}
-		messages.push({ role: ChatMessageRole.User, content: [{ type: 'text', value: request.message }] });
+		const currentText = await this._composeUserMessage(request.message, request.variables?.variables, budget, token);
+		messages.push({ role: ChatMessageRole.User, content: [{ type: 'text', value: currentText }] });
 		return messages;
+	}
+
+	private async _composeUserMessage(
+		message: string | undefined,
+		variables: readonly IChatRequestVariableEntry[] | undefined,
+		budget: AttachmentBudget,
+		token: CancellationToken,
+	): Promise<string> {
+		const prefix = await this._renderAttachments(variables, budget, token);
+		const userText = message ?? '';
+		if (!prefix) {
+			return userText;
+		}
+		if (!userText.trim()) {
+			return prefix;
+		}
+		return `${prefix}\n\n${userText}`;
+	}
+
+	private async _renderAttachments(
+		variables: readonly IChatRequestVariableEntry[] | undefined,
+		budget: AttachmentBudget,
+		token: CancellationToken,
+	): Promise<string> {
+		if (!variables || !variables.length) {
+			return '';
+		}
+		const blocks: string[] = [];
+		for (const entry of variables) {
+			if (token.isCancellationRequested || budget.remaining <= 0) {
+				break;
+			}
+			const block = await this._renderAttachment(entry, budget, token);
+			if (block) {
+				blocks.push(block);
+			}
+		}
+		return blocks.join('\n\n');
+	}
+
+	private async _renderAttachment(
+		entry: IChatRequestVariableEntry,
+		budget: AttachmentBudget,
+		token: CancellationToken,
+	): Promise<string | undefined> {
+		switch (entry.kind) {
+			case 'file':
+			case 'directory':
+			case 'promptFile':
+			case 'sessionReference': {
+				const uri = IChatRequestVariableEntry.toUri(entry);
+				if (!uri) {
+					return undefined;
+				}
+				if (entry.kind === 'directory') {
+					return this._renderDirectory(uri, budget, token);
+				}
+				return this._renderFile(uri, undefined, entry.name ?? basename(uri), 'Attached file', budget, token);
+			}
+			case 'implicit': {
+				const value: unknown = entry.value;
+				let uri: URI | undefined;
+				let range: IRange | undefined;
+				if (URI.isUri(value)) {
+					uri = value;
+				} else if (isLocation(value)) {
+					uri = value.uri;
+					range = value.range;
+				} else if (value && URI.isUri((value as { uri?: URI }).uri)) {
+					uri = (value as { uri: URI }).uri;
+				} else if (URI.isUri(entry.uri)) {
+					uri = entry.uri;
+				}
+				if (!uri) {
+					return undefined;
+				}
+				const label = entry.isSelection ? 'Attached selection' : 'Attached file (current editor)';
+				return this._renderFile(uri, range, entry.name ?? basename(uri), label, budget, token);
+			}
+			case 'symbol': {
+				const loc = entry.value;
+				if (!loc?.uri) {
+					return undefined;
+				}
+				return this._renderFile(loc.uri, loc.range, entry.name ?? basename(loc.uri), 'Attached symbol', budget, token);
+			}
+			case 'paste': {
+				const lang = entry.language || extToLang(entry.fileName) || '';
+				const origin = entry.copiedFrom?.uri ? ` from ${shortUri(entry.copiedFrom.uri)}` : entry.fileName ? ` from ${entry.fileName}` : '';
+				return this._renderFenced(`Attached pasted code${origin}`, lang, entry.code, budget);
+			}
+			case 'string':
+			case 'promptText':
+			case 'workspace':
+			case 'command':
+			case 'debugVariable': {
+				const value = typeof entry.value === 'string' ? entry.value : undefined;
+				if (!value) {
+					return undefined;
+				}
+				return this._renderFenced(`Attached ${entry.kind}: ${entry.name ?? entry.id}`, '', value, budget);
+			}
+			case 'terminalCommand': {
+				const parts: string[] = [];
+				if (entry.command) {
+					parts.push(`$ ${entry.command}`);
+				}
+				if (entry.output) {
+					parts.push(entry.output);
+				}
+				if (typeof entry.exitCode === 'number') {
+					parts.push(`(exit ${entry.exitCode})`);
+				}
+				if (!parts.length) {
+					return undefined;
+				}
+				return this._renderFenced('Attached terminal command', 'bash', parts.join('\n'), budget);
+			}
+			case 'diagnostic': {
+				const where = entry.filterUri ? shortUri(entry.filterUri) : 'workspace';
+				const msg = entry.problemMessage ?? 'See workspace problems.';
+				return `[Attached diagnostic in ${where}] ${msg}`;
+			}
+			case 'image':
+			case 'tool':
+			case 'toolset':
+			case 'notebookOutput':
+			case 'element':
+			case 'generic':
+			case 'scmHistoryItem':
+			case 'scmHistoryItemChange':
+			case 'scmHistoryItemChangeRange':
+			case 'agentFeedback':
+			case 'debugEvents':
+				// Not represented as text for now; tool-using flows handle these elsewhere.
+				return undefined;
+		}
+	}
+
+	private async _renderDirectory(uri: URI, budget: AttachmentBudget, _token: CancellationToken): Promise<string | undefined> {
+		try {
+			const stat = await this._fileService.resolve(uri, { resolveMetadata: false });
+			const children = (stat.children ?? []).slice(0, 200).map(c => `${c.isDirectory ? 'd' : 'f'} ${c.name}`).join('\n');
+			if (!children) {
+				return undefined;
+			}
+			return this._renderFenced(`Attached directory listing: ${shortUri(uri)}`, '', children, budget);
+		} catch (err) {
+			this._logService.warn('[CustomAi] Failed to list directory attachment', uri.toString(), err);
+			return undefined;
+		}
+	}
+
+	private async _renderFile(
+		uri: URI,
+		range: IRange | undefined,
+		displayName: string,
+		labelPrefix: string,
+		budget: AttachmentBudget,
+		token: CancellationToken,
+	): Promise<string | undefined> {
+		const text = await this._readUriText(uri, range, token);
+		if (text === undefined) {
+			return undefined;
+		}
+		const rangeSuffix = range ? ` (lines ${range.startLineNumber}-${range.endLineNumber})` : '';
+		const label = `${labelPrefix}: ${displayName}${rangeSuffix}`;
+		const lang = extToLang(uri.path);
+		return this._renderFenced(label, lang, text, budget);
+	}
+
+	private _renderFenced(label: string, lang: string, body: string, budget: AttachmentBudget): string | undefined {
+		if (budget.remaining <= 0) {
+			return undefined;
+		}
+		let truncated = false;
+		let payload = body;
+		const approxBytes = payload.length;
+		const cap = Math.min(ATTACHMENT_MAX_BYTES_PER_FILE, Math.max(0, budget.remaining));
+		if (approxBytes > cap) {
+			payload = payload.slice(0, cap);
+			truncated = true;
+		}
+		budget.remaining -= payload.length;
+		const fence = '```';
+		const tag = lang ? lang : '';
+		const trailer = truncated ? '\n// …truncated by Custom AI attachment budget' : '';
+		return `[${label}]\n${fence}${tag}\n${payload}${trailer}\n${fence}`;
+	}
+
+	private async _readUriText(uri: URI, range: IRange | undefined, token: CancellationToken): Promise<string | undefined> {
+		const model = this._modelService.getModel(uri);
+		if (model && !model.isDisposed()) {
+			try {
+				if (range) {
+					const r = Range.lift(range);
+					return model.getValueInRange(r);
+				}
+				return model.getValue();
+			} catch (err) {
+				this._logService.warn('[CustomAi] Failed reading buffer attachment', uri.toString(), err);
+			}
+		}
+		try {
+			const content = await this._fileService.readFile(uri, { limits: { size: ATTACHMENT_MAX_BYTES_PER_FILE } }, token);
+			const text = content.value.toString();
+			if (range) {
+				return sliceLines(text, range);
+			}
+			return text;
+		} catch (err) {
+			this._logService.warn('[CustomAi] Failed reading file attachment', uri.toString(), err);
+			return undefined;
+		}
+	}
+}
+
+interface AttachmentBudget {
+	remaining: number;
+}
+
+function sliceLines(text: string, range: IRange): string {
+	const lines = text.split(/\r?\n/);
+	const start = Math.max(0, range.startLineNumber - 1);
+	const end = Math.min(lines.length, range.endLineNumber);
+	if (end <= start) {
+		return '';
+	}
+	return lines.slice(start, end).join('\n');
+}
+
+function shortUri(uri: URI): string {
+	if (uri.scheme === 'file') {
+		return uri.fsPath;
+	}
+	return uri.toString();
+}
+
+function extToLang(pathOrName: string): string {
+	const ext = (pathOrName.includes('.') ? pathOrName.slice(pathOrName.lastIndexOf('.') + 1) : '').toLowerCase();
+	switch (ext) {
+		case 'ts': return 'ts';
+		case 'tsx': return 'tsx';
+		case 'js': return 'js';
+		case 'jsx': return 'jsx';
+		case 'mjs':
+		case 'cjs': return 'js';
+		case 'py': return 'python';
+		case 'rs': return 'rust';
+		case 'go': return 'go';
+		case 'java': return 'java';
+		case 'rb': return 'ruby';
+		case 'php': return 'php';
+		case 'cs': return 'csharp';
+		case 'cpp':
+		case 'cc':
+		case 'cxx':
+		case 'hpp':
+		case 'h': return 'cpp';
+		case 'c': return 'c';
+		case 'kt':
+		case 'kts': return 'kotlin';
+		case 'swift': return 'swift';
+		case 'json':
+		case 'jsonc': return 'json';
+		case 'yaml':
+		case 'yml': return 'yaml';
+		case 'toml': return 'toml';
+		case 'md':
+		case 'markdown': return 'md';
+		case 'css': return 'css';
+		case 'scss': return 'scss';
+		case 'html':
+		case 'htm': return 'html';
+		case 'sh':
+		case 'bash':
+		case 'zsh': return 'bash';
+		case 'sql': return 'sql';
+		default: return '';
 	}
 }
 

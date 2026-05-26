@@ -17,3 +17,8 @@ export const CUSTOM_AI_OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download';
 
 export const CUSTOM_AI_COMMAND_OPEN_OLLAMA_DOWNLOAD = 'customAi.openOllamaDownload';
 export const CUSTOM_AI_COMMAND_OPEN_OLLAMA_SETTINGS = 'customAi.openOllamaSettings';
+
+/** Tool id for the Custom AI file editor tool. */
+export const CUSTOM_AI_EDIT_FILE_TOOL_ID = 'customAi_editFile';
+/** Reference name used by the model (function `name` in OpenAI tool-calling). */
+export const CUSTOM_AI_EDIT_FILE_TOOL_NAME = 'editFile';
