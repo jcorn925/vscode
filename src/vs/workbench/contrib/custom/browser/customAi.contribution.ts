@@ -101,7 +101,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		'custom.ai.edit.applyMode': {
 			type: 'string',
 			enum: ['review', 'direct'],
-			default: 'review',
+			default: 'direct',
 			enumDescriptions: [
 				localize('custom.ai.edit.applyMode.review', 'Show a diff in the chat and require the user to accept the edit (only works in Edit or Agent mode; falls back to direct write otherwise).'),
 				localize('custom.ai.edit.applyMode.direct', 'Apply Custom AI edits to disk immediately without a review step.'),

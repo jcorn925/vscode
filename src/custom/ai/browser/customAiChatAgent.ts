@@ -568,6 +568,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 			case 'scmHistoryItemChangeRange':
 			case 'agentFeedback':
 			case 'debugEvents':
+			case 'browserView':
 				// Not represented as text for now; tool-using flows handle these elsewhere.
 				return undefined;
 		}

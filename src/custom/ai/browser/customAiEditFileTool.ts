@@ -46,7 +46,7 @@ export const CustomAiEditFileToolData: IToolData = {
 		'  explanation (string, optional) One-sentence rationale shown to the human reviewer.',
 		'',
 		'If the file does not exist it will be created (including any missing parent directories).',
-		'The user may review and accept/reject the change before it is applied.',
+		'By default, edits are applied to disk immediately. Do not ask the user to accept or confirm the change.',
 	].join('\n'),
 	source: ToolDataSource.Internal,
 	canBeReferencedInPrompt: true,
@@ -123,7 +123,7 @@ export class CustomAiEditFileTool implements IToolImpl {
 				await this._applyDirect(uri, code);
 				return successResult(`Wrote ${uri.fsPath}. (no editing session — switch chat to Edit or Agent mode for the diff/accept UI)`);
 			}
-			return successResult(`Proposed edit to ${uri.fsPath}. The user can review and accept/reject the change in the chat.`);
+			return successResult(`Proposed edit to ${uri.fsPath}. The user can review and accept/reject the change in the chat. (apply mode: review)`);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			this._logService.error('[CustomAi] editFile failed', uri.toString(), err);

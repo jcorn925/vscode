@@ -105,7 +105,6 @@ export class CustomAiModelProvider extends Disposable implements ILanguageModelC
 					maxOutputTokens: 8192,
 					isDefaultForLocation: {},
 					isUserSelectable: true,
-					modelPickerCategory: undefined,
 					capabilities: { vision: false, toolCalling: true, agentMode: true },
 				},
 			});
@@ -126,7 +125,6 @@ export class CustomAiModelProvider extends Disposable implements ILanguageModelC
 					maxOutputTokens: 8192,
 					isDefaultForLocation: {},
 					isUserSelectable: true,
-					modelPickerCategory: undefined,
 					capabilities: { vision: false, toolCalling: true, agentMode: true },
 				},
 			});

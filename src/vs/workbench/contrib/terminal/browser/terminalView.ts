@@ -238,7 +238,7 @@ export class TerminalViewPane extends ViewPane {
 
 		const targetWindow = dom.getWindow(container);
 		if (typeof targetWindow.ResizeObserver === 'function') {
-			const resizeObserver = this._register(new dom.DisposableResizeObserver((entries) => {
+			const resizeObserver = this._register(new dom.DisposableResizeObserver('TerminalView.body', (entries) => {
 				const entry = entries[0];
 				const nextWidth = Math.round(entry?.contentRect?.width ?? 0);
 				const nextHeight = Math.round(entry?.contentRect?.height ?? 0);
