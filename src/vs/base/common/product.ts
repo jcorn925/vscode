@@ -64,6 +64,25 @@ export type ExtensionVirtualWorkspaceSupport = {
 	readonly override?: boolean;
 };
 
+/**
+ * Per-platform configuration for downloading an agent SDK on demand. When
+ * `IProductConfiguration.agentSdks?.[pkg]` is set, the agent host GETs
+ * `url`, verifies sha256 against `sha256`, and caches the extracted root
+ * under `userDataPath/agent-host/sdk-cache/`.
+ *
+ * The build pipeline patches `agentSdks` per-platform during packaging, so
+ * each shipped product.json carries only the entry appropriate for the
+ * platform it targets — there is no per-target sha lookup at runtime.
+ *
+ * The trust anchor for `sha256` is product.json's own integrity coverage
+ * via `product.checksums` (computed in the same packaging step).
+ */
+export interface IAgentSdkProductConfig {
+	readonly version: string;
+	readonly url: string;
+	readonly sha256: string;
+}
+
 export interface IProductConfiguration {
 	readonly version: string;
 	readonly date?: string;
@@ -79,10 +98,10 @@ export interface IProductConfiguration {
 	readonly win32RegValueName?: string;
 	readonly win32NameVersion?: string;
 	readonly win32VersionedUpdate?: boolean;
-	readonly win32SiblingExeBasename?: string;
+	readonly win32ContextMenu?: { readonly [arch: string]: { readonly clsid: string } };
 	readonly applicationName: string;
 	readonly embedderIdentifier?: string;
-	readonly telemetryAppName?: string;
+	readonly agentsTelemetryAppName?: string;
 
 	readonly urlProtocol: string;
 	readonly dataFolderName: string; // location for extensions (e.g. ~/.vscode-insiders)
@@ -117,6 +136,8 @@ export interface IProductConfiguration {
 		readonly nlsBaseUrl: string;
 		readonly accessSKUs?: string[];
 	};
+
+	readonly agentSdks?: { readonly [packageId: string]: IAgentSdkProductConfig };
 
 	readonly mcpGallery?: {
 		readonly serviceUrl: string;
@@ -212,6 +233,7 @@ export interface IProductConfiguration {
 	}>;
 	readonly extensionsForceVersionByQuality?: readonly string[];
 	readonly builtInExtensionsEnabledWithAutoUpdates: readonly string[];
+	readonly sessionsWindowAllowedExtensions?: readonly string[];
 
 	readonly msftInternalDomains?: string[];
 	readonly linkProtectionTrustedDomains?: readonly string[];
@@ -223,7 +245,6 @@ export interface IProductConfiguration {
 	readonly 'editSessions.store'?: Omit<ConfigurationSyncStore, 'insidersUrl' | 'stableUrl'>;
 	readonly darwinUniversalAssetId?: string;
 	readonly darwinBundleIdentifier?: string;
-	readonly darwinSiblingBundleIdentifier?: string;
 	readonly profileTemplatesUrl?: string;
 
 	readonly commonlyUsedSettings?: string[];
@@ -240,8 +261,6 @@ export interface IProductConfiguration {
 
 	readonly onboardingKeymaps?: readonly IProductOnboardingKeymap[];
 	readonly onboardingThemes?: readonly IProductOnboardingTheme[];
-
-	readonly embedded?: IEmbeddedProductConfiguration;
 
 	/**
 	 * When running as an embedded app, the parent VS Code's policy
@@ -268,22 +287,6 @@ export interface IProductOnboardingTheme {
 	readonly themeId: string;
 	readonly type: 'dark' | 'light' | 'hcDark' | 'hcLight';
 }
-
-export type IEmbeddedProductConfiguration = Pick<IProductConfiguration,
-	'nameShort' |
-	'nameLong' |
-	'applicationName' |
-	'dataFolderName' |
-	'darwinBundleIdentifier' |
-	'darwinSiblingBundleIdentifier' |
-	'urlProtocol' |
-	'win32AppUserModelId' |
-	'win32MutexName' |
-	'win32RegValueName' |
-	'win32NameVersion' |
-	'win32VersionedUpdate' |
-	'win32SiblingExeBasename'
->;
 
 export interface ITunnelApplicationConfig {
 	authenticationProviders: IStringDictionary<{ scopes: string[] }>;
@@ -398,9 +401,7 @@ export interface IDefaultChatAgent {
 	readonly documentationUrl: string;
 	readonly skusDocumentationUrl: string;
 	readonly publicCodeMatchesUrl: string;
-	readonly manageSettingsUrl: string;
 	readonly managePlanUrl: string;
-	readonly manageAdditionalSpendUrl: string;
 	readonly upgradePlanUrl: string;
 	readonly signUpUrl: string;
 	readonly termsStatementUrl: string;
@@ -421,6 +422,7 @@ export interface IDefaultChatAgent {
 	readonly entitlementSignupLimitedUrl: string;
 	readonly tokenEntitlementUrl: string;
 	readonly mcpRegistryDataUrl: string;
+	readonly managedSettingsUrl: string;
 
 	readonly chatQuotaExceededContext: string;
 	readonly completionsQuotaExceededContext: string;
