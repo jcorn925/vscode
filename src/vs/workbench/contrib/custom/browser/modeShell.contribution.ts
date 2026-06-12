@@ -44,6 +44,8 @@ import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../common/theme.js';
 import { IRange } from '../../../../editor/common/core/range.js';
 import { ModeShellChatSessionManager } from './modeShellChatSessions.js';
 import { IIxIntegrationService, type IxIntegrationState, type IxPipelineStepSnapshot, type IxPipelineStepStatus } from '../../../../../custom/ix/IxIntegrationService.js';
+import { DOCKER_DESKTOP_URL, DockerAvailabilityStatus, IDockerAvailabilityService } from '../../../../../custom/docker/DockerAvailabilityService.js';
+import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { IWebviewService } from '../../webview/browser/webview.js';
 import { ProcessNotesCytoscapeView, type ProcessNotesGraphWebviewMessage } from './processNotesCytoscapeView.js';
 import type { ProcessNoteGraph, ProcessNoteId, ProcessNotesFile } from './processNotesTypes.js';
@@ -161,6 +163,8 @@ class ModeShellContribution extends Disposable {
 	private readonly uiChatWidget: ChatWidget;
 	private readonly processChatWidget: ChatWidget;
 	private readonly processIxWebHint: HTMLElement;
+	private readonly processDockerBanner: HTMLElement;
+	private readonly processDockerBannerText: HTMLElement;
 	private readonly processNotesPanel: HTMLElement;
 	private readonly processNotesGraphAnchor: HTMLElement;
 	private readonly processNotesGraphView: ProcessNotesCytoscapeView;
@@ -224,6 +228,8 @@ class ModeShellContribution extends Disposable {
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IIxIntegrationService private readonly ixIntegrationService: IIxIntegrationService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IDockerAvailabilityService private readonly dockerAvailabilityService: IDockerAvailabilityService,
+		@IOpenerService private readonly openerService: IOpenerService,
 	) {
 		super();
 
@@ -914,6 +920,30 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench.custom-mode-web .custom-mode-ix-webhint {
 				display: block;
+			}
+
+			.monaco-workbench .custom-mode-docker-banner {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 12px;
+				margin: 0 12px 10px;
+				padding: 10px 12px;
+				border-radius: 8px;
+				border: 1px solid var(--vscode-inputValidation-warningBorder);
+				background-color: var(--vscode-inputValidation-warningBackground);
+				color: var(--vscode-inputValidation-warningForeground);
+				font-size: 12px;
+				line-height: 1.4;
+			}
+
+			.monaco-workbench .custom-mode-docker-banner.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-docker-banner-text {
+				flex: 1 1 auto;
+				min-width: 0;
 			}
 
 			.monaco-workbench .custom-mode-ix-pipeline {
@@ -1848,6 +1878,17 @@ class ModeShellContribution extends Disposable {
 		this.processSetup.appendChild(processSetupDetails);
 		this.processIxWebHint = $('div.custom-mode-ix-webhint', undefined,
 			localize('customMode.ixWebHint', 'Ix CLI automation (install, Docker, map, watch) runs only in the desktop application, not in the browser.'));
+		this.processDockerBannerText = $('div.custom-mode-docker-banner-text');
+		const processDockerBannerButton = $('button.custom-mode-callout-button', {
+			type: 'button',
+		}, localize('customMode.dockerDesktopDownload', 'Get Docker Desktop')) as HTMLButtonElement;
+		this.processDockerBanner = $('div.custom-mode-docker-banner.hidden', undefined,
+			this.processDockerBannerText,
+			processDockerBannerButton,
+		);
+		this._register(addDisposableListener(processDockerBannerButton, 'click', () => {
+			void this.openerService.open(URI.parse(DOCKER_DESKTOP_URL));
+		}));
 
 		this.processIxPipeline = $('div.custom-mode-ix-pipeline');
 		this.processIxPipelineGlobalRow = $('div.custom-mode-ix-pipeline-global-row');
@@ -1927,6 +1968,7 @@ class ModeShellContribution extends Disposable {
 		this.processNotesGraphView.setGraph({ nodes: [], edges: [] } satisfies ProcessNoteGraph);
 
 		this.processMainContent = $('div.custom-mode-process-main-content');
+		this.processMainContent.appendChild(this.processDockerBanner);
 		this.processMainContent.appendChild(this.processCallout);
 		this.processMainContent.appendChild(this.processIxWebHint);
 		this.processMainContent.appendChild(this.processIxPipeline);
@@ -1990,6 +2032,10 @@ class ModeShellContribution extends Disposable {
 		}));
 		this._register(this.devServerService.onDidChangeState(state => this.updateDevServerDebug(state)));
 		this._register(this.ixIntegrationService.onDidChangeState(state => this.updateIxDebug(state)));
+		if (!isWeb) {
+			this._register(this.dockerAvailabilityService.onDidChangeStatus(() => this.updateProcessDockerBanner()));
+			void this.dockerAvailabilityService.refresh().then(() => this.updateProcessDockerBanner());
+		}
 
 		this.updateProjectState();
 		this.updateDevServerDebug(this.devServerService.getState());
@@ -2276,6 +2322,31 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
+	private updateProcessDockerBanner(): void {
+		if (isWeb) {
+			this.processDockerBanner.classList.add('hidden');
+			return;
+		}
+		const status = this.dockerAvailabilityService.getStatus();
+		if (status === DockerAvailabilityStatus.Missing) {
+			this.processDockerBannerText.textContent = localize(
+				'customMode.dockerDesktopBannerMissing',
+				'Docker Desktop is required for Ix and Docker MCP on the Process tab. Install Docker Desktop, start it, and keep it running.',
+			);
+			this.processDockerBanner.classList.remove('hidden');
+			return;
+		}
+		if (status === DockerAvailabilityStatus.McpToolkitMissing) {
+			this.processDockerBannerText.textContent = localize(
+				'customMode.dockerDesktopBannerMcpToolkit',
+				'Docker is installed, but MCP Toolkit is not enabled. Open Docker Desktop → Settings → Beta features → enable Docker MCP Toolkit, then reload this window.',
+			);
+			this.processDockerBanner.classList.remove('hidden');
+			return;
+		}
+		this.processDockerBanner.classList.add('hidden');
+	}
+
 	private updateMode(mode: Mode): void {
 		for (const [itemMode, button] of this.topModeButtons) {
 			const isActive = itemMode === mode;
@@ -2289,9 +2360,15 @@ class ModeShellContribution extends Disposable {
 
 		if (mode !== 'Process') {
 			this.ixPipelineDurationTicker.clear();
-		} else if (this.lastIxPipelineState) {
-			this.refreshIxPipelineTicker(this.lastIxPipelineState);
+		} else {
+			if (this.lastIxPipelineState) {
+				this.refreshIxPipelineTicker(this.lastIxPipelineState);
+			}
+			if (!isWeb) {
+				void this.dockerAvailabilityService.refresh().then(() => this.updateProcessDockerBanner());
+			}
 		}
+		this.updateProcessDockerBanner();
 
 		const isUi = mode === 'UI';
 		this.uiContainer.classList.toggle('visible', isUi);
@@ -3408,6 +3485,19 @@ class ModeShellContribution extends Disposable {
 			}
 			return;
 		}
+
+		log(`[discovery] … ensure ix backend`);
+		const backendReady = await this.ixIntegrationService.ensureIxBackendReady(discoveryFolder);
+		if (!backendReady) {
+			const hint = formatIxDiscoveryFailureHint('fetch failed', 'fetch failed');
+			log(`[discovery] ✗ ix docker start failed or backend still unreachable${hint ? `\n${hint}` : ''}`);
+			log(`[discovery] ✗ No discovery JSON available.`);
+			if (this.processNotesGraphLayer === 'overview') {
+				this.renderProcessNotesCards();
+			}
+			return;
+		}
+		log(`[discovery] ✓ ix backend ready`);
 
 		log(`[discovery] … ensure ix mapped`);
 		const hydrate = await this.ixIntegrationService.ensureIxMappedIfEmpty(discoveryFolder);

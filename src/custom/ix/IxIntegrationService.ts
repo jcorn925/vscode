@@ -7,10 +7,14 @@ import { Emitter, Event } from '../../vs/base/common/event.js';
 import { Disposable, DisposableStore } from '../../vs/base/common/lifecycle.js';
 import { isWeb, isWindows } from '../../vs/base/common/platform.js';
 import { URI } from '../../vs/base/common/uri.js';
+import { joinPath } from '../../vs/base/common/resources.js';
 import { RunOnceScheduler } from '../../vs/base/common/async.js';
+import { parse, type YamlMapNode, type YamlNode } from '../../vs/base/common/yaml.js';
 import { createDecorator } from '../../vs/platform/instantiation/common/instantiation.js';
 import { InstantiationType, registerSingleton } from '../../vs/platform/instantiation/common/extensions.js';
 import { IConfigurationService } from '../../vs/platform/configuration/common/configuration.js';
+import { INativeEnvironmentService } from '../../vs/platform/environment/common/environment.js';
+import { IFileService } from '../../vs/platform/files/common/files.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../vs/platform/workspace/common/workspace.js';
 import { ITerminalService } from '../../vs/workbench/contrib/terminal/browser/terminal.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../vs/platform/storage/common/storage.js';
@@ -56,6 +60,10 @@ export interface IIxIntegrationService {
 	installOrResolve(): Promise<void>;
 	openDocs(): Promise<void>;
 	runJsonQuery(args: readonly string[], cwd?: URI, timeoutMs?: number): Promise<{ ok: true; value: unknown; raw: string } | { ok: false; error: string; raw: string; exitCode: number }>;
+	/**
+	 * Ensures the Ix Docker backend on port 8090 is reachable, running `ix docker start` when needed.
+	 */
+	ensureIxBackendReady(cwd: URI): Promise<boolean>;
 	/**
 	 * Runs `ix stats`; if there are no nodes, runs `ix map .` once to hydrate the workspace graph.
 	 * Use before `ix subsystems` / JSON `ix map` in Process notes flows.
@@ -122,6 +130,95 @@ function looksIxGraphEmptyFromStats(statsOutput: string): boolean {
 	return /nodes\s*\(\s*0\s+total\s*\)/i.test(stripAnsi(statsOutput));
 }
 
+function looksIxBackendUnreachable(output: string): boolean {
+	return /fetch failed|ECONNREFUSED|connection refused|connect ECONNREFUSED/i.test(output);
+}
+
+interface IxWorkspaceConfigEntry {
+	readonly workspace_name?: string;
+	readonly root_path?: string;
+	readonly default?: boolean;
+}
+
+function yamlScalarValue(node: YamlNode | undefined): string | undefined {
+	return node?.type === 'scalar' ? node.value : undefined;
+}
+
+function yamlBooleanValue(node: YamlNode | undefined): boolean | undefined {
+	const value = yamlScalarValue(node);
+	if (value === 'true') {
+		return true;
+	}
+	if (value === 'false') {
+		return false;
+	}
+	return undefined;
+}
+
+function yamlMapProperty(map: YamlMapNode, key: string): YamlNode | undefined {
+	return map.properties.find(p => p.key.value === key)?.value;
+}
+
+function parseIxWorkspacesFromConfig(root: YamlNode | undefined): IxWorkspaceConfigEntry[] {
+	if (!root || root.type !== 'map') {
+		return [];
+	}
+	const workspacesNode = yamlMapProperty(root, 'workspaces');
+	if (!workspacesNode || workspacesNode.type !== 'sequence') {
+		return [];
+	}
+	const workspaces: IxWorkspaceConfigEntry[] = [];
+	for (const item of workspacesNode.items) {
+		if (item.type !== 'map') {
+			continue;
+		}
+		workspaces.push({
+			workspace_name: yamlScalarValue(yamlMapProperty(item, 'workspace_name')),
+			root_path: yamlScalarValue(yamlMapProperty(item, 'root_path')),
+			default: yamlBooleanValue(yamlMapProperty(item, 'default')),
+		});
+	}
+	return workspaces;
+}
+
+function getIxDefaultWorkspaceRootFromConfig(root: YamlNode | undefined): string | undefined {
+	if (!root || root.type !== 'map') {
+		return undefined;
+	}
+	const workspaces = parseIxWorkspacesFromConfig(root);
+	const namedWorkspace = yamlScalarValue(yamlMapProperty(root, 'workspace'));
+	if (namedWorkspace) {
+		const match = workspaces.find(w => w.workspace_name === namedWorkspace);
+		if (match?.root_path) {
+			return match.root_path;
+		}
+	}
+	return workspaces.find(w => w.default)?.root_path;
+}
+
+function normalizeIxFilesystemPath(path: string): string {
+	let normalized = path.trim();
+	while (normalized.length > 1 && (normalized.endsWith('/') || normalized.endsWith('\\'))) {
+		normalized = normalized.slice(0, -1);
+	}
+	try {
+		return URI.file(normalized).fsPath;
+	} catch {
+		return normalized;
+	}
+}
+
+/** Skip reset when a single-root VS Code folder is already the Ix default workspace. */
+function vscodeFoldersMatchIxDefaultWorkspace(
+	folders: ReadonlyArray<{ readonly uri: URI }>,
+	ixDefaultRoot: string | undefined,
+): boolean {
+	if (!ixDefaultRoot || folders.length !== 1) {
+		return false;
+	}
+	return normalizeIxFilesystemPath(folders[0].uri.fsPath) === normalizeIxFilesystemPath(ixDefaultRoot);
+}
+
 function tailOutput(text: string): string {
 	const t = stripAnsi(text).trim();
 	if (!t) {
@@ -177,12 +274,15 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 	private readonly watchInstances = new Map<string, DisposableStore>();
 	private readonly startScheduler = this._register(new RunOnceScheduler(() => void this.runAutoStartPipeline(), 900));
 	private readonly pipelineOutputFlushScheduler = this._register(new RunOnceScheduler(() => this.fireState(), 120));
+	private dockerStartInFlight: Promise<boolean> | undefined;
 
 	constructor(
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@IStorageService private readonly storageService: IStorageService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@INativeEnvironmentService private readonly environmentService: INativeEnvironmentService,
+		@IFileService private readonly fileService: IFileService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
 		@IOpenerService private readonly openerService: IOpenerService,
@@ -390,6 +490,16 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		return Boolean(this.configurationService.getValue<boolean>('custom.ix.autoResetOnStart') ?? true);
 	}
 
+	private async getIxDefaultWorkspaceRootPath(): Promise<string | undefined> {
+		try {
+			const configUri = joinPath(this.environmentService.userHome, '.ix', 'config.yaml');
+			const content = await this.fileService.readFile(configUri);
+			return getIxDefaultWorkspaceRootFromConfig(parse(content.value.toString()));
+		} catch {
+			return undefined;
+		}
+	}
+
 	private getInstallUrl(): string {
 		const raw = this.configurationService.getValue<string>('custom.ix.installScriptUrl');
 		const url = typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : 'https://ix-infra.com/install.sh';
@@ -479,6 +589,63 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 	}
 
+	private async probeIxBackendReachable(cwd: URI, ixBin: string): Promise<boolean> {
+		const stats = await this.runCommand(cwd, `${this.quoteIx(ixBin)} stats`, 15_000, { ui: 'none' });
+		if (stats.exitCode === 0) {
+			return true;
+		}
+		const output = stripAnsi(stats.output);
+		if (looksIxBackendUnreachable(output)) {
+			return false;
+		}
+		const status = await this.runCommand(cwd, `${this.quoteIx(ixBin)} status`, 15_000, { ui: 'none' });
+		return status.exitCode === 0 && /Ix Memory:\s*ok/i.test(stripAnsi(status.output));
+	}
+
+	private async ensureIxDockerStarted(
+		cwd: URI,
+		ixBin: string,
+		opts?: { ui?: 'pipeline' | 'none'; stepId?: string; skipIfReachable?: boolean },
+	): Promise<boolean> {
+		if (opts?.skipIfReachable && await this.probeIxBackendReachable(cwd, ixBin)) {
+			return true;
+		}
+		if (this.dockerStartInFlight) {
+			return this.dockerStartInFlight;
+		}
+		const ui = opts?.ui ?? 'none';
+		this.dockerStartInFlight = (async () => {
+			try {
+				const docker = await this.runCommand(cwd, `${this.quoteIx(ixBin)} docker start`, 300_000, {
+					ui,
+					stepId: opts?.stepId,
+				});
+				return docker.exitCode === 0;
+			} finally {
+				this.dockerStartInFlight = undefined;
+			}
+		})();
+		return this.dockerStartInFlight;
+	}
+
+	async ensureIxBackendReady(cwd: URI): Promise<boolean> {
+		if (isWeb || !this.isIxAutomationEnabled()) {
+			return false;
+		}
+		const ixBin = await this.resolveIxBinary(cwd);
+		if (!ixBin) {
+			return false;
+		}
+		if (await this.probeIxBackendReachable(cwd, ixBin)) {
+			return true;
+		}
+		const started = await this.ensureIxDockerStarted(cwd, ixBin, { ui: 'none' });
+		if (!started) {
+			return false;
+		}
+		return this.probeIxBackendReachable(cwd, ixBin);
+	}
+
 	async ensureIxMappedIfEmpty(cwd: URI): Promise<{ readonly statsPreview: string; readonly ranMap: boolean; readonly statsOk: boolean }> {
 		if (isWeb) {
 			return { statsPreview: '', ranMap: false, statsOk: false };
@@ -486,6 +653,13 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		const ixBin = await this.resolveIxBinary(cwd);
 		if (!ixBin) {
 			return { statsPreview: '', ranMap: false, statsOk: false };
+		}
+		if (!await this.ensureIxBackendReady(cwd)) {
+			return {
+				statsPreview: localize('ix.error.backendUnreachable', 'Ix backend is not reachable on port 8090.'),
+				ranMap: false,
+				statsOk: false,
+			};
 		}
 		const stats = await this.runCommand(cwd, `${this.quoteIx(ixBin)} stats`, 30_000, { ui: 'none' });
 		const statsPreview = stripAnsi(stats.output).trim();
@@ -512,6 +686,15 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		const ixBin = await this.resolveIxBinary(folder);
 		if (!ixBin) {
 			return { ok: false, error: 'Could not resolve ix CLI binary.', raw: '', exitCode: 1 };
+		}
+
+		if (!await this.ensureIxBackendReady(folder)) {
+			return {
+				ok: false,
+				error: localize('ix.error.backendUnreachable', 'Ix backend is not reachable on port 8090.'),
+				raw: '',
+				exitCode: 1,
+			};
 		}
 
 		// Shell passes through `bash -c "<cmd>"` / `cmd /c <cmd>` — values with spaces (subsystem labels like
@@ -719,15 +902,15 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 
 		this.beginStep(STEP_DOCKER);
 		try {
-			const docker = await this.runCommand(primary, `${this.quoteIx(ix)} docker start`, 300_000, { stepId: STEP_DOCKER });
+			const dockerStarted = await this.ensureIxDockerStarted(primary, ix, { ui: 'pipeline', stepId: STEP_DOCKER, skipIfReachable: true });
 			if (gen !== this.pipelineGeneration) {
 				return;
 			}
-			if (docker.exitCode !== 0) {
+			if (!dockerStarted) {
 				const tail = tailOutput(this.outputBuffer);
 				const detail = tail
-					? localize('ix.error.dockerWithLog', '`ix docker start` failed (exit {0}). Recent output:\n\n{1}', String(docker.exitCode), tail)
-					: localize('ix.error.docker', '`ix docker start` failed (exit {0}). Is Docker running?', String(docker.exitCode));
+					? localize('ix.error.dockerWithLog', '`ix docker start` failed (exit {0}). Recent output:\n\n{1}', '1', tail)
+					: localize('ix.error.docker', '`ix docker start` failed (exit {0}). Is Docker running?', '1');
 				this.completeStep(STEP_DOCKER, 'error', detail);
 				this.markRemainingIdleStepsSkipped();
 				this.setPhase('error', detail);
@@ -751,26 +934,43 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 
 		if (this.isAutoResetOnStartEnabled()) {
 			this.beginStep(STEP_RESET);
-			try {
-				// --code wipes files/functions/classes/regions only; preserves goals/plans/tasks/bugs/decisions.
-				// Use a generous 5-minute budget: large repos can churn for a while and 60s was tripping the
-				// timeout mid-"Wiping code graph..." spinner.
-				const reset = await this.runCommand(primary, `${this.quoteIx(ix)} reset --code -y`, 300_000, { stepId: STEP_RESET, debounceOutput: true });
-				if (gen !== this.pipelineGeneration) {
-					return;
+			const ixDefaultRoot = await this.getIxDefaultWorkspaceRootPath();
+			if (gen !== this.pipelineGeneration) {
+				return;
+			}
+			if (vscodeFoldersMatchIxDefaultWorkspace(folders, ixDefaultRoot)) {
+				const resetStep = this.findStep(STEP_RESET);
+				if (resetStep) {
+					resetStep.command = localize('ix.reset.skippedCmd', '(skipped — open workspace matches Ix default)');
+					resetStep.outputBuf = localize(
+						'ix.reset.skippedSameWorkspace',
+						'Skipped `ix reset --code`: the open workspace already matches the default Ix workspace ({0}).',
+						ixDefaultRoot ?? '',
+					);
 				}
-				if (reset.exitCode !== 0) {
-					const err = localize('ix.error.reset', '`ix reset --code` failed (exit {0}).', String(reset.exitCode));
-					this.completeStep(STEP_RESET, 'error', err);
-					// Non-fatal: continue to stats/map so an aging-but-present graph is still usable.
-				} else {
-					this.completeStep(STEP_RESET, 'success');
+				this.completeStep(STEP_RESET, 'skipped');
+			} else {
+				try {
+					// --code wipes files/functions/classes/regions only; preserves goals/plans/tasks/bugs/decisions.
+					// Use a generous 5-minute budget: large repos can churn for a while and 60s was tripping the
+					// timeout mid-"Wiping code graph..." spinner.
+					const reset = await this.runCommand(primary, `${this.quoteIx(ix)} reset --code -y`, 300_000, { stepId: STEP_RESET, debounceOutput: true });
+					if (gen !== this.pipelineGeneration) {
+						return;
+					}
+					if (reset.exitCode !== 0) {
+						const err = localize('ix.error.reset', '`ix reset --code` failed (exit {0}).', String(reset.exitCode));
+						this.completeStep(STEP_RESET, 'error', err);
+						// Non-fatal: continue to stats/map so an aging-but-present graph is still usable.
+					} else {
+						this.completeStep(STEP_RESET, 'success');
+					}
+				} catch (e) {
+					if (gen !== this.pipelineGeneration) {
+						return;
+					}
+					this.completeStep(STEP_RESET, 'error', String(e));
 				}
-			} catch (e) {
-				if (gen !== this.pipelineGeneration) {
-					return;
-				}
-				this.completeStep(STEP_RESET, 'error', String(e));
 			}
 		}
 

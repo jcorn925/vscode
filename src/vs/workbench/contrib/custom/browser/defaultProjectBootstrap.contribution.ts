@@ -8,6 +8,7 @@ import { Registry } from '../../../../platform/registry/common/platform.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { WorkbenchPhase, registerWorkbenchContribution2 } from '../../../common/contributions.js';
 import { DefaultProjectBootstrapContribution } from './defaultProjectBootstrap.js';
+import { DockerMcpBootstrapContribution } from './dockerMcpBootstrap.js';
 
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 	id: 'custom',
@@ -41,13 +42,13 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		'custom.ix.autoStart': {
 			type: 'boolean',
 			default: true,
-			description: localize('custom.ix.autoStart', "When enabled and a folder workspace is open, automatically run `ix docker start`, `ix map` for each workspace root, then `ix watch` per root."),
+			description: localize('custom.ix.autoStart', "When enabled and a folder workspace is open, automatically run `ix docker start`, `ix map` for each workspace root, then `ix watch` per root. Requires Docker Desktop to be installed and running."),
 			scope: ConfigurationScope.APPLICATION
 		},
 		'custom.ix.autoResetOnStart': {
 			type: 'boolean',
 			default: true,
-			description: localize('custom.ix.autoResetOnStart', "When enabled, run `ix reset --code -y` between `ix docker start` and `ix map` on each startup so the architecture graph reflects only the current workspace. Preserves plans, goals, tasks, bugs, and decisions."),
+			description: localize('custom.ix.autoResetOnStart', "When enabled, run `ix reset --code -y` between `ix docker start` and `ix map` on startup when switching to a different workspace than the Ix default. Skipped when a single-root VS Code folder already matches the default Ix workspace. Preserves plans, goals, tasks, bugs, and decisions."),
 			scope: ConfigurationScope.APPLICATION
 		},
 		'custom.ix.autoInstall': {
@@ -73,9 +74,22 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			default: '',
 			description: localize('custom.ix.preferredWorkspaceFolder', "In a multi-root workspace, the Explorer folder **name**, **basename**, or filesystem path substring to use as the Process notes / Ix evidence root. When empty, the first workspace folder is used. This does not change `~/.ix/config.yaml`; it tells this editor which VS Code workspace root drives `cwd` when running `ix` for Process notes and suggestions."),
 			scope: ConfigurationScope.WINDOW
+		},
+		'custom.dockerMcp.autoInstall': {
+			type: 'boolean',
+			default: true,
+			description: localize('custom.dockerMcp.autoInstall', "When enabled on desktop, automatically register the Docker MCP Toolkit gateway (`docker mcp gateway run`) as the `MCP_DOCKER` server if it is not already installed. Requires Docker Desktop to be installed, running, and MCP Toolkit enabled."),
+			scope: ConfigurationScope.APPLICATION
+		},
+		'custom.dockerMcp.profile': {
+			type: 'string',
+			default: 'default',
+			description: localize('custom.dockerMcp.profile', "Docker MCP Toolkit profile passed to `docker mcp gateway run --profile` when custom.dockerMcp.autoInstall is enabled."),
+			scope: ConfigurationScope.APPLICATION
 		}
 	}
 });
 
 registerWorkbenchContribution2(DefaultProjectBootstrapContribution.ID, DefaultProjectBootstrapContribution, WorkbenchPhase.AfterRestored);
+registerWorkbenchContribution2(DockerMcpBootstrapContribution.ID, DockerMcpBootstrapContribution, WorkbenchPhase.AfterRestored);
 

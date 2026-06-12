@@ -328,7 +328,7 @@ export function formatIxDiscoveryFailureHint(error: string | undefined, raw?: st
 	if (!isIxBackendUnreachableError(error, raw)) {
 		return undefined;
 	}
-	return 'Ix backend is not reachable (port 8090). Run `ix docker start` and fix any port conflicts, then reload.';
+	return 'Ix backend is not reachable (port 8090). VS Code attempted `ix docker start` automatically; if this persists, check Docker Desktop and port conflicts, then reload.';
 }
 
 export function ixSubsystemsDetailedDiscoveryArgsAfterUnknownOption(
