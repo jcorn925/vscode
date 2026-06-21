@@ -63,6 +63,11 @@ export interface IIxIntegrationService {
 	/**
 	 * Ensures the Ix Docker backend on port 8090 is reachable, running `ix docker start` when needed.
 	 */
+	/**
+	 * Waits for the startup pipeline Docker step (if running), then ensures the backend is reachable.
+	 * Prefer this over {@link ensureIxBackendReady} from Process discovery to avoid racing docker start.
+	 */
+	prepareForDiscovery(cwd: URI): Promise<boolean>;
 	ensureIxBackendReady(cwd: URI): Promise<boolean>;
 	/**
 	 * Runs `ix stats`; if there are no nodes, runs `ix map .` once to hydrate the workspace graph.
@@ -81,6 +86,12 @@ const STEP_RESOLVE = 'resolve';
 const STEP_DOCKER = 'docker';
 const STEP_RESET = 'ix-reset';
 const STEP_STATS = 'ix-stats';
+
+/** Backend health probes can be slow on large graphs; 15s was falsely failing the Docker start step. */
+const IX_BACKEND_PROBE_TIMEOUT_MS = 60_000;
+const IX_DOCKER_START_TIMEOUT_MS = 300_000;
+const IX_BACKEND_READY_RETRY_COUNT = 12;
+const IX_BACKEND_READY_RETRY_DELAY_MS = 10_000;
 
 function mapStepId(uri: URI): string {
 	return `map:${uri.toString()}`;
@@ -584,48 +595,68 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			}
 
 			return { exitCode, output: stripAnsi(buf) };
+		} catch (e) {
+			if (String(e).includes('timeout')) {
+				return { exitCode: 1, output: stripAnsi(buf) };
+			}
+			throw e;
 		} finally {
 			store.dispose();
 		}
 	}
 
+	private async runCommandOrTimeout(
+		cwd: URI | undefined,
+		commandLine: string,
+		timeoutMs: number,
+		opts?: { ui?: 'pipeline' | 'none'; stepId?: string; debounceOutput?: boolean },
+	): Promise<{ exitCode: number; output: string; timedOut: boolean }> {
+		try {
+			const result = await this.runCommand(cwd, commandLine, timeoutMs, opts);
+			return { ...result, timedOut: false };
+		} catch (e) {
+			if (String(e).includes('timeout')) {
+				return { exitCode: 1, output: '', timedOut: true };
+			}
+			throw e;
+		}
+	}
+
+	private async probeDockerDaemon(cwd: URI | undefined): Promise<boolean> {
+		const r = await this.runCommandOrTimeout(cwd, 'docker version --format {{.Server.Version}}', 20_000, { ui: 'none' });
+		return !r.timedOut && r.exitCode === 0;
+	}
+
 	private async probeIxBackendReachable(cwd: URI, ixBin: string): Promise<boolean> {
-		const stats = await this.runCommand(cwd, `${this.quoteIx(ixBin)} stats`, 15_000, { ui: 'none' });
-		if (stats.exitCode === 0) {
+		const stats = await this.runCommandOrTimeout(cwd, `${this.quoteIx(ixBin)} stats`, IX_BACKEND_PROBE_TIMEOUT_MS, { ui: 'none' });
+		if (!stats.timedOut && stats.exitCode === 0) {
 			return true;
 		}
 		const output = stripAnsi(stats.output);
 		if (looksIxBackendUnreachable(output)) {
 			return false;
 		}
-		const status = await this.runCommand(cwd, `${this.quoteIx(ixBin)} status`, 15_000, { ui: 'none' });
-		return status.exitCode === 0 && /Ix Memory:\s*ok/i.test(stripAnsi(status.output));
+		if (stats.timedOut) {
+			// Slow graph — containers may still be up; check ix status before declaring down.
+		}
+		const status = await this.runCommandOrTimeout(cwd, `${this.quoteIx(ixBin)} status`, IX_BACKEND_PROBE_TIMEOUT_MS, { ui: 'none' });
+		return !status.timedOut && status.exitCode === 0 && /Ix Memory:\s*ok/i.test(stripAnsi(status.output));
 	}
 
-	private async ensureIxDockerStarted(
-		cwd: URI,
-		ixBin: string,
-		opts?: { ui?: 'pipeline' | 'none'; stepId?: string; skipIfReachable?: boolean },
-	): Promise<boolean> {
-		if (opts?.skipIfReachable && await this.probeIxBackendReachable(cwd, ixBin)) {
-			return true;
-		}
-		if (this.dockerStartInFlight) {
-			return this.dockerStartInFlight;
-		}
-		const ui = opts?.ui ?? 'none';
-		this.dockerStartInFlight = (async () => {
-			try {
-				const docker = await this.runCommand(cwd, `${this.quoteIx(ixBin)} docker start`, 300_000, {
-					ui,
-					stepId: opts?.stepId,
-				});
-				return docker.exitCode === 0;
-			} finally {
-				this.dockerStartInFlight = undefined;
+	private async waitForPipelineDockerIdle(maxWaitMs: number = IX_DOCKER_START_TIMEOUT_MS + 30_000): Promise<void> {
+		const deadline = Date.now() + maxWaitMs;
+		while (Date.now() < deadline) {
+			const dockerStep = this.findStep(STEP_DOCKER);
+			if (!dockerStep || dockerStep.status !== 'running') {
+				return;
 			}
-		})();
-		return this.dockerStartInFlight;
+			await new Promise<void>(resolve => setTimeout(resolve, 1000));
+		}
+	}
+
+	async prepareForDiscovery(cwd: URI): Promise<boolean> {
+		await this.waitForPipelineDockerIdle();
+		return this.ensureIxBackendReady(cwd);
 	}
 
 	async ensureIxBackendReady(cwd: URI): Promise<boolean> {
@@ -636,6 +667,9 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		if (!ixBin) {
 			return false;
 		}
+		if (!await this.probeDockerDaemon(cwd)) {
+			return false;
+		}
 		if (await this.probeIxBackendReachable(cwd, ixBin)) {
 			return true;
 		}
@@ -643,7 +677,47 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		if (!started) {
 			return false;
 		}
-		return this.probeIxBackendReachable(cwd, ixBin);
+		for (let attempt = 0; attempt < IX_BACKEND_READY_RETRY_COUNT; attempt++) {
+			if (await this.probeIxBackendReachable(cwd, ixBin)) {
+				return true;
+			}
+			await new Promise<void>(resolve => setTimeout(resolve, IX_BACKEND_READY_RETRY_DELAY_MS));
+		}
+		return false;
+	}
+
+	private async ensureIxDockerStarted(
+		cwd: URI,
+		ixBin: string,
+		opts?: { ui?: 'pipeline' | 'none'; stepId?: string; skipIfReachable?: boolean },
+	): Promise<boolean> {
+		if (opts?.skipIfReachable) {
+			try {
+				if (await this.probeDockerDaemon(cwd) && await this.probeIxBackendReachable(cwd, ixBin)) {
+					return true;
+				}
+			} catch {
+				// Fall through to docker start.
+			}
+		}
+		if (this.dockerStartInFlight) {
+			return this.dockerStartInFlight;
+		}
+		const ui = opts?.ui ?? 'none';
+		this.dockerStartInFlight = (async () => {
+			try {
+				const docker = await this.runCommand(cwd, `${this.quoteIx(ixBin)} docker start`, IX_DOCKER_START_TIMEOUT_MS, {
+					ui,
+					stepId: opts?.stepId,
+				});
+				return docker.exitCode === 0;
+			} catch (e) {
+				return false;
+			} finally {
+				this.dockerStartInFlight = undefined;
+			}
+		})();
+		return this.dockerStartInFlight;
 	}
 
 	async ensureIxMappedIfEmpty(cwd: URI): Promise<{ readonly statsPreview: string; readonly ranMap: boolean; readonly statsOk: boolean }> {
@@ -698,7 +772,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 
 		// Shell passes through `bash -c "<cmd>"` / `cmd /c <cmd>` — values with spaces (subsystem labels like
-		// "Graphify Out") must be quoted or they split into wrong argv and ix exits non‑zero, spamming terminal errors.
+		// "Graphify Out") must be quoted or they split into wrong argv and ix exits non-zero, spamming terminal errors.
 		const cmd = `${this.quoteIx(ixBin)} ${args.map(a => this.quoteShellArg(a)).join(' ')}`;
 		const { exitCode, output } = await this.runCommand(folder, cmd, timeoutMs, { ui: 'none' });
 		if (exitCode !== 0) {

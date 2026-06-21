@@ -7,12 +7,16 @@ import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import {
 	buildIxSubsystemsDetailedDiscoveryArgs,
+	buildSubsystemDetailGraph,
 	formatCouplingSummary,
 	formatInboundSummary,
 	ixSubsystemsDetailedDiscoveryArgsAfterUnknownOption,
 	isIxUnknownOptionError,
 	isIxUnknownOptionFailure,
 	parseSubsystemFingerprints,
+	parseMemberFilePaths,
+	parsePathEdges,
+	formatSubsystemPathEdge,
 	pickEntryPath,
 	pickTopExternalDependency,
 } from '../processNotesSubsystemSnapshot.js';
@@ -58,9 +62,20 @@ suite('processNotesSubsystemSnapshot', () => {
 		assert.strictEqual(fromScores[0]!.name, 'Schedule');
 		assert.strictEqual(fromScores[0]!.topDependencyPath, 'src/lib/buffer.ts');
 		assert.strictEqual(fromScores[0]!.entryPath, 'src/app/api/buffer/schedule/route.ts');
+		assert.deepStrictEqual(fromScores[0]!.memberFiles, ['src/app/api/buffer/schedule/route.ts']);
+		assert.strictEqual(fromScores[0]!.importsOut.length, 2);
+		assert.strictEqual(formatSubsystemPathEdge(fromScores[0]!.importsOut[1]!), 'src/app/api/buffer/schedule/route.ts → src/lib/buffer.ts');
 
 		const fromRegions = parseSubsystemFingerprints({ regions: [scheduleRegion] });
 		assert.strictEqual(fromRegions[0]!.name, 'Schedule');
+	});
+
+	test('parseMemberFilePaths and parsePathEdges', () => {
+		assert.deepStrictEqual(parseMemberFilePaths(scheduleRegion), ['src/app/api/buffer/schedule/route.ts']);
+		const imports = parsePathEdges(scheduleRegion, 'imports_out');
+		assert.strictEqual(imports.length, 2);
+		assert.strictEqual(imports[1]!.dstPath, 'src/lib/buffer.ts');
+		assert.deepStrictEqual(parsePathEdges(scheduleRegion, 'calls_out'), []);
 	});
 
 	test('pickEntryPath prefers API route', () => {
@@ -88,6 +103,14 @@ suite('processNotesSubsystemSnapshot', () => {
 		assert.strictEqual(formatInboundSummary(2, 1), '2 callers · 1 importer');
 		assert.strictEqual(formatInboundSummary(0, 3), '3 importers');
 		assert.strictEqual(formatInboundSummary(0, 0), undefined);
+	});
+
+	test('buildSubsystemDetailGraph includes member files and import edges', () => {
+		const [fp] = parseSubsystemFingerprints({ scores: [scheduleRegion] });
+		assert.ok(fp);
+		const graph = buildSubsystemDetailGraph(fp!.memberFiles, fp!.importsOut, fp!.callsOut, fp!.importsIn, fp!.callsIn);
+		assert.ok(graph.nodes.some(n => n.label === 'route.ts'));
+		assert.ok(graph.edges.some(e => e.type === 'imports'));
 	});
 
 	test('formatCouplingSummary', () => {

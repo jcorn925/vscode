@@ -61,12 +61,14 @@ import { buildCustomPromptEvidencePack, type ProcessNotesGenerationProgressEvent
 import { formatSavedProcessNoteMarkdown, ixCommandLabelsFromEvidenceRaw } from './processNotesProvenance.js';
 import type { ProcessNotesSynthesisResult } from './processNotesSynthesis.js';
 import { synthesizeCustomPromptNote } from './processNotesSynthesis.js';
-// Suggested “system processes” are derived directly from ix subsystems output.
+// Suggested "system processes" are derived directly from ix subsystems output.
 import { resolveIxEvidenceWorkspaceFolderUri } from './processNotesIxFolder.js';
 import {
 	formatIxDiscoveryFailureHint,
 	formatIxSubsystemsDetailedDiscoveryCommand,
 	LOW_CONFIDENCE_THRESHOLD,
+	buildSubsystemDetailGraph,
+	formatSubsystemPathEdge,
 	parseSubsystemFingerprints,
 	runSubsystemsDetailedDiscovery,
 	type SubsystemFingerprint,
@@ -176,6 +178,7 @@ class ModeShellContribution extends Disposable {
 	private readonly processNotesExpandedChrome: HTMLElement;
 	private readonly processNotesExpandedActions: HTMLElement;
 	private readonly processNotesLogs: HTMLElement;
+	private readonly processNotesDetail: HTMLElement;
 	private readonly processNotesMarkdown: HTMLElement;
 	private readonly processNotesCards: HTMLElement;
 	private processNotesSuggestions: readonly ProcessNoteSuggestion[] = [];
@@ -291,8 +294,7 @@ class ModeShellContribution extends Disposable {
 				left: 0;
 				right: 0;
 				height: var(--custom-mode-shell-height);
-				/* Stay below the quick input widget (z-index 2550) so the command palette / Go to File
-				   search input is not obscured by the mode tabs when opened on top of the editor. */
+				/* Stay below the quick input widget (z-index 2550) so the command palette / Go to File search input is not obscured by the mode tabs when opened on top of the editor. */
 				z-index: 2500;
 				display: flex;
 				flex-direction: row;
@@ -1379,6 +1381,65 @@ class ModeShellContribution extends Disposable {
 				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
 			}
 
+			.monaco-workbench .custom-mode-process-notes-detail {
+				font-size: 11px;
+				line-height: 1.4;
+				color: var(--vscode-foreground);
+				user-select: text;
+				-webkit-user-select: text;
+				max-height: min(280px, 32vh);
+				overflow: auto;
+				padding: 8px 10px;
+				border-radius: 6px;
+				background-color: var(--vscode-editor-background);
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+			}
+
+			.monaco-workbench .custom-mode-process-notes-detail.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-detail-title {
+				font-size: 12px;
+				font-weight: 600;
+				margin-bottom: 8px;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-process-notes-detail-section {
+				margin-bottom: 10px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-detail-section:last-child {
+				margin-bottom: 0;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-detail-section-title {
+				font-size: 10px;
+				font-weight: 700;
+				letter-spacing: 0.04em;
+				text-transform: uppercase;
+				color: var(--vscode-descriptionForeground);
+				margin-bottom: 4px;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-detail-list {
+				margin: 0;
+				padding: 0 0 0 14px;
+				font-family: var(--monaco-monospace-font);
+				font-size: 10px;
+				line-height: 1.45;
+				color: var(--vscode-descriptionForeground);
+				word-break: break-all;
+			}
+
+			.monaco-workbench .custom-mode-process-notes-detail-empty {
+				font-size: 10px;
+				color: var(--vscode-descriptionForeground);
+				opacity: 0.75;
+				font-style: italic;
+			}
+
 			.monaco-workbench .custom-mode-process-notes-logs {
 				font-family: var(--monaco-monospace-font);
 				font-size: 10px;
@@ -1447,6 +1508,7 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-process-notes-cards.hidden,
+			.monaco-workbench .custom-mode-process-notes-detail.hidden,
 			.monaco-workbench .custom-mode-process-notes-markdown.hidden,
 			.monaco-workbench .custom-mode-process-notes-graph.hidden {
 				display: none;
@@ -1654,7 +1716,7 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-setup summary::before {
-				content: '▸';
+				content: '>';
 				display: inline-block;
 				margin-right: 8px;
 				color: var(--vscode-descriptionForeground);
@@ -1662,7 +1724,7 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-setup details[open] summary::before {
-				content: '▾';
+				content: 'v';
 			}
 
 			.monaco-workbench .custom-mode-start-hints-title {
@@ -1934,6 +1996,7 @@ class ModeShellContribution extends Disposable {
 			$('div.custom-mode-process-notes-expanded-spacer'),
 		);
 		this.processNotesLogs = $('pre.custom-mode-process-notes-logs');
+		this.processNotesDetail = $('div.custom-mode-process-notes-detail.hidden');
 		this.processNotesMarkdown = $('div.custom-mode-process-notes-markdown');
 		this.processNotesGraphAnchor = $('div.custom-mode-process-notes-graph');
 		this.processNotesPanel = $('div.custom-mode-process-notes', undefined,
@@ -1941,6 +2004,7 @@ class ModeShellContribution extends Disposable {
 			this.processNotesExpandedChrome,
 			this.processNotesCards,
 			this.processNotesExpandedActions,
+			this.processNotesDetail,
 			this.processNotesLogs,
 			this.processNotesMarkdown,
 			this.processNotesGraphAnchor
@@ -3117,9 +3181,13 @@ class ModeShellContribution extends Disposable {
 		const detail = this.processNotesGraphLayer === 'detail';
 		this.processNotesCards.classList.toggle('hidden', detail);
 		this.processNotesGraphAnchor.classList.toggle('hidden', !detail);
+		this.processNotesDetail.classList.toggle('hidden', !detail);
 		this.processNotesMarkdown.classList.toggle('hidden', !detail);
 		this.processNotesExpandedActions.classList.toggle('hidden', !detail);
 		this.processNotesDeleteButton.disabled = this.processNotesGraphLayer !== 'detail';
+		if (detail) {
+			this.renderProcessNotesSubsystemDetail();
+		}
 		this.updateProcessNotesLogText();
 	}
 
@@ -3255,7 +3323,78 @@ class ModeShellContribution extends Disposable {
 		this.updateProcessNotesLogText();
 		this.processNotesDeleteButton.disabled = !note;
 		if (this.processNotesGraphLayer === 'detail') {
-			this.processNotesGraphView.setGraph(note?.graph ?? { nodes: [], edges: [] });
+			this.renderProcessNotesSubsystemDetail();
+			const suggestion = this.selectedProcessNoteSuggestion();
+			const discoveryGraph = suggestion && (suggestion.memberFiles?.length || suggestion.importsOut?.length || suggestion.callsOut?.length)
+				? buildSubsystemDetailGraph(
+					suggestion.memberFiles ?? [],
+					suggestion.importsOut ?? [],
+					suggestion.callsOut ?? [],
+					suggestion.importsIn ?? [],
+					suggestion.callsIn ?? [],
+				)
+				: undefined;
+			this.processNotesGraphView.setGraph(note?.graph?.nodes.length ? note.graph : (discoveryGraph ?? { nodes: [], edges: [] }));
+		}
+	}
+
+	private selectedProcessNoteSuggestion(): ProcessNoteSuggestion | undefined {
+		const suggestionId = this.suggestionIdFromProcessNoteId(this.processNotesTopicSelect.value);
+		return suggestionId ? this.processNotesSuggestions.find(s => s.id === suggestionId) : undefined;
+	}
+
+	private renderProcessNotesSubsystemDetail(): void {
+		this.processNotesDetail.replaceChildren();
+		const suggestion = this.selectedProcessNoteSuggestion();
+		if (!suggestion) {
+			this.processNotesDetail.appendChild($('div.custom-mode-process-notes-detail-empty', undefined,
+				localize('customMode.processNotes.detail.noSelection', 'No subsystem selected.')));
+			return;
+		}
+
+		this.processNotesDetail.appendChild($('div.custom-mode-process-notes-detail-title', undefined, suggestion.label));
+
+		const appendSection = (title: string, items: readonly string[]) => {
+			const section = $('div.custom-mode-process-notes-detail-section');
+			section.appendChild($('div.custom-mode-process-notes-detail-section-title', undefined, title));
+			if (!items.length) {
+				section.appendChild($('div.custom-mode-process-notes-detail-empty', undefined,
+					localize('customMode.processNotes.detail.none', 'None')));
+			} else {
+				const list = $('ul.custom-mode-process-notes-detail-list');
+				for (const item of items) {
+					list.appendChild($('li', undefined, item));
+				}
+				section.appendChild(list);
+			}
+			this.processNotesDetail.appendChild(section);
+		};
+
+		const memberCount = suggestion.memberFiles?.length ?? suggestion.files ?? 0;
+		appendSection(
+			localize('customMode.processNotes.detail.memberFiles', 'Member files ({0})', String(memberCount)),
+			suggestion.memberFiles ?? [],
+		);
+		appendSection(
+			localize('customMode.processNotes.detail.importsOut', 'Imports out ({0})', String(suggestion.importsOut?.length ?? suggestion.importsOutTotal ?? 0)),
+			(suggestion.importsOut ?? []).map(formatSubsystemPathEdge),
+		);
+		appendSection(
+			localize('customMode.processNotes.detail.callsOut', 'Calls out ({0})', String(suggestion.callsOut?.length ?? suggestion.callsOutTotal ?? 0)),
+			(suggestion.callsOut ?? []).map(formatSubsystemPathEdge),
+		);
+		appendSection(
+			localize('customMode.processNotes.detail.importsIn', 'Imports in ({0})', String(suggestion.importsIn?.length ?? suggestion.importsInTotal ?? 0)),
+			(suggestion.importsIn ?? []).map(formatSubsystemPathEdge),
+		);
+		appendSection(
+			localize('customMode.processNotes.detail.callsIn', 'Calls in ({0})', String(suggestion.callsIn?.length ?? suggestion.callsInTotal ?? 0)),
+			(suggestion.callsIn ?? []).map(formatSubsystemPathEdge),
+		);
+
+		if (!suggestion.memberFiles?.length && !suggestion.importsOut?.length && !suggestion.callsOut?.length) {
+			this.processNotesDetail.appendChild($('div.custom-mode-process-notes-detail-empty', undefined,
+				localize('customMode.processNotes.detail.noDetailedData', 'Detailed Ix data is not available for this process. Re-run discovery or use Generate to build a note.')));
 		}
 	}
 
@@ -3295,7 +3434,7 @@ class ModeShellContribution extends Disposable {
 				this.processNotesLogs.scrollTop = this.processNotesLogs.scrollHeight;
 			};
 			const onProgress = (e: ProcessNotesGenerationProgressEvent) => {
-				const tag = e.status === 'start' ? '…' : e.status === 'success' ? '✓' : e.status === 'error' ? '✗' : '•';
+				const tag = e.status === 'start' ? '…' : e.status === 'success' ? '✓' : e.status === 'error' ? 'x' : '•';
 				const detail = e.detail ? ` — ${e.detail}` : '';
 				logLine(`[${e.phase}] ${tag} ${e.label}${detail}`);
 			};
@@ -3479,7 +3618,7 @@ class ModeShellContribution extends Disposable {
 		const discoveryFolder = resolveIxEvidenceWorkspaceFolderUri(this.workspaceContextService, this.configurationService);
 		if (!discoveryFolder) {
 			this.processNotesSuggestions = [];
-			log(`[discovery] ✗ No workspace folder for Ix evidence.`);
+			log(`[discovery] x No workspace folder for Ix evidence.`);
 			if (this.processNotesGraphLayer === 'overview') {
 				this.renderProcessNotesCards();
 			}
@@ -3487,11 +3626,11 @@ class ModeShellContribution extends Disposable {
 		}
 
 		log(`[discovery] … ensure ix backend`);
-		const backendReady = await this.ixIntegrationService.ensureIxBackendReady(discoveryFolder);
+		const backendReady = await this.ixIntegrationService.prepareForDiscovery(discoveryFolder);
 		if (!backendReady) {
 			const hint = formatIxDiscoveryFailureHint('fetch failed', 'fetch failed');
-			log(`[discovery] ✗ ix docker start failed or backend still unreachable${hint ? `\n${hint}` : ''}`);
-			log(`[discovery] ✗ No discovery JSON available.`);
+			log(`[discovery] x ix docker start failed or backend still unreachable${hint ? `\n${hint}` : ''}`);
+			log(`[discovery] x No discovery JSON available.`);
 			if (this.processNotesGraphLayer === 'overview') {
 				this.renderProcessNotesCards();
 			}
@@ -3503,7 +3642,7 @@ class ModeShellContribution extends Disposable {
 		const hydrate = await this.ixIntegrationService.ensureIxMappedIfEmpty(discoveryFolder);
 		if (!hydrate.statsOk) {
 			const hint = formatIxDiscoveryFailureHint(hydrate.statsPreview, hydrate.statsPreview);
-			log(`[discovery] ✗ ix stats failed${hint ? `\n${hint}` : ''}`);
+			log(`[discovery] x ix stats failed${hint ? `\n${hint}` : ''}`);
 			if (hydrate.statsPreview) {
 				log(hydrate.statsPreview.split(/\r?\n/).slice(-6).join('\n'));
 			}
@@ -3515,12 +3654,12 @@ class ModeShellContribution extends Disposable {
 			['subsystems', '--list', '--detailed', '--sort', 'importance', '--format', 'json'],
 		);
 		log(`[discovery] … ${detailedCmd}`);
-		const detailed = await runSubsystemsDetailedDiscovery(this.ixIntegrationService, discoveryFolder, 90_000);
+		const detailed = await runSubsystemsDetailedDiscovery(this.ixIntegrationService, discoveryFolder, 180_000);
 		if (detailed.ok) {
 			log(`[discovery] ✓ ${formatIxSubsystemsDetailedDiscoveryCommand(detailed.args)}`);
 		} else {
 			const hint = formatIxDiscoveryFailureHint(detailed.error, detailed.raw);
-			log(`[discovery] ✗ ${formatIxSubsystemsDetailedDiscoveryCommand(detailed.args)}\n${detailed.error}${hint ? `\n${hint}` : ''}`);
+			log(`[discovery] x ${formatIxSubsystemsDetailedDiscoveryCommand(detailed.args)}\n${detailed.error}${hint ? `\n${hint}` : ''}`);
 		}
 
 		let suggestions: ProcessNoteSuggestion[] = [];
@@ -3530,7 +3669,7 @@ class ModeShellContribution extends Disposable {
 				suggestions = this.processNoteSuggestionsFromFingerprints(fingerprints);
 				log(`[selection] ✓ fingerprints=${fingerprints.length}`);
 			} else {
-				log(`[selection] ✗ fingerprints=0 from detailed json\n${describeIxDiscoveryShape(detailed.value)}`);
+				log(`[selection] x fingerprints=0 from detailed json\n${describeIxDiscoveryShape(detailed.value)}`);
 			}
 		}
 
@@ -3539,19 +3678,19 @@ class ModeShellContribution extends Disposable {
 			const subsystems = await this.ixIntegrationService.runJsonQuery(
 				['subsystems', '--sort', 'importance', '--all-items', '--format', 'json'],
 				discoveryFolder,
-				90_000,
+				180_000,
 			);
 			if (subsystems.ok) {
 				log(`[discovery] ✓ ix subsystems --sort importance --all-items --format json`);
 			} else {
 				const hint = formatIxDiscoveryFailureHint(subsystems.error, subsystems.raw);
-				log(`[discovery] ✗ ix subsystems --sort importance --all-items --format json\n${subsystems.error}${hint ? `\n${hint}` : ''}`);
+				log(`[discovery] x ix subsystems --sort importance --all-items --format json\n${subsystems.error}${hint ? `\n${hint}` : ''}`);
 			}
 			if (subsystems.ok) {
 				suggestions = this.processNoteSuggestionsFromHierarchyCards(
 					this.extractDiscoveryCardsFromIxSubsystems(subsystems.value),
 				);
-				log(`[selection] ${suggestions.length ? '✓' : '✗'} hierarchy cards=${suggestions.length}`);
+				log(`[selection] ${suggestions.length ? '✓' : 'x'} hierarchy cards=${suggestions.length}`);
 				if (!suggestions.length) {
 					log(describeIxDiscoveryShape(subsystems.value));
 				}
@@ -3559,7 +3698,7 @@ class ModeShellContribution extends Disposable {
 		}
 
 		if (!suggestions.length) {
-			log(`[discovery] ✗ No discovery JSON available.`);
+			log(`[discovery] x No discovery JSON available.`);
 			return;
 		}
 
@@ -3598,6 +3737,11 @@ class ModeShellContribution extends Disposable {
 				callsOutTotal: f.callsOutTotal,
 				importsInTotal: f.importsInTotal,
 				callsInTotal: f.callsInTotal,
+				memberFiles: f.memberFiles,
+				importsOut: f.importsOut,
+				callsOut: f.callsOut,
+				importsIn: f.importsIn,
+				callsIn: f.callsIn,
 				promptTemplates: [
 					f.prompt,
 					`What is the ${f.name} pipeline?`,

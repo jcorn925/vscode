@@ -3072,4 +3072,20 @@ export default defineConfig(
 		rules: {
 			'local/code-no-new-javascript-files': 'error',
 		},
+	},
+	{
+		files: [
+			'src/custom/**/*.ts',
+			'src/vs/workbench/contrib/custom/**/*.ts',
+		],
+		rules: {
+			'local/code-import-patterns': 'off',
+			'local/code-translation-remind': 'off',
+			'no-duplicate-imports': 'off',
+			'no-restricted-syntax': 'off',
+			'local/code-no-in-operator': 'off',
+			'local/code-no-any-casts': 'off',
+			'@typescript-eslint/no-explicit-any': 'off',
+			'local/code-no-unexternalized-strings': 'off',
+		},
 	});

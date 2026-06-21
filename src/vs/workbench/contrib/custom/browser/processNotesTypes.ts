@@ -105,6 +105,12 @@ export interface ProcessNoteBinding {
 
 export type ProcessNoteSuggestionKind = 'system' | 'subsystem' | 'module';
 
+/** File-to-file edge from `ix subsystems --list --detailed` (src_path → dst_path). */
+export interface SubsystemPathEdge {
+	readonly srcPath?: string;
+	readonly dstPath: string;
+}
+
 export interface ProcessNoteSuggestionProbe {
 	readonly ok: boolean;
 	readonly resolvedTargets: number;
@@ -138,6 +144,16 @@ export interface ProcessNoteSuggestion {
 	readonly callsOutTotal?: number;
 	readonly importsInTotal?: number;
 	readonly callsInTotal?: number;
+	/** Member file paths returned by detailed discovery (capped by `--member-file-cap`). */
+	readonly memberFiles?: readonly string[];
+	/** Outbound import edges from detailed discovery (capped by `--edge-cap`). */
+	readonly importsOut?: readonly SubsystemPathEdge[];
+	/** Outbound call edges from detailed discovery (capped by `--edge-cap`). */
+	readonly callsOut?: readonly SubsystemPathEdge[];
+	/** Inbound import edges from detailed discovery (capped by `--edge-cap`). */
+	readonly importsIn?: readonly SubsystemPathEdge[];
+	/** Inbound call edges from detailed discovery (capped by `--edge-cap`). */
+	readonly callsIn?: readonly SubsystemPathEdge[];
 	/** Deterministic prompt templates users can pick/fill. */
 	readonly promptTemplates: readonly string[];
 	/** Optional validation probe summary (budgeted). */

@@ -47,8 +47,8 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		},
 		'custom.ix.autoResetOnStart': {
 			type: 'boolean',
-			default: true,
-			description: localize('custom.ix.autoResetOnStart', "When enabled, run `ix reset --code -y` between `ix docker start` and `ix map` on startup when switching to a different workspace than the Ix default. Skipped when a single-root VS Code folder already matches the default Ix workspace. Preserves plans, goals, tasks, bugs, and decisions."),
+			default: false,
+			description: localize('custom.ix.autoResetOnStart', "When enabled, run `ix reset --code -y` between `ix docker start` and `ix map` on startup when switching to a different workspace than the Ix default. Skipped when a single-root VS Code folder already matches the default Ix workspace. Preserves plans, goals, tasks, bugs, and decisions. Disabled by default because reset can take many minutes on large graphs."),
 			scope: ConfigurationScope.APPLICATION
 		},
 		'custom.ix.autoInstall': {

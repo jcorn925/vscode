@@ -7,7 +7,7 @@ export type UiClickOverlayClickMessage = {
 	type: 'vscode-ui-click';
 	timestamp: number;
 	href: string;
-	/** Set when Shift was held (used by the host for “go to source” gestures). */
+	/** Set when Shift was held (used by the host for "go to source" gestures). */
 	modifiers?: { shiftKey?: boolean; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean };
 	target: {
 		tag: string;
@@ -383,7 +383,7 @@ function onMarqueeMouseDown(ev) {
 	const t = ev.target;
 	if (t && t.closest && t.closest('input,textarea,select,[contenteditable]')) { return; }
 	// Allow normal text selection in the Process Notes panel (logs/markdown).
-	if (t && t.closest && t.closest('.custom-mode-process-notes-logs,.custom-mode-process-notes-markdown')) { return; }
+	if (t && t.closest && t.closest('.custom-mode-process-notes-logs,.custom-mode-process-notes-markdown,.custom-mode-process-notes-detail')) { return; }
 	dragState = { x0: ev.clientX, y0: ev.clientY, active: false, marquee: null, lastHits: [] };
 	window.addEventListener('mousemove', onMarqueeMouseMove, true);
 	window.addEventListener('mouseup', onMarqueeMouseUp, true);

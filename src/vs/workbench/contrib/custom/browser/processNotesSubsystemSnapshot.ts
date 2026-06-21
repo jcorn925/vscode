@@ -5,7 +5,7 @@
 
 import { URI } from '../../../../base/common/uri.js';
 import type { IIxIntegrationService } from '../../../../../custom/ix/IxIntegrationService.js';
-import type { ProcessNoteSuggestionKind } from './processNotesTypes.js';
+import type { ProcessNoteGraph, ProcessNoteSuggestionKind, SubsystemPathEdge } from './processNotesTypes.js';
 
 /** Regions below this confidence get a "low confidence" chip in the UI. */
 export const LOW_CONFIDENCE_THRESHOLD = 0.15;
@@ -26,6 +26,11 @@ export interface SubsystemFingerprint {
 	readonly topDependencyPath?: string;
 	readonly inboundSummary?: string;
 	readonly couplingSummary: string;
+	readonly memberFiles: readonly string[];
+	readonly importsOut: readonly SubsystemPathEdge[];
+	readonly callsOut: readonly SubsystemPathEdge[];
+	readonly importsIn: readonly SubsystemPathEdge[];
+	readonly callsIn: readonly SubsystemPathEdge[];
 	readonly prompt: string;
 }
 
@@ -63,6 +68,103 @@ function kindFromLabelKind(labelKind: string | undefined): ProcessNoteSuggestion
 		case 'subsystem': return 'subsystem';
 		default: return 'module';
 	}
+}
+
+export function parseMemberFilePaths(region: Record<string, unknown>): readonly string[] {
+	const out: string[] = [];
+	const members = region.member_files;
+	if (!Array.isArray(members)) {
+		return out;
+	}
+	for (const m of members) {
+		if (!isRecord(m)) {
+			continue;
+		}
+		const p = textField(m.path);
+		if (p) {
+			out.push(normalizePath(p));
+		}
+	}
+	return out;
+}
+
+export function parsePathEdges(region: Record<string, unknown>, arrayKey: string): readonly SubsystemPathEdge[] {
+	const out: SubsystemPathEdge[] = [];
+	const arr = region[arrayKey];
+	if (!Array.isArray(arr)) {
+		return out;
+	}
+	for (const edge of arr) {
+		if (!isRecord(edge)) {
+			continue;
+		}
+		const dstPath = textField(edge.dst_path);
+		if (!dstPath) {
+			continue;
+		}
+		const srcPath = textField(edge.src_path);
+		out.push({
+			srcPath: srcPath ? normalizePath(srcPath) : undefined,
+			dstPath: normalizePath(dstPath),
+		});
+	}
+	return out;
+}
+
+export function formatSubsystemPathEdge(edge: SubsystemPathEdge): string {
+	if (edge.srcPath) {
+		return `${edge.srcPath} → ${edge.dstPath}`;
+	}
+	return edge.dstPath;
+}
+
+export function buildSubsystemDetailGraph(
+	memberFiles: readonly string[],
+	importsOut: readonly SubsystemPathEdge[],
+	callsOut: readonly SubsystemPathEdge[],
+	importsIn: readonly SubsystemPathEdge[],
+	callsIn: readonly SubsystemPathEdge[],
+): ProcessNoteGraph {
+	const nodes: ProcessNoteGraph['nodes'][number][] = [];
+	const edges: ProcessNoteGraph['edges'][number][] = [];
+	const nodeIds = new Set<string>();
+
+	const ensureFileNode = (path: string): string => {
+		const id = `file:${path}`;
+		if (!nodeIds.has(id)) {
+			nodeIds.add(id);
+			const label = path.split('/').pop() ?? path;
+			nodes.push({ id, label, kind: 'file' });
+		}
+		return id;
+	};
+
+	for (const path of memberFiles) {
+		ensureFileNode(path);
+	}
+
+	const addEdges = (items: readonly SubsystemPathEdge[], type: 'imports' | 'calls') => {
+		for (const edge of items) {
+			if (edge.srcPath) {
+				ensureFileNode(edge.srcPath);
+			}
+			const toId = ensureFileNode(edge.dstPath);
+			const fromId = edge.srcPath ? ensureFileNode(edge.srcPath) : toId;
+			edges.push({
+				from: fromId,
+				to: toId,
+				type,
+				evidence: formatSubsystemPathEdge(edge),
+			});
+		}
+	};
+
+	addEdges(importsOut, 'imports');
+	addEdges(callsOut, 'calls');
+	addEdges(importsIn, 'imports');
+	addEdges(callsIn, 'calls');
+
+	return { nodes, edges };
 }
 
 function memberPaths(region: Record<string, unknown>): Set<string> {
@@ -255,6 +357,11 @@ export function parseSubsystemFingerprints(json: unknown): SubsystemFingerprint[
 		const topDependencyPath = pickTopExternalDependency(region);
 		const inboundSummary = formatInboundSummary(callsInTotal, importsInTotal);
 		const couplingSummary = formatCouplingSummary(fileCount, importsOutTotal, callsOutTotal);
+		const memberFiles = parseMemberFilePaths(region);
+		const importsOut = parsePathEdges(region, 'imports_out');
+		const callsOut = parsePathEdges(region, 'calls_out');
+		const importsIn = parsePathEdges(region, 'imports_in');
+		const callsIn = parsePathEdges(region, 'calls_in');
 		const prompt = buildStructureAwarePrompt(
 			name,
 			labelKind,
@@ -281,6 +388,11 @@ export function parseSubsystemFingerprints(json: unknown): SubsystemFingerprint[
 			topDependencyPath,
 			inboundSummary,
 			couplingSummary,
+			memberFiles,
+			importsOut,
+			callsOut,
+			importsIn,
+			callsIn,
 			prompt,
 		});
 	}
