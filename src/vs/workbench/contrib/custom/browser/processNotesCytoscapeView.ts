@@ -67,7 +67,7 @@ export class ProcessNotesCytoscapeView extends Disposable {
 		this.webview.postMessage({ type: 'processNotes.setTheme', theme });
 	}
 
-	setHtml(cytoscapeUri: URI, coseBaseUri: URI, fcoseUri: URI): void {
+	setHtml(cytoscapeUri: URI, layoutBaseUri: URI, coseBaseUri: URI, fcoseUri: URI): void {
 		const nonce = String(Math.random()).slice(2);
 		const cspSource = webviewGenericCspSource;
 		this.webview.setHtml(`<!doctype html>
@@ -95,6 +95,7 @@ export class ProcessNotesCytoscapeView extends Disposable {
 	<div id="cy"></div>
 	<div id="hint">drag to pan • wheel to zoom • topics: click to expand • detail: click node to open source</div>
 	<script nonce="${nonce}" src="${cytoscapeUri.toString()}"></script>
+	<script nonce="${nonce}" src="${layoutBaseUri.toString()}"></script>
 	<script nonce="${nonce}" src="${coseBaseUri.toString()}"></script>
 	<script nonce="${nonce}" src="${fcoseUri.toString()}"></script>
 	<script nonce="${nonce}">

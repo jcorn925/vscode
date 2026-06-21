@@ -7,6 +7,7 @@ import { $, addDisposableListener } from '../../../../base/browser/dom.js';
 import { createStyleSheet } from '../../../../base/browser/domStylesheets.js';
 import { mainWindow } from '../../../../base/browser/window.js';
 import { Disposable, DisposableStore, type IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
+import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { isWeb, isWindows } from '../../../../base/common/platform.js';
 import { URI, UriComponents } from '../../../../base/common/uri.js';
 import { basename, isEqualOrParent, resolvePath } from '../../../../base/common/resources.js';
@@ -73,6 +74,8 @@ import {
 	runSubsystemsDetailedDiscovery,
 	type SubsystemFingerprint,
 } from './processNotesSubsystemSnapshot.js';
+import { IStartupGuideService } from '../../../../../custom/startup/StartupGuideService.js';
+import { StartupGuidePanel } from './startupGuidePanel.js';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
@@ -207,6 +210,8 @@ class ModeShellContribution extends Disposable {
 	}>();
 	private lastIxPipelineState: IxIntegrationState | undefined;
 	private readonly ixPipelineDurationTicker = this._register(new MutableDisposable<IDisposable>());
+	private readonly startupGuideButton: HTMLButtonElement;
+	private readonly startupGuidePanel: StartupGuidePanel;
 
 	private _processChatDismissed = false;
 	private _uiChatDismissed = false;
@@ -233,6 +238,7 @@ class ModeShellContribution extends Disposable {
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IDockerAvailabilityService private readonly dockerAvailabilityService: IDockerAvailabilityService,
 		@IOpenerService private readonly openerService: IOpenerService,
+		@IStartupGuideService private readonly startupGuideService: IStartupGuideService,
 	) {
 		super();
 
@@ -1254,6 +1260,142 @@ class ModeShellContribution extends Disposable {
 				display: block;
 			}
 
+			.monaco-workbench .custom-mode-startup-guide-btn {
+				min-width: 34px;
+				padding: 0 8px;
+				font-size: 14px;
+				line-height: 1;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-btn-attention {
+				box-shadow: inset 0 0 0 1px var(--vscode-inputValidation-warningBorder);
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-overlay {
+				position: fixed;
+				inset: 0;
+				z-index: 2600;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				padding: 24px;
+				background: rgba(0, 0, 0, 0.45);
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-overlay.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-dialog {
+				width: min(760px, calc(100vw - 48px));
+				max-height: min(82vh, 900px);
+				overflow: auto;
+				padding: 18px 20px;
+				border-radius: 10px;
+				background: var(--vscode-editorWidget-background);
+				border: 1px solid var(--vscode-editorWidget-border);
+				box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-title {
+				font-size: 18px;
+				font-weight: 700;
+				margin-bottom: 4px;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-subtitle,
+			.monaco-workbench .custom-mode-startup-guide-summary {
+				color: var(--vscode-descriptionForeground);
+				font-size: 12px;
+				line-height: 1.45;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-summary {
+				margin: 12px 0;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-steps {
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-step {
+				padding: 12px 14px;
+				border-radius: 8px;
+				border: 1px solid var(--vscode-widget-border);
+				background: var(--vscode-editor-background);
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-step-head {
+				display: flex;
+				gap: 10px;
+				align-items: flex-start;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-step-glyph {
+				width: 18px;
+				flex: 0 0 18px;
+				font-weight: 700;
+				text-align: center;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-step-label {
+				font-weight: 600;
+				margin-bottom: 2px;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-step-description,
+			.monaco-workbench .custom-mode-startup-guide-step-detail {
+				color: var(--vscode-descriptionForeground);
+				font-size: 12px;
+				line-height: 1.4;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-step-detail {
+				margin-top: 8px;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-step-actions {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px;
+				margin-top: 10px;
+				align-items: center;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-step-manual {
+				margin: 8px 0 0;
+				padding: 8px 10px;
+				border-radius: 6px;
+				background: var(--vscode-textCodeBlock-background);
+				font-family: var(--monaco-monospace-font);
+				font-size: 11px;
+				line-height: 1.45;
+				white-space: pre-wrap;
+				overflow: auto;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-footer {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px;
+				margin-top: 16px;
+				justify-content: flex-end;
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-step-success .custom-mode-startup-guide-step-glyph {
+				color: var(--vscode-testing-iconPassed);
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-step-error .custom-mode-startup-guide-step-glyph {
+				color: var(--vscode-errorForeground);
+			}
+
+			.monaco-workbench .custom-mode-startup-guide-step-warning .custom-mode-startup-guide-step-glyph {
+				color: var(--vscode-inputValidation-warningBorder);
+			}
+
 			.monaco-workbench .custom-mode-process-ix-popover-title {
 				font-weight: 700;
 				margin-bottom: 6px;
@@ -1832,6 +1974,27 @@ class ModeShellContribution extends Disposable {
 			this._register(addDisposableListener(button, 'click', () => this.modeService.setMode(mode)));
 		}
 		this.container.insertBefore(this.modeTopBar, this.container.firstChild);
+
+		this.startupGuidePanel = this._register(new StartupGuidePanel(this.container, this.startupGuideService));
+		this.startupGuideButton = $('button.custom-mode-top-tab.custom-mode-startup-guide-btn', {
+			type: 'button',
+			title: localize('startupGuide.open', 'Startup setup'),
+			'aria-label': localize('startupGuide.open', 'Startup setup'),
+		}, '\u2699') as HTMLButtonElement;
+		const processTab = this.topModeButtons.get('Process');
+		if (processTab) {
+			this.modeTopBar.insertBefore(this.startupGuideButton, processTab);
+		} else {
+			this.modeTopBar.appendChild(this.startupGuideButton);
+		}
+		this._register(addDisposableListener(this.startupGuideButton, 'click', () => {
+			this.startupGuidePanel.toggle();
+			if (this.modeService.getMode() !== 'Process') {
+				this.modeService.setMode('Process');
+			}
+		}));
+		this._register(this.startupGuideService.onDidChangeState(() => this.startupGuidePanel.updateBadge(this.startupGuideButton)));
+		this.startupGuidePanel.updateBadge(this.startupGuideButton);
 		this._register(toDisposable(() => this.modeTopBar.remove()));
 		queueMicrotask(() => this.layoutService.layout());
 
@@ -1934,7 +2097,7 @@ class ModeShellContribution extends Disposable {
 		this.processSetup = $('div.custom-mode-setup');
 		const processSetupDetails = document.createElement('details');
 		const processSetupSummary = document.createElement('summary');
-		processSetupSummary.textContent = localize('customMode.setupSummary', 'Setup');
+		processSetupSummary.textContent = localize('customMode.setupSummary', 'Setup — open Startup setup (gear icon before Process) for the full checklist.');
 		processSetupDetails.appendChild(processSetupSummary);
 		processSetupDetails.appendChild(this.processStartHints);
 		this.processSetup.appendChild(processSetupDetails);
@@ -2014,11 +2177,12 @@ class ModeShellContribution extends Disposable {
 			? URI.file(this.nativeEnvironmentService.appRoot)
 			: URI.file(process.cwd());
 		const cytoscapeRoot = URI.joinPath(appRoot, 'node_modules', 'cytoscape', 'dist');
+		const layoutBaseRoot = URI.joinPath(appRoot, 'node_modules', 'layout-base');
 		const coseBaseRoot = URI.joinPath(appRoot, 'node_modules', 'cose-base');
 		const fcoseRoot = URI.joinPath(appRoot, 'node_modules', 'cytoscape-fcose');
 		this.processNotesGraphView = this._register(new ProcessNotesCytoscapeView(
 			this.webviewService,
-			[cytoscapeRoot, coseBaseRoot, fcoseRoot],
+			[cytoscapeRoot, layoutBaseRoot, coseBaseRoot, fcoseRoot],
 			(msg: ProcessNotesGraphWebviewMessage) => this.onProcessNotesGraphMessage(msg),
 		));
 
@@ -2026,14 +2190,16 @@ class ModeShellContribution extends Disposable {
 		this.processNotesGraphView.attach(this.processNotesGraphAnchor, this.processMainColumn);
 
 		const cytoscapeUri = this.processNotesGraphView.asWebviewUri(URI.joinPath(cytoscapeRoot, 'cytoscape.min.js'));
+		const layoutBaseUri = this.processNotesGraphView.asWebviewUri(URI.joinPath(layoutBaseRoot, 'layout-base.js'));
 		const coseBaseUri = this.processNotesGraphView.asWebviewUri(URI.joinPath(coseBaseRoot, 'cose-base.js'));
 		const fcoseUri = this.processNotesGraphView.asWebviewUri(URI.joinPath(fcoseRoot, 'cytoscape-fcose.js'));
-		this.processNotesGraphView.setHtml(cytoscapeUri, coseBaseUri, fcoseUri);
+		this.processNotesGraphView.setHtml(cytoscapeUri, layoutBaseUri, coseBaseUri, fcoseUri);
 		this.processNotesGraphView.setGraph({ nodes: [], edges: [] } satisfies ProcessNoteGraph);
 
 		this.processMainContent = $('div.custom-mode-process-main-content');
 		this.processMainContent.appendChild(this.processDockerBanner);
 		this.processMainContent.appendChild(this.processCallout);
+		this.processMainContent.appendChild(this.processSetup);
 		this.processMainContent.appendChild(this.processIxWebHint);
 		this.processMainContent.appendChild(this.processIxPipeline);
 		this.processMainContent.appendChild(this.processNotesPanel);
@@ -2180,6 +2346,23 @@ class ModeShellContribution extends Disposable {
 				}
 				this.pushUiRuntimeLog(`[load-failed] ${desc}${url ? ` (${url})` : ''}`);
 			}));
+		}
+
+		if (!isWeb) {
+			const startupAutoRunScheduler = this._register(new RunOnceScheduler(() => {
+				void this.startupGuideService.refresh().then(async () => {
+					this.startupGuidePanel.updateBadge(this.startupGuideButton);
+					if (!this.startupGuideService.shouldShowOnStartup()) {
+						return;
+					}
+					this.modeService.setMode('Process');
+					this.startupGuidePanel.show();
+					if (Boolean(this.configurationService.getValue<boolean>('custom.startupGuide.autoRun') ?? true)) {
+						await this.startupGuideService.runAutomaticFixes();
+					}
+				});
+			}, 2500));
+			startupAutoRunScheduler.schedule();
 		}
 	}
 

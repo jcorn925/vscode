@@ -22,6 +22,11 @@ import { INotificationService, Severity } from '../../vs/platform/notification/c
 import { ILifecycleService } from '../../vs/workbench/services/lifecycle/common/lifecycle.js';
 import { IOpenerService } from '../../vs/platform/opener/common/opener.js';
 import { localize } from '../../vs/nls.js';
+import {
+	buildIxInstallScriptCommand,
+	buildShellEnvPreamble,
+	ensureHomebrewShellEnvInProfile,
+} from './ixInstallHelpers.js';
 
 export type IxPhase = 'idle' | 'installing' | 'docker' | 'mapping' | 'watching' | 'error';
 
@@ -533,6 +538,13 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		return { executable: '/bin/bash', args: ['-c', commandLine] };
 	}
 
+	private async resolveTerminalCwd(cwd: URI | undefined): Promise<URI | undefined> {
+		if (cwd && await this.fileService.exists(cwd)) {
+			return cwd;
+		}
+		return this.environmentService.userHome;
+	}
+
 	private async runCommand(
 		cwd: URI | undefined,
 		commandLine: string,
@@ -559,7 +571,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			}
 
 			const instance = await this.terminalService.createTerminal({
-				cwd,
+				cwd: await this.resolveTerminalCwd(cwd),
 				config: {
 					...shell,
 					name: 'Ix',
@@ -807,10 +819,6 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 	}
 
-	private probeCommand(): string {
-		return isWindows ? 'where ix >nul 2>nul' : 'command -v ix';
-	}
-
 	private async resolveIxBinary(cwd: URI): Promise<string | undefined> {
 		const configured = this.getConfiguredCliPath();
 		if (configured) {
@@ -847,13 +855,13 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 	}
 
 	private buildInstallCommand(): string {
-		const url = this.getInstallUrl();
-		if (isWindows) {
-			const safe = url.replace(/'/g, "''");
-			return `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-Expression (Invoke-WebRequest -UseBasicParsing -Uri '${safe}').Content"`;
-		}
-		const safe = url.replace(/'/g, `'\\''`);
-		return `curl -fsSL '${safe}' | sh`;
+		return buildIxInstallScriptCommand(this.getInstallUrl());
+	}
+
+	private probeCommand(): string {
+		const preamble = buildShellEnvPreamble();
+		const probe = isWindows ? 'where ix >nul 2>nul' : 'command -v ix';
+		return preamble ? `${preamble}\n${probe}` : probe;
 	}
 
 	private async ensureInstalled(cwd: URI, gen: number, resolveStepId: string): Promise<string | undefined> {
@@ -879,6 +887,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 
 		this.setPhase('installing');
+		await ensureHomebrewShellEnvInProfile(this.fileService, this.environmentService.userHome);
 		const installCmd = this.buildInstallCommand();
 		try {
 			const r = await this.runCommand(cwd, installCmd, 600_000, { stepId: resolveStepId });
@@ -924,6 +933,14 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		return folders.length > 0 ? folders[0].uri : undefined;
 	}
 
+	private async getSafeTerminalCwd(): Promise<URI> {
+		const primary = this.getPrimaryFolder();
+		if (primary && await this.fileService.exists(primary)) {
+			return primary;
+		}
+		return this.environmentService.userHome;
+	}
+
 	private async runAutoStartPipeline(): Promise<void> {
 		if (isWeb || !this.isIxAutomationEnabled() || !this.isAutoStartEnabled()) {
 			this.clearPipeline();
@@ -945,8 +962,19 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		const gen = ++this.pipelineGeneration;
 		const folders = this.workspaceContextService.getWorkspace().folders;
 		const primary = folders[0]?.uri;
-		if (!primary) {
+		if (!primary || !(await this.fileService.exists(primary))) {
 			this.clearPipeline();
+			this.rebuildPipelineResolveOnly();
+			this.beginStep(STEP_RESOLVE);
+			const cwd = await this.getSafeTerminalCwd();
+			const ix = await this.ensureInstalled(cwd, gen, STEP_RESOLVE);
+			if (gen !== this.pipelineGeneration) {
+				return;
+			}
+			if (ix) {
+				this.completeStep(STEP_RESOLVE, 'success');
+			}
+			this.setPhase('idle');
 			this.fireState();
 			return;
 		}
@@ -1222,15 +1250,12 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		if (isWeb) {
 			return;
 		}
-		const primary = this.getPrimaryFolder();
-		if (!primary) {
-			return;
-		}
+		const cwd = await this.getSafeTerminalCwd();
 		const gen = this.pipelineGeneration;
 		this.storageService.remove(STORAGE_IX_CLI, StorageScope.APPLICATION);
 		this.rebuildPipelineResolveOnly();
 		this.beginStep(STEP_RESOLVE);
-		const ix = await this.ensureInstalled(primary, gen, STEP_RESOLVE);
+		const ix = await this.ensureInstalled(cwd, gen, STEP_RESOLVE);
 		if (this.pipelineGeneration !== gen) {
 			this.fireState();
 			return;

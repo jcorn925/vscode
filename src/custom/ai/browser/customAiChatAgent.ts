@@ -49,7 +49,7 @@ import {
 	CUSTOM_AI_OLLAMA_DOWNLOAD_URL,
 	CUSTOM_AI_SECRET_OPENAI_API_KEY,
 } from '../common/customAiConstants.js';
-import { readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
+import { CustomAiInvalidApiKeyError, readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
 
 const MAX_TOOL_ROUNDS = 15;
 const ATTACHMENT_MAX_BYTES_PER_FILE = 64 * 1024;
@@ -120,6 +120,10 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 	}
 
 	async invoke(request: IChatAgentRequest, progress: (parts: IChatProgress[]) => void, history: IChatAgentHistoryEntry[], token: CancellationToken): Promise<IChatAgentResult> {
+		return this._invokeInternal(request, progress, history, token, false);
+	}
+
+	private async _invokeInternal(request: IChatAgentRequest, progress: (parts: IChatProgress[]) => void, history: IChatAgentHistoryEntry[], token: CancellationToken, retryAfterKeyUpdate: boolean): Promise<IChatAgentResult> {
 		const emit = (p: IChatProgress) => progress([p]);
 		let modelId = '';
 		try {
@@ -277,6 +281,29 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 
 			return {};
 		} catch (err) {
+			if (modelId === CUSTOM_AI_MODEL_OPENAI && err instanceof CustomAiInvalidApiKeyError && !retryAfterKeyUpdate) {
+				this._logService.warn('[CustomAi] OpenAI-compatible API key rejected by server', err);
+				try {
+					await this._secretStorage.delete(CUSTOM_AI_SECRET_OPENAI_API_KEY);
+				} catch (deleteErr) {
+					this._logService.warn('[CustomAi] Failed to clear rejected API key', deleteErr);
+				}
+				const keyOk = await this._ensureOpenAiApiKey(token, { rejected: true });
+				if (keyOk) {
+					return this._invokeInternal(request, progress, history, token, true);
+				}
+				return {
+					errorDetails: {
+						message: localize(
+							'customAi.error.apiKeyRejected',
+							'The stored OpenAI-compatible API key was rejected by the server. You canceled or left the replacement key empty — send your message again to enter a valid key, or run **Custom AI: Set OpenAI API Key** from the Command Palette.',
+						),
+						isExpectedError: true,
+						level: ChatErrorLevel.Warning,
+					},
+				};
+			}
+
 			const ollamaBase = (this._configurationService.getValue<string>('custom.ai.ollama.baseUrl') ?? 'http://127.0.0.1:11434').replace(/\/$/, '');
 			const openAiBase = (this._configurationService.getValue<string>('custom.ai.openaiCompatible.baseUrl') ?? 'https://api.openai.com/v1').replace(/\/$/, '');
 			const ollamaModel = this._configurationService.getValue<string>('custom.ai.ollama.model') ?? 'llama3.1';
@@ -340,15 +367,19 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 		return false;
 	}
 
-	/** Prompt for API key when missing; returns false if user cancels or submits empty. */
-	private async _ensureOpenAiApiKey(token: CancellationToken): Promise<boolean> {
-		const existing = await this._secretStorage.get(CUSTOM_AI_SECRET_OPENAI_API_KEY);
-		if (existing?.trim()) {
-			return true;
+	/** Prompt for API key when missing or rejected; returns false if user cancels or submits empty. */
+	private async _ensureOpenAiApiKey(token: CancellationToken, options?: { rejected?: boolean }): Promise<boolean> {
+		if (!options?.rejected) {
+			const existing = await this._secretStorage.get(CUSTOM_AI_SECRET_OPENAI_API_KEY);
+			if (existing?.trim()) {
+				return true;
+			}
 		}
 		const key = await this._quickInput.input({
 			title: localize('customAi.quickInput.title', 'Custom AI — API key'),
-			prompt: localize('customAi.quickInput.prompt', 'Enter an OpenAI-compatible API key. It is stored only on this device (same as the Command Palette command).'),
+			prompt: options?.rejected
+				? localize('customAi.quickInput.promptRejected', 'The stored API key was rejected by the server (401). Enter a valid OpenAI-compatible API key. It is stored only on this device.')
+				: localize('customAi.quickInput.prompt', 'Enter an OpenAI-compatible API key. It is stored only on this device (same as the Command Palette command).'),
 			placeHolder: localize('customAi.quickInput.placeholder', 'API key'),
 			password: true,
 			ignoreFocusLost: true,

@@ -417,6 +417,7 @@ import './contrib/editSessions/browser/editSessions.contribution.js';
 import './contrib/remoteCodingAgents/browser/remoteCodingAgents.contribution.js';
 import './contrib/custom/browser/modeShell.contribution.js';
 import './contrib/custom/browser/defaultProjectBootstrap.contribution.js';
+import './contrib/custom/browser/startupGuide.contribution.js';
 import './contrib/custom/browser/ix.contribution.js';
 import './contrib/custom/browser/customAi.contribution.js';
 

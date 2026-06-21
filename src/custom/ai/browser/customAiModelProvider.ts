@@ -41,6 +41,25 @@ type OpenAiCompatibleTool = {
 	};
 };
 
+/** Thrown when the OpenAI-compatible backend rejects the stored API key (401/403). */
+export class CustomAiInvalidApiKeyError extends Error {
+	readonly kind = 'CustomAiInvalidApiKeyError';
+	constructor(statusCode: number, body: string) {
+		super(`OpenAI-compatible request failed (${statusCode}): ${body.slice(0, 500)}`);
+		this.name = 'CustomAiInvalidApiKeyError';
+	}
+}
+
+function isInvalidApiKeyResponse(statusCode: number, body: string): boolean {
+	if (statusCode !== 401 && statusCode !== 403) {
+		return false;
+	}
+	const lower = body.toLowerCase();
+	return lower.includes('invalid_api_key')
+		|| lower.includes('incorrect api key')
+		|| lower.includes('invalid api key');
+}
+
 /** Normalize OpenAI-style `delta.content` (string, array of parts, or null) to plain text. */
 function openAiDeltaContentToText(delta: { content?: unknown } | undefined): string | undefined {
 	const c = delta?.content;
@@ -194,6 +213,9 @@ export class CustomAiModelProvider extends Disposable implements ILanguageModelC
 		}, token);
 		if (ctx.res.statusCode && (ctx.res.statusCode < 200 || ctx.res.statusCode >= 300)) {
 			const errText = await readAllStreamText(ctx.stream, token);
+			if (isInvalidApiKeyResponse(ctx.res.statusCode, errText)) {
+				throw new CustomAiInvalidApiKeyError(ctx.res.statusCode, errText);
+			}
 			throw new Error(`OpenAI-compatible request failed (${ctx.res.statusCode}): ${errText.slice(0, 500)}`);
 		}
 		return this._streamOpenAiSse(ctx.stream, token);

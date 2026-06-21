@@ -17,14 +17,20 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 	properties: {
 		'custom.defaultProject.repoUrl': {
 			type: 'string',
-			default: 'https://github.com/jcorn925/videditor.git',
-			description: localize('custom.defaultProject.repoUrl', "Git repo URL to clone when creating the default project."),
+			default: '',
+			description: localize('custom.defaultProject.repoUrl', "Git repo URL to clone when creating the default project. Leave empty to open this VS Code checkout instead."),
 			scope: ConfigurationScope.APPLICATION
 		},
 		'custom.defaultProject.branch': {
 			type: 'string',
 			default: '',
 			description: localize('custom.defaultProject.branch', "Optional git branch, tag, or commit to checkout after cloning the default project."),
+			scope: ConfigurationScope.APPLICATION
+		},
+		'custom.defaultProject.autoCreate': {
+			type: 'boolean',
+			default: true,
+			description: localize('custom.defaultProject.autoCreate', "When enabled in Code mode, automatically clone and open the default project at startup when no valid project folder is open. Also recovers when a previously opened Custom project folder is missing on disk."),
 			scope: ConfigurationScope.APPLICATION
 		},
 		'custom.nextComponentMapping.swcPluginWasmPath': {
