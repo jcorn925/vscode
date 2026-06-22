@@ -5,6 +5,7 @@
 
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
+import { isCancellationError } from '../../../../base/common/errors.js';
 import { Disposable, IDisposable } from '../../../../base/common/lifecycle.js';
 import { constObservable, IObservable, ISettableObservable, observableValue, transaction } from '../../../../base/common/observable.js';
 import { isUriComponents, URI } from '../../../../base/common/uri.js';
@@ -281,6 +282,12 @@ class ChatModes extends Disposable implements IChatModes {
 
 			this.hasCustomModes.set(this._customModeInstances.size > 0);
 		} catch (error) {
+			// Refreshes are deliberately canceled when a newer refresh supersedes them
+			// or when this instance is disposed. Preserve the current modes and avoid
+			// reporting that expected control flow as a load failure.
+			if (token.isCancellationRequested || isCancellationError(error)) {
+				return;
+			}
 			this.logService.error(error, 'Failed to load custom agents');
 			this._customModeInstances.clear();
 			this.hasCustomModes.set(false);
