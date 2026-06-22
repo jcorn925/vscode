@@ -75,7 +75,8 @@ import {
 	type SubsystemFingerprint,
 } from './processNotesSubsystemSnapshot.js';
 import { IStartupGuideService } from '../../../../../custom/startup/StartupGuideService.js';
-import { StartupGuidePanel } from './startupGuidePanel.js';
+import { IAppLaunchGuideService } from '../../../../../custom/appLaunch/AppLaunchGuideService.js';
+import { SetupGuidePanel } from './setupGuidePanel.js';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
@@ -210,8 +211,9 @@ class ModeShellContribution extends Disposable {
 	}>();
 	private lastIxPipelineState: IxIntegrationState | undefined;
 	private readonly ixPipelineDurationTicker = this._register(new MutableDisposable<IDisposable>());
-	private readonly startupGuideButton: HTMLButtonElement;
-	private readonly startupGuidePanel: StartupGuidePanel;
+	private readonly startupGuidePanel: SetupGuidePanel;
+	private readonly appLaunchGuidePanel: SetupGuidePanel;
+	private tabGuideAutoRunAttempted = false;
 
 	private _processChatDismissed = false;
 	private _uiChatDismissed = false;
@@ -239,6 +241,7 @@ class ModeShellContribution extends Disposable {
 		@IDockerAvailabilityService private readonly dockerAvailabilityService: IDockerAvailabilityService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@IStartupGuideService private readonly startupGuideService: IStartupGuideService,
+		@IAppLaunchGuideService private readonly appLaunchGuideService: IAppLaunchGuideService,
 	) {
 		super();
 
@@ -292,6 +295,28 @@ class ModeShellContribution extends Disposable {
 				bottom: var(--custom-mode-shell-bottom-inset);
 				width: auto;
 				height: auto;
+				overflow: hidden;
+			}
+
+			/*
+			 * Code mode: clip editor content (e.g. Welcome page) so absolutely positioned
+			 * slides cannot paint over a side/bottom panel terminal.
+			 */
+			.monaco-workbench.custom-mode-shell-enabled.custom-mode-code .part.editor > .content {
+				overflow: hidden;
+			}
+
+			.monaco-workbench.custom-mode-shell-enabled.custom-mode-code .custom-mode-surface {
+				display: none !important;
+				visibility: hidden;
+				pointer-events: none;
+			}
+
+			/* Electron <webview> layers can outlive a hidden mode surface; suppress in Code mode. */
+			.monaco-workbench.custom-mode-shell-enabled.custom-mode-code .custom-mode-ui-webview,
+			.monaco-workbench.custom-mode-shell-enabled.custom-mode-code .custom-mode-ui-frame {
+				visibility: hidden;
+				pointer-events: none;
 			}
 
 			.monaco-workbench.custom-mode-shell-enabled > .custom-mode-top-modes {
@@ -1260,19 +1285,13 @@ class ModeShellContribution extends Disposable {
 				display: block;
 			}
 
-			.monaco-workbench .custom-mode-startup-guide-btn {
-				min-width: 34px;
-				padding: 0 8px;
-				font-size: 14px;
-				line-height: 1;
-			}
-
-			.monaco-workbench .custom-mode-startup-guide-btn-attention {
-				box-shadow: inset 0 0 0 1px var(--vscode-inputValidation-warningBorder);
+			.monaco-workbench .custom-mode-ui-container,
+			.monaco-workbench .custom-mode-process-container {
+				position: relative;
 			}
 
 			.monaco-workbench .custom-mode-startup-guide-overlay {
-				position: fixed;
+				position: absolute;
 				inset: 0;
 				z-index: 2600;
 				display: flex;
@@ -1975,26 +1994,6 @@ class ModeShellContribution extends Disposable {
 		}
 		this.container.insertBefore(this.modeTopBar, this.container.firstChild);
 
-		this.startupGuidePanel = this._register(new StartupGuidePanel(this.container, this.startupGuideService));
-		this.startupGuideButton = $('button.custom-mode-top-tab.custom-mode-startup-guide-btn', {
-			type: 'button',
-			title: localize('startupGuide.open', 'Startup setup'),
-			'aria-label': localize('startupGuide.open', 'Startup setup'),
-		}, '\u2699') as HTMLButtonElement;
-		const processTab = this.topModeButtons.get('Process');
-		if (processTab) {
-			this.modeTopBar.insertBefore(this.startupGuideButton, processTab);
-		} else {
-			this.modeTopBar.appendChild(this.startupGuideButton);
-		}
-		this._register(addDisposableListener(this.startupGuideButton, 'click', () => {
-			this.startupGuidePanel.toggle();
-			if (this.modeService.getMode() !== 'Process') {
-				this.modeService.setMode('Process');
-			}
-		}));
-		this._register(this.startupGuideService.onDidChangeState(() => this.startupGuidePanel.updateBadge(this.startupGuideButton)));
-		this.startupGuidePanel.updateBadge(this.startupGuideButton);
 		this._register(toDisposable(() => this.modeTopBar.remove()));
 		queueMicrotask(() => this.layoutService.layout());
 
@@ -2095,12 +2094,7 @@ class ModeShellContribution extends Disposable {
 		this.processCallout = this.createDefaultProjectCallout(localize('customMode.processCalloutTitle', 'No project open'), localize('customMode.processCalloutSubtitle', 'Create and open the default project to start coding.'), () => this.defaultProjectService.createAndOpenDefaultProject());
 		this.processStartHints = $('div.custom-mode-start-hints');
 		this.processSetup = $('div.custom-mode-setup');
-		const processSetupDetails = document.createElement('details');
-		const processSetupSummary = document.createElement('summary');
-		processSetupSummary.textContent = localize('customMode.setupSummary', 'Setup — open Startup setup (gear icon before Process) for the full checklist.');
-		processSetupDetails.appendChild(processSetupSummary);
-		processSetupDetails.appendChild(this.processStartHints);
-		this.processSetup.appendChild(processSetupDetails);
+		this.processSetup.style.display = 'none';
 		this.processIxWebHint = $('div.custom-mode-ix-webhint', undefined,
 			localize('customMode.ixWebHint', 'Ix CLI automation (install, Docker, map, watch) runs only in the desktop application, not in the browser.'));
 		this.processDockerBannerText = $('div.custom-mode-docker-banner-text');
@@ -2241,6 +2235,25 @@ class ModeShellContribution extends Disposable {
 		this.modeSurface.appendChild(this.processContainer);
 		this.container.appendChild(this.modeSurface);
 
+		this.startupGuidePanel = this._register(new SetupGuidePanel(
+			this.processContainer,
+			this.startupGuideService,
+			{
+				title: localize('startupGuide.title', 'Startup setup'),
+				subtitle: localize('startupGuide.subtitle', 'Complete these steps to use Process mode, Ix, and the default project.'),
+			},
+		));
+		this.appLaunchGuidePanel = this._register(new SetupGuidePanel(
+			this.uiContainer,
+			this.appLaunchGuideService,
+			{
+				title: localize('appLaunchGuide.title', 'App Launch'),
+				subtitle: localize('appLaunchGuide.subtitle', 'Complete these steps to run the open-folder app on localhost and load it in the preview.'),
+			},
+		));
+		this._register(this.startupGuideService.onDidChangeState(() => this.syncTabGuides(this.modeService.getMode())));
+		this._register(this.appLaunchGuideService.onDidChangeState(() => this.syncTabGuides(this.modeService.getMode())));
+
 		// Create embedded chat widgets for UI/Process.
 		this.uiChatWidget = this.createEmbeddedChatWidget(this.uiChatContainer, 'customModeShellUI');
 		this.processChatWidget = this.createEmbeddedChatWidget(this.processChatContainer, 'customModeShellProcess', 'how does the scrape videos process work');
@@ -2349,20 +2362,42 @@ class ModeShellContribution extends Disposable {
 		}
 
 		if (!isWeb) {
-			const startupAutoRunScheduler = this._register(new RunOnceScheduler(() => {
-				void this.startupGuideService.refresh().then(async () => {
-					this.startupGuidePanel.updateBadge(this.startupGuideButton);
-					if (!this.startupGuideService.shouldShowOnStartup()) {
-						return;
-					}
-					this.modeService.setMode('Process');
-					this.startupGuidePanel.show();
-					if (Boolean(this.configurationService.getValue<boolean>('custom.startupGuide.autoRun') ?? true)) {
-						await this.startupGuideService.runAutomaticFixes();
-					}
-				});
-			}, 2500));
-			startupAutoRunScheduler.schedule();
+			const tabGuideScheduler = this._register(new RunOnceScheduler(() => {
+				void Promise.all([
+					this.startupGuideService.refresh(),
+					this.appLaunchGuideService.refresh(),
+				]).then(() => this.syncTabGuides(this.modeService.getMode(), true));
+			}, 1200));
+			tabGuideScheduler.schedule();
+		}
+	}
+
+	private syncTabGuides(mode: Mode, allowAutoRun = false): void {
+		if (isWeb) {
+			return;
+		}
+
+		const onProcess = mode === 'Process';
+		const onUi = mode === 'UI';
+
+		this.appLaunchGuidePanel.syncForTab(onUi);
+		this.startupGuidePanel.syncForTab(onProcess);
+
+		if (!allowAutoRun || this.tabGuideAutoRunAttempted) {
+			return;
+		}
+
+		if (onProcess && this.startupGuidePanel.isVisible()
+			&& Boolean(this.configurationService.getValue<boolean>('custom.startupGuide.autoRun') ?? true)) {
+			this.tabGuideAutoRunAttempted = true;
+			void this.startupGuideService.runAutomaticFixes();
+			return;
+		}
+
+		if (onUi && this.appLaunchGuidePanel.isVisible()
+			&& Boolean(this.configurationService.getValue<boolean>('custom.appLaunchGuide.autoRun') ?? true)) {
+			this.tabGuideAutoRunAttempted = true;
+			void this.appLaunchGuideService.runAutomaticFixes();
 		}
 	}
 
@@ -2626,6 +2661,8 @@ class ModeShellContribution extends Disposable {
 		if (mode === 'Code') {
 			void this.chatSessionManager.openSessionForMode(mode, this.chatSessionsCts.token);
 		}
+
+		this.syncTabGuides(mode);
 	}
 
 	private createEmbeddedChatWidget(container: HTMLElement, viewId: string, defaultInput?: string): ChatWidget {
@@ -3698,7 +3735,18 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
+	private ensureCodeModeForDevServerTerminal(): void {
+		if (this.modeService.getMode() === 'Code') {
+			return;
+		}
+		this.modeService.setMode('Code');
+	}
+
 	private updateDevServerDebug(state: DevServerState): void {
+		if (state.phase === 'installing' || state.phase === 'starting') {
+			this.ensureCodeModeForDevServerTerminal();
+		}
+
 		const lines: string[] = [];
 		lines.push(`phase: ${state.phase}`);
 		if (state.script) {

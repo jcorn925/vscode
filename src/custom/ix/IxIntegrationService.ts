@@ -26,6 +26,7 @@ import {
 	buildIxInstallScriptCommand,
 	buildShellEnvPreamble,
 	ensureHomebrewShellEnvInProfile,
+	resolveKnownIxCliPath,
 } from './ixInstallHelpers.js';
 
 export type IxPhase = 'idle' | 'installing' | 'docker' | 'mapping' | 'watching' | 'error';
@@ -851,7 +852,13 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			this.storageService.store(STORAGE_IX_CLI, line, StorageScope.APPLICATION, StorageTarget.MACHINE);
 			return line;
 		}
-		return 'ix';
+
+		const known = await resolveKnownIxCliPath(this.fileService, this.environmentService.userHome);
+		if (known) {
+			this.storageService.store(STORAGE_IX_CLI, known, StorageScope.APPLICATION, StorageTarget.MACHINE);
+			return known;
+		}
+		return undefined;
 	}
 
 	private buildInstallCommand(): string {
@@ -916,6 +923,13 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 
 		this.storageService.remove(STORAGE_IX_CLI, StorageScope.APPLICATION);
 		binary = await this.resolveIxBinary(cwd);
+		if (!binary) {
+			const known = await resolveKnownIxCliPath(this.fileService, this.environmentService.userHome);
+			if (known) {
+				await this.configurationService.updateValue('custom.ix.cliPath', known);
+				binary = known;
+			}
+		}
 		if (!binary) {
 			const msg = localize('ix.error.afterInstall', 'Ix install finished but `ix` is still not on PATH.');
 			this.completeStep(resolveStepId, 'error', msg);

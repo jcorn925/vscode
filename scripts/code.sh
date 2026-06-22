@@ -42,6 +42,8 @@ function code() {
 	export VSCODE_CLI=1
 	export ELECTRON_ENABLE_STACK_DUMPING=1
 	export ELECTRON_ENABLE_LOGGING=1
+	# Parent IDE (Cursor/VS Code) sets ELECTRON_RUN_AS_NODE=1; must clear for GUI launch.
+	unset ELECTRON_RUN_AS_NODE
 
 	DISABLE_TEST_EXTENSION="--disable-extension=vscode.vscode-api-tests"
 	if [[ "$@" == *"--extensionTestsPath"* ]]; then

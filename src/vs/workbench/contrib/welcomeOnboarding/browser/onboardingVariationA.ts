@@ -47,6 +47,7 @@ import {
 	parseGheInstanceInput,
 } from '../common/onboardingTypes.js';
 import { IOnboardingService } from '../common/onboardingService.js';
+import { getDefaultChatProviderName } from '../../chat/common/chatBranding.js';
 
 type OnboardingStepViewClassification = {
 	owner: 'cwebster-99';
@@ -488,7 +489,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				if (!this._footerSignInBtn && !this._userSignedIn) {
 					this._footerSignInBtn = append(this.footerLeft, $<HTMLButtonElement>('button.onboarding-a-signin-nudge-btn'));
 					this._footerSignInBtn.type = 'button';
-					this._footerSignInBtn.textContent = localize('onboarding.sessions.signInNudge', "Sign in to use GitHub Copilot");
+					this._footerSignInBtn.textContent = localize('onboarding.sessions.signInNudge', "Sign in to use {0}", getDefaultChatProviderName());
 					this.stepDisposables.add(addDisposableListener(this._footerSignInBtn, EventType.CLICK, async () => {
 						this._logAction('signInNudge');
 						await this._handleSignIn();
@@ -523,7 +524,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		title.textContent = localize('onboarding.signIn.heroTitle', "Welcome to VS Code");
 
 		const subtitle = append(contentMain, $('p.onboarding-a-signin-subtitle'));
-		subtitle.textContent = localize('onboarding.signIn.heroSubtitle', "Sign in to use GitHub Copilot.");
+		subtitle.textContent = localize('onboarding.signIn.heroSubtitle', "Sign in to use {0}.", getDefaultChatProviderName());
 
 		const actions = append(contentMain, $('.onboarding-a-signin-actions'));
 
@@ -558,7 +559,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this._createInlineLink(copilotDisclaimer, localize('onboarding.signIn.disclaimer.terms', "Terms"), defaultChat.termsStatementUrl);
 		copilotDisclaimer.append(localize('onboarding.signIn.disclaimer.middle', " and "));
 		this._createInlineLink(copilotDisclaimer, localize('onboarding.signIn.disclaimer.privacy', "Privacy Statement"), defaultChat.privacyStatementUrl);
-		copilotDisclaimer.append(localize('onboarding.signIn.disclaimer.copilotPrefix', ". {0} Copilot may show ", defaultChat.provider.default.name));
+		copilotDisclaimer.append(localize('onboarding.signIn.disclaimer.aiPrefix', ". {0} may show ", defaultChat.provider.default.name));
 		this._createInlineLink(copilotDisclaimer, localize('onboarding.signIn.disclaimer.publicCode', "public code"), defaultChat.publicCodeMatchesUrl);
 		copilotDisclaimer.append(localize('onboarding.signIn.disclaimer.improveSuffix', " suggestions and use your data to improve the product."));
 		copilotDisclaimer.append(' ');
@@ -1193,11 +1194,11 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		this._createFeatureCard(moreGrid, Codicon.rocket,
 			localize('onboarding.sessions.runAnywhere', "Run Agents Anywhere"),
-			localize('onboarding.sessions.runAnywhere.desc', "Run agents locally for interactive work, in the background with Copilot CLI, or in the cloud with cloud agents that open a pull request your team can review."));
+			localize('onboarding.sessions.runAnywhere.desc', "Run agents locally for interactive work, in the background with a CLI agent, or in the cloud with cloud agents that open a pull request your team can review."));
 
 		this._createFeatureCard(moreGrid, Codicon.settingsGear,
 			localize('onboarding.sessions.customize', "Customize Your Agents"),
-			localize('onboarding.sessions.customize.desc', "Tailor Copilot to your project with custom instructions and agents, skills, reusable prompts, and MCP servers that connect to the tools and context you rely on."));
+			localize('onboarding.sessions.customize.desc', "Tailor agents to your project with custom instructions and agents, skills, reusable prompts, and MCP servers that connect to the tools and context you rely on."));
 
 		// Tutorial link at bottom of content, above footer
 		const docsRow = append(wrapper, $('.onboarding-a-sessions-docs'));

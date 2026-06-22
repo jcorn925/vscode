@@ -43,6 +43,7 @@ import { IContextViewService } from '../../../../../platform/contextview/browser
 import { isNewUser } from './chatStatus.js';
 import { IChatStatusItemService, ChatStatusEntry } from './chatStatusItemService.js';
 import { GitHubPaths, IDefaultAccountService } from '../../../../../platform/defaultAccount/common/defaultAccount.js';
+import { getDefaultChatProviderName } from '../../common/chatBranding.js';
 import product from '../../../../../platform/product/common/product.js';
 import { isCompletionsEnabled } from '../../../../../editor/common/services/completionsEnablement.js';
 
@@ -542,16 +543,16 @@ export class ChatStatusDashboard extends DomWidget {
 		let descriptionText: string | MarkdownString;
 		let descriptionClass = '.description';
 		if (newUser && anonymousUser) {
-			descriptionText = new MarkdownString(localize({ key: 'activeDescriptionAnonymous', comment: ['{Locked="]({2})"}', '{Locked="]({3})"}'] }, "By continuing with {0} Copilot, you agree to {1}'s [Terms]({2}) and [Privacy Statement]({3})", defaultChat.provider.default.name, defaultChat.provider.default.name, defaultChat.termsStatementUrl, defaultChat.privacyStatementUrl), { isTrusted: true });
+			descriptionText = new MarkdownString(localize({ key: 'activeDescriptionAnonymous', comment: ['{Locked="]({2})"}', '{Locked="]({3})"}'] }, "By continuing with {0}, you agree to {1}'s [Terms]({2}) and [Privacy Statement]({3})", defaultChat.provider.default.name, defaultChat.provider.default.name, defaultChat.termsStatementUrl, defaultChat.privacyStatementUrl), { isTrusted: true });
 			descriptionClass = `${descriptionClass}.terms`;
 		} else if (newUser) {
-			descriptionText = localize('activateDescription', "Set up Copilot to use AI features.");
+			descriptionText = localize('activateDescription', "Set up AI features to get started.");
 		} else if (anonymousUser) {
-			descriptionText = localize('enableMoreDescription', "Sign in to enable more Copilot AI features.");
+			descriptionText = localize('enableMoreDescription', "Sign in to enable more AI features.");
 		} else if (disabled) {
-			descriptionText = localize('enableDescription', "Enable Copilot to use AI features.");
+			descriptionText = localize('enableDescription', "Enable AI features.");
 		} else {
-			descriptionText = localize('signInDescription', "Sign in to use GitHub Copilot AI features.");
+			descriptionText = localize('signInDescription', "Sign in to use {0} AI features.", getDefaultChatProviderName());
 		}
 
 		let buttonLabel: string;
@@ -562,7 +563,7 @@ export class ChatStatusDashboard extends DomWidget {
 		} else if (disabled) {
 			buttonLabel = localize('enableCopilotButton', "Enable AI Features");
 		} else {
-			buttonLabel = localize('signInToUseAIFeatures', "Sign in to use GitHub Copilot");
+			buttonLabel = localize('signInToUseAIFeatures', "Sign in to use {0}", getDefaultChatProviderName());
 		}
 
 		let commandId: string;

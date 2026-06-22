@@ -17,7 +17,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 	properties: {
 		'custom.defaultProject.repoUrl': {
 			type: 'string',
-			default: '',
+			default: 'https://github.com/jcorn925/videditor.git',
 			description: localize('custom.defaultProject.repoUrl', "Git repo URL to clone when creating the default project. Leave empty to open this VS Code checkout instead."),
 			scope: ConfigurationScope.APPLICATION
 		},

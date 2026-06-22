@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Emitter, Event } from '../../vs/base/common/event.js';
+import { Emitter } from '../../vs/base/common/event.js';
 import { Disposable, DisposableStore } from '../../vs/base/common/lifecycle.js';
 import { isMacintosh, isWeb, isWindows } from '../../vs/base/common/platform.js';
 import { joinPath } from '../../vs/base/common/resources.js';
@@ -28,11 +28,13 @@ import {
 	IX_DEFAULT_INSTALL_URL,
 	IX_INSTALL_MANUAL_HINT,
 	resolveInstalledIxPath,
+	resolveKnownIxCliPath,
 } from '../ix/ixInstallHelpers.js';
 import { IOpenerService } from '../../vs/platform/opener/common/opener.js';
 import { localize } from '../../vs/nls.js';
+import type { SetupGuideController, SetupGuideStepStatus } from '../setup/setupGuideTypes.js';
 
-export type StartupGuideStepStatus = 'pending' | 'running' | 'success' | 'error' | 'skipped' | 'warning';
+export type StartupGuideStepStatus = SetupGuideStepStatus;
 
 export type StartupGuideStepId =
 	| 'node'
@@ -52,6 +54,7 @@ export interface StartupGuideStepSnapshot {
 	readonly manualHint: string;
 	readonly canAutoFix: boolean;
 	readonly autoFixLabel: string | undefined;
+	readonly extraActions?: ReadonlyArray<{ readonly id: string; readonly label: string }>;
 }
 
 export interface StartupGuideState {
@@ -61,15 +64,10 @@ export interface StartupGuideState {
 	readonly isAutoFixRunning: boolean;
 }
 
-export interface IStartupGuideService {
+export interface IStartupGuideService extends SetupGuideController {
 	readonly _serviceBrand: undefined;
-	readonly onDidChangeState: Event<StartupGuideState>;
-	getState(): StartupGuideState;
 	shouldShowOnStartup(): boolean;
-	markDismissed(): void;
 	clearDismissed(): void;
-	refresh(): Promise<void>;
-	runAutomaticFixes(): Promise<void>;
 	runStepFix(stepId: StartupGuideStepId): Promise<void>;
 	openHomebrewInstallTerminal(): Promise<void>;
 }
@@ -133,7 +131,7 @@ export class StartupGuideService extends Disposable implements IStartupGuideServ
 		return this.snapshot();
 	}
 
-	shouldShowOnStartup(): boolean {
+	shouldShow(): boolean {
 		if (isWeb) {
 			return false;
 		}
@@ -144,6 +142,10 @@ export class StartupGuideService extends Disposable implements IStartupGuideServ
 			return false;
 		}
 		return this.snapshot().incompleteCount > 0;
+	}
+
+	shouldShowOnStartup(): boolean {
+		return this.shouldShow();
 	}
 
 	markDismissed(): void {
@@ -190,7 +192,7 @@ export class StartupGuideService extends Disposable implements IStartupGuideServ
 				if (!step.canAutoFix) {
 					continue;
 				}
-				await this.runStepFix(id);
+				await this.runStartupStepFix(id);
 				await this.refresh();
 			}
 		} finally {
@@ -199,7 +201,17 @@ export class StartupGuideService extends Disposable implements IStartupGuideServ
 		}
 	}
 
-	async runStepFix(stepId: StartupGuideStepId): Promise<void> {
+	async runExtraAction(actionId: string): Promise<void> {
+		if (actionId === 'homebrew-terminal') {
+			await this.openHomebrewInstallTerminal();
+		}
+	}
+
+	async runStepFix(stepId: string): Promise<void> {
+		return this.runStartupStepFix(stepId as StartupGuideStepId);
+	}
+
+	async runStartupStepFix(stepId: StartupGuideStepId): Promise<void> {
 		if (isWeb) {
 			return;
 		}
@@ -465,10 +477,11 @@ export class StartupGuideService extends Disposable implements IStartupGuideServ
 			step.detail = version.trim();
 			return;
 		}
-		const localBin = joinPath(this.environmentService.userHome, '.local', 'bin', 'ix');
-		if (await this.fileService.exists(localBin)) {
+		const known = await resolveKnownIxCliPath(this.fileService, this.environmentService.userHome);
+		if (known) {
+			await this.configurationService.updateValue('custom.ix.cliPath', known);
 			step.status = 'success';
-			step.detail = localize('startupGuide.ixCli.local', 'Installed at {0} (add ~/.local/bin to PATH or set custom.ix.cliPath).', localBin.fsPath);
+			step.detail = known;
 			return;
 		}
 		step.status = 'error';
@@ -560,6 +573,11 @@ export class StartupGuideService extends Disposable implements IStartupGuideServ
 			const ixPath = await resolveInstalledIxPath(which);
 			if (ixPath) {
 				await this.configurationService.updateValue('custom.ix.cliPath', ixPath);
+				return;
+			}
+			const known = await resolveKnownIxCliPath(this.fileService, this.environmentService.userHome);
+			if (known) {
+				await this.configurationService.updateValue('custom.ix.cliPath', known);
 				return;
 			}
 		}
@@ -694,6 +712,9 @@ export class StartupGuideService extends Disposable implements IStartupGuideServ
 			manualHint: s.manualHint,
 			canAutoFix: s.canAutoFix,
 			autoFixLabel: s.autoFixLabel,
+			extraActions: s.id === 'homebrew' && s.status !== 'success' && s.status !== 'skipped'
+				? [{ id: 'homebrew-terminal', label: localize('startupGuide.homebrew.openTerminal', 'Open PATH + Ix install in Terminal') }]
+				: undefined,
 		}));
 		const incompleteCount = steps.filter(s => s.status !== 'success' && s.status !== 'skipped').length;
 		return {

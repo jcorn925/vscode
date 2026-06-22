@@ -7,38 +7,45 @@ import { $, addDisposableListener } from '../../../../base/browser/dom.js';
 import { Disposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { isWeb } from '../../../../base/common/platform.js';
 import { localize } from '../../../../nls.js';
-import { IStartupGuideService, type StartupGuideState, type StartupGuideStepId, type StartupGuideStepSnapshot, type StartupGuideStepStatus } from '../../../../../custom/startup/StartupGuideService.js';
+import type { SetupGuideController, SetupGuideState, SetupGuideStepSnapshot, SetupGuideStepStatus } from '../../../../../custom/setup/setupGuideTypes.js';
 
-export class StartupGuidePanel extends Disposable {
+export interface SetupGuidePanelOptions {
+	readonly title: string;
+	readonly subtitle: string;
+}
+
+export class SetupGuidePanel extends Disposable {
 	private readonly overlay: HTMLElement;
 	private readonly dialog: HTMLElement;
 	private readonly stepsContainer: HTMLElement;
 	private readonly summaryEl: HTMLElement;
-	private readonly refreshButton: HTMLButtonElement;
 	private readonly autoFixButton: HTMLButtonElement;
+	private readonly refreshButton: HTMLButtonElement;
 	private readonly closeButton: HTMLButtonElement;
 	private readonly dismissButton: HTMLButtonElement;
 	private visible = false;
+	private userDismissedSession = false;
 
 	constructor(
 		private readonly parent: HTMLElement,
-		private readonly startupGuideService: IStartupGuideService,
+		private readonly controller: SetupGuideController,
+		options: SetupGuidePanelOptions,
 	) {
 		super();
 
 		this.overlay = $('div.custom-mode-startup-guide-overlay.hidden');
 		this.dialog = $('div.custom-mode-startup-guide-dialog');
 		const header = $('div.custom-mode-startup-guide-header', undefined,
-			$('div.custom-mode-startup-guide-title', undefined, localize('startupGuide.title', 'Startup setup')),
-			$('div.custom-mode-startup-guide-subtitle', undefined, localize('startupGuide.subtitle', 'Complete these steps to use Process mode, Ix, and the default project.')),
+			$('div.custom-mode-startup-guide-title', undefined, options.title),
+			$('div.custom-mode-startup-guide-subtitle', undefined, options.subtitle),
 		);
 		this.summaryEl = $('div.custom-mode-startup-guide-summary');
 		this.stepsContainer = $('div.custom-mode-startup-guide-steps');
 		const footer = $('div.custom-mode-startup-guide-footer');
-		this.autoFixButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('startupGuide.runAutomatic', 'Run automatic fixes')) as HTMLButtonElement;
-		this.refreshButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('startupGuide.refresh', 'Refresh')) as HTMLButtonElement;
-		this.dismissButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('startupGuide.dismiss', "Don't show again")) as HTMLButtonElement;
-		this.closeButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('startupGuide.close', 'Close')) as HTMLButtonElement;
+		this.autoFixButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('setupGuide.runAutomatic', 'Run automatic fixes')) as HTMLButtonElement;
+		this.refreshButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('setupGuide.refresh', 'Refresh')) as HTMLButtonElement;
+		this.dismissButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('setupGuide.dismiss', "Don't show again")) as HTMLButtonElement;
+		this.closeButton = $('button.custom-mode-process-ix-button', { type: 'button' }, localize('setupGuide.close', 'Close')) as HTMLButtonElement;
 		footer.appendChild(this.autoFixButton);
 		footer.appendChild(this.refreshButton);
 		footer.appendChild(this.dismissButton);
@@ -61,34 +68,40 @@ export class StartupGuidePanel extends Disposable {
 				return;
 			}
 			const action = target.getAttribute('data-step-action');
-			if (action === 'homebrew-terminal') {
-				void this.startupGuideService.openHomebrewInstallTerminal();
+			if (!action) {
 				return;
 			}
-			if (action) {
-				void this.startupGuideService.runStepFix(action as StartupGuideStepId);
+			if (action.startsWith('extra:')) {
+				void this.controller.runExtraAction?.(action.slice('extra:'.length));
+				return;
 			}
+			void this.controller.runStepFix(action);
 		}));
-		this._register(addDisposableListener(this.autoFixButton, 'click', () => void this.startupGuideService.runAutomaticFixes()));
-		this._register(addDisposableListener(this.refreshButton, 'click', () => void this.startupGuideService.refresh()));
+		this._register(addDisposableListener(this.autoFixButton, 'click', () => void this.controller.runAutomaticFixes()));
+		this._register(addDisposableListener(this.refreshButton, 'click', () => void this.controller.refresh()));
 		this._register(addDisposableListener(this.dismissButton, 'click', () => {
-			this.startupGuideService.markDismissed();
+			this.controller.markDismissed();
+			this.userDismissedSession = true;
 			this.hide();
 		}));
 		this._register(addDisposableListener(this.closeButton, 'click', () => this.hide()));
-		this._register(this.startupGuideService.onDidChangeState(state => this.render(state)));
+		this._register(this.controller.onDidChangeState(state => this.onStateChanged(state)));
 		this._register(toDisposable(() => this.overlay.remove()));
 
-		this.render(this.startupGuideService.getState());
+		this.render(this.controller.getState());
 	}
 
 	show(): void {
-		if (isWeb) {
+		if (isWeb || this.userDismissedSession) {
 			return;
 		}
+		const wasVisible = this.visible;
 		this.visible = true;
 		this.overlay.classList.remove('hidden');
-		void this.startupGuideService.refresh();
+		// Only probe on first open; refresh() fires state → syncTabGuides → show() caused an OOM loop.
+		if (!wasVisible) {
+			void this.controller.refresh();
+		}
 	}
 
 	hide(): void {
@@ -96,47 +109,50 @@ export class StartupGuidePanel extends Disposable {
 		this.overlay.classList.add('hidden');
 	}
 
-	toggle(): void {
-		if (this.visible) {
-			this.hide();
-		} else {
-			this.show();
-		}
-	}
-
 	isVisible(): boolean {
 		return this.visible;
 	}
 
-	updateBadge(button: HTMLButtonElement): void {
-		const incomplete = this.startupGuideService.getState().incompleteCount;
-		button.classList.toggle('custom-mode-startup-guide-btn-attention', incomplete > 0);
-		button.title = incomplete > 0
-			? localize('startupGuide.openWithCount', 'Startup setup ({0} steps remaining)', String(incomplete))
-			: localize('startupGuide.openComplete', 'Startup setup (complete)');
+	syncForTab(active: boolean): void {
+		if (!active) {
+			this.hide();
+			return;
+		}
+		if (this.controller.shouldShow() && !this.userDismissedSession) {
+			this.show();
+		} else {
+			this.hide();
+		}
 	}
 
-	private render(state: StartupGuideState): void {
+	private onStateChanged(state: SetupGuideState): void {
+		this.render(state);
+		if (this.visible && state.incompleteCount === 0) {
+			this.hide();
+		}
+	}
+
+	private render(state: SetupGuideState): void {
 		this.updateControls(state);
 		this.summaryEl.textContent = state.incompleteCount > 0
-			? localize('startupGuide.summaryIncomplete', '{0} step(s) still need attention.', String(state.incompleteCount))
-			: localize('startupGuide.summaryComplete', 'All startup steps look good.');
+			? localize('setupGuide.summaryIncomplete', '{0} step(s) still need attention.', String(state.incompleteCount))
+			: localize('setupGuide.summaryComplete', 'All steps look good.');
 		this.stepsContainer.replaceChildren();
 		for (const step of state.steps) {
 			this.stepsContainer.appendChild(this.renderStep(step));
 		}
 	}
 
-	private updateControls(state: StartupGuideState): void {
+	private updateControls(state: SetupGuideState): void {
 		const busy = state.isRefreshing || state.isAutoFixRunning;
 		this.autoFixButton.disabled = busy;
 		this.refreshButton.disabled = busy;
 		this.autoFixButton.textContent = state.isAutoFixRunning
-			? localize('startupGuide.runningAutomatic', 'Running automatic fixes…')
-			: localize('startupGuide.runAutomatic', 'Run automatic fixes');
+			? localize('setupGuide.runningAutomatic', 'Running automatic fixes…')
+			: localize('setupGuide.runAutomatic', 'Run automatic fixes');
 	}
 
-	private renderStep(step: StartupGuideStepSnapshot): HTMLElement {
+	private renderStep(step: SetupGuideStepSnapshot): HTMLElement {
 		const card = $('div.custom-mode-startup-guide-step');
 		card.classList.add(`custom-mode-startup-guide-step-${step.status}`);
 		const head = $('div.custom-mode-startup-guide-step-head', undefined,
@@ -157,16 +173,16 @@ export class StartupGuidePanel extends Disposable {
 				'data-step-action': step.id,
 			}, step.autoFixLabel));
 		}
-		if (step.id === 'homebrew' && step.status !== 'success' && step.status !== 'skipped') {
+		for (const extra of step.extraActions ?? []) {
 			actions.appendChild($('button.custom-mode-process-ix-button', {
 				type: 'button',
-				'data-step-action': 'homebrew-terminal',
-			}, localize('startupGuide.homebrew.openTerminal', 'Open PATH + Ix install in Terminal')));
+				'data-step-action': `extra:${extra.id}`,
+			}, extra.label));
 		}
 		if (step.manualHint) {
 			const details = document.createElement('details');
 			const summary = document.createElement('summary');
-			summary.textContent = localize('startupGuide.manualInstructions', 'Manual instructions');
+			summary.textContent = localize('setupGuide.manualInstructions', 'Manual instructions');
 			const pre = document.createElement('pre');
 			pre.className = 'custom-mode-startup-guide-step-manual';
 			pre.textContent = step.manualHint;
@@ -180,7 +196,7 @@ export class StartupGuidePanel extends Disposable {
 		return card;
 	}
 
-	private statusGlyph(status: StartupGuideStepStatus): string {
+	private statusGlyph(status: SetupGuideStepStatus): string {
 		switch (status) {
 			case 'success': return '\u2713';
 			case 'error': return '\u2717';

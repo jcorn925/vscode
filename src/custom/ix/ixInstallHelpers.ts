@@ -34,16 +34,37 @@ export const IX_INSTALL_MANUAL_HINT =
 	+ 'With brew on PATH, the Ix script skips the Homebrew step.';
 
 export function buildShellEnvPreamble(): string {
-	if (!isMacintosh) {
-		return '';
+	const lines: string[] = [];
+	if (isMacintosh) {
+		lines.push(
+			'if [ -x /opt/homebrew/bin/brew ]; then',
+			'  eval "$(/opt/homebrew/bin/brew shellenv zsh)"',
+			'elif [ -x /usr/local/bin/brew ]; then',
+			'  eval "$(/usr/local/bin/brew shellenv)"',
+			'fi',
+		);
 	}
-	return [
-		'if [ -x /opt/homebrew/bin/brew ]; then',
-		'  eval "$(/opt/homebrew/bin/brew shellenv zsh)"',
-		'elif [ -x /usr/local/bin/brew ]; then',
-		'  eval "$(/usr/local/bin/brew shellenv)"',
-		'fi',
-	].join('\n');
+	if (!isWindows) {
+		// Ix installs to ~/.local/bin; GUI/hidden bash probes do not load ~/.zshrc.
+		lines.push('export PATH="$HOME/.local/bin:$PATH"');
+	}
+	return lines.join('\n');
+}
+
+export async function resolveKnownIxCliPath(
+	fileService: IFileService,
+	userHome: URI,
+): Promise<string | undefined> {
+	const candidates = [
+		joinPath(userHome, '.local', 'bin', 'ix'),
+		joinPath(userHome, '.ix', 'cli', 'ix'),
+	];
+	for (const candidate of candidates) {
+		if (await fileService.exists(candidate)) {
+			return candidate.fsPath;
+		}
+	}
+	return undefined;
 }
 
 export function buildIxInstallScriptCommand(installUrl: string = IX_DEFAULT_INSTALL_URL): string {
