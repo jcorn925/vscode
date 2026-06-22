@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { VSBuffer } from '../../../../../base/common/buffer.js';
+import { isCancellationError } from '../../../../../base/common/errors.js';
 import { hashAsync } from '../../../../../base/common/hash.js';
 import { ResourceMap } from '../../../../../base/common/map.js';
 import { revive } from '../../../../../base/common/marshalling.js';
@@ -114,7 +115,9 @@ export class ChatEditingSessionStorage {
 				timeline: revive(data.timeline),
 			};
 		} catch (e) {
-			this._logService.error(`Error restoring chat editing session from ${storageLocation.toString()}`, e);
+			if (!isCancellationError(e)) {
+				this._logService.error(`Error restoring chat editing session from ${storageLocation.toString()}`, e);
+			}
 		}
 		return undefined;
 	}
@@ -137,7 +140,9 @@ export class ChatEditingSessionStorage {
 				// does not exist, create
 				await this._fileService.createFolder(contentsFolder);
 			} catch (e) {
-				this._logService.error(`Error creating chat editing session content folder ${contentsFolder.toString()}`, e);
+				if (!isCancellationError(e)) {
+					this._logService.error(`Error creating chat editing session content folder ${contentsFolder.toString()}`, e);
+				}
 				return;
 			}
 		}

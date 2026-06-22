@@ -180,9 +180,10 @@ export class DevServerService extends Disposable implements IDevServerService {
 		this.script = startScript;
 		this.lastError = undefined;
 
-		// Infer URL early so UI can load immediately; gets replaced once terminal output contains the real URL.
+		// Infer the URL for probing and command hints, but do not publish it until a
+		// server actually responds. Publishing an unverified URL makes the embedded
+		// preview navigate too early and show ERR_CONNECTION_REFUSED during startup.
 		const inferredUrl = this.inferDevUrl(packageJson, startScript);
-		this.setActiveUrl(inferredUrl);
 
 		const packageManager = await this.detectPackageManager(folder, packageJson);
 		const startCommand = this.formatRunCommand(packageManager, startScript);
@@ -196,9 +197,7 @@ export class DevServerService extends Disposable implements IDevServerService {
 		// to skip injection even when nothing is actually serving on the port.
 		const reachableUrl = await this.findRunningDevServerUrl(inferredUrl);
 		if (reachableUrl) {
-			if (reachableUrl !== inferredUrl) {
-				this.setActiveUrl(reachableUrl);
-			}
+			this.setActiveUrl(reachableUrl);
 			this.setPhase('running');
 			this.started = true;
 			return this.activeUrl;
@@ -235,7 +234,7 @@ export class DevServerService extends Disposable implements IDevServerService {
 	}
 
 	/**
-	 * Resolves once `instance.cols` reports a sane terminal width (≥40 cols), or after a short
+	 * Resolves once `instance.cols` reports a sane terminal width (at least 40 cols), or after a short
 	 * timeout. Combined with `setActiveInstance` + `revealTerminal`, this is what guarantees the
 	 * dev server's first output is wrapped at the panel's real width instead of the PTY default.
 	 */
@@ -489,15 +488,23 @@ export class DevServerService extends Disposable implements IDevServerService {
 
 	private pickStartScript(packageJson: PackageJson): string | undefined {
 		const scripts = packageJson.scripts ?? {};
+		const isRunnable = (script: string | undefined): boolean => {
+			if (!script?.trim()) {
+				return false;
+			}
+			// An echo-only script is documentation or a placeholder, not a persistent
+			// dev server. Commands that continue after the echo remain eligible.
+			return !/^\s*echo\b[^;&|\n]*$/i.test(script);
+		};
 
 		// Prefer dev if it exists, otherwise pick common alternatives.
-		if (scripts['dev']) {
+		if (isRunnable(scripts['dev'])) {
 			return 'dev';
 		}
-		if (scripts['start']) {
+		if (isRunnable(scripts['start'])) {
 			return 'start';
 		}
-		if (scripts['web']) {
+		if (isRunnable(scripts['web'])) {
 			return 'web';
 		}
 
@@ -596,4 +603,3 @@ export class DevServerService extends Disposable implements IDevServerService {
 }
 
 registerSingleton(IDevServerService, DevServerService, InstantiationType.Delayed);
-

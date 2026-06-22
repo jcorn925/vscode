@@ -2029,7 +2029,11 @@ class ModeShellContribution extends Disposable {
 		);
 		this.uiSetup.appendChild(uiStartBar);
 		this.uiCallout = this.createDefaultProjectCallout(localize('customMode.uiCalloutTitle', 'No project open'), localize('customMode.uiCalloutSubtitle', 'Create and open the default project to start coding.'), () => this.defaultProjectService.createAndOpenDefaultProject());
-		const initialUrl = this.devServerService.getActiveUrl() ?? 'http://localhost:3000';
+		// Avoid eagerly navigating to a conventional dev-server URL. When no server is
+		// active this only produces a Chromium ERR_CONNECTION_REFUSED page and noisy
+		// startup logs. The active URL listener below navigates the preview as soon as
+		// a server is detected.
+		const initialUrl = this.devServerService.getActiveUrl() ?? 'about:blank';
 		// Use iframe on web and Electron webview on desktop.
 		// Many dev servers (e.g. Next) send headers that block framing (X-Frame-Options / CSP frame-ancestors),
 		// which would make an iframe appear blank even though the server is running.
