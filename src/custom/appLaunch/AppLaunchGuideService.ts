@@ -152,7 +152,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 			return;
 		}
 		const step = this.findStep(stepId as AppLaunchGuideStepId);
-		if (!step?.canAutoFix) {
+		if (!step?.canAutoFix || !isFixableStepStatus(step.status)) {
 			return;
 		}
 		step.status = 'running';
@@ -308,8 +308,8 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		const step = this.findStep('dependencies')!;
 		const devScriptStep = this.findStep('dev-script');
 		if (devScriptStep?.status !== 'success' || !this.lastWorkspaceFolder) {
-			step.status = 'pending';
-			step.detail = localize('appLaunchGuide.dependencies.waitScript', 'Configure a dev script first.');
+			step.status = devScriptStep?.status === 'error' ? 'skipped' : 'pending';
+			step.detail = localize('appLaunchGuide.dependencies.waitScript', 'Add a runnable app script before installing dependencies.');
 			return;
 		}
 		const hints = await this.devServerService.getSuggestedStartCommands();
@@ -332,8 +332,8 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		const depsStep = this.findStep('dependencies');
 		const devScriptStep = this.findStep('dev-script');
 		if (devScriptStep?.status !== 'success') {
-			step.status = 'pending';
-			step.detail = localize('appLaunchGuide.devServer.waitScript', 'Configure a dev script first.');
+			step.status = devScriptStep?.status === 'error' ? 'skipped' : 'pending';
+			step.detail = localize('appLaunchGuide.devServer.waitScript', 'Add a runnable app script before starting localhost.');
 			return;
 		}
 		if (depsStep?.status !== 'success' && depsStep?.status !== 'warning') {
@@ -450,7 +450,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 			status: s.status,
 			detail: s.detail,
 			manualHint: s.manualHint,
-			canAutoFix: s.canAutoFix,
+			canAutoFix: s.canAutoFix && isFixableStepStatus(s.status),
 			autoFixLabel: s.autoFixLabel,
 		}));
 		const incompleteCount = steps.filter(s => s.status !== 'success' && s.status !== 'skipped').length;
@@ -465,6 +465,10 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 	private fireState(): void {
 		this._onDidChangeState.fire(this.snapshot());
 	}
+}
+
+function isFixableStepStatus(status: SetupGuideStepStatus): boolean {
+	return status === 'error' || status === 'warning';
 }
 
 registerSingleton(IAppLaunchGuideService, AppLaunchGuideService, InstantiationType.Delayed);

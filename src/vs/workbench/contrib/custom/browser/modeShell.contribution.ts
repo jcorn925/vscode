@@ -128,6 +128,7 @@ class ModeShellContribution extends Disposable {
 	private readonly container: HTMLElement;
 	private readonly topModeButtons = new Map<Mode, HTMLButtonElement>();
 	private readonly modeTopBar: HTMLElement;
+	private readonly uiProjectName: HTMLElement;
 	private readonly modeSurface: HTMLElement;
 	private readonly uiContainer: HTMLElement;
 	private readonly processContainer: HTMLElement;
@@ -393,6 +394,22 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-tab-activeForeground);
 				border-bottom-color: var(--vscode-tab-activeBorder, var(--vscode-focusBorder));
 				background-color: var(--vscode-tab-activeBackground, transparent);
+			}
+
+			.monaco-workbench .custom-mode-ui-project-name {
+				max-width: min(240px, 28vw);
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				color: var(--vscode-descriptionForeground);
+				font-size: 12px;
+				font-weight: 600;
+				line-height: 1;
+				margin-right: 8px;
+			}
+
+			.monaco-workbench .custom-mode-ui-project-name.hidden {
+				display: none;
 			}
 
 			.monaco-workbench .custom-mode-surface {
@@ -2085,6 +2102,7 @@ class ModeShellContribution extends Disposable {
 		`;
 
 		this.modeTopBar = $('div.custom-mode-top-modes', { role: 'tablist' });
+		this.uiProjectName = $('span.custom-mode-ui-project-name.hidden');
 		for (const mode of ModeShellContribution.MODES) {
 			const button = $('button.custom-mode-top-tab', {
 				type: 'button',
@@ -2094,6 +2112,9 @@ class ModeShellContribution extends Disposable {
 			}, mode) as HTMLButtonElement;
 			this.topModeButtons.set(mode, button);
 			this.modeTopBar.appendChild(button);
+			if (mode === 'UI') {
+				this.modeTopBar.appendChild(this.uiProjectName);
+			}
 			this._register(addDisposableListener(button, 'click', () => this.modeService.setMode(mode)));
 		}
 		this.container.insertBefore(this.modeTopBar, this.container.firstChild);
@@ -2808,6 +2829,10 @@ class ModeShellContribution extends Disposable {
 		if (this.getSelectedSurface()) {
 			return;
 		}
+		const hints = this.lastUiStartHints;
+		if (hints && !hints.primaryRunCommand) {
+			return;
+		}
 		void this.probeEmbeddedUiDevServer().finally(() => {
 			if (this.modeService.getMode() !== 'UI') {
 				return;
@@ -2827,6 +2852,10 @@ class ModeShellContribution extends Disposable {
 
 	private async probeEmbeddedUiDevServer(): Promise<void> {
 		if (this.getSelectedSurface()) {
+			return;
+		}
+		const hints = await this.devServerService.getSuggestedStartCommands();
+		if (!hints?.primaryRunCommand) {
 			return;
 		}
 		const url = await this.devServerService.syncActiveUrlFromProbe();
@@ -2981,7 +3010,16 @@ class ModeShellContribution extends Disposable {
 	private updateProjectState(): void {
 		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
 		this.container.classList.toggle('custom-mode-shell-hasProject', hasProject);
+		this.updateUiProjectName();
 		this.refreshStartCommandHints();
+	}
+
+	private updateUiProjectName(): void {
+		const folder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		const name = folder ? basename(folder) : '';
+		this.uiProjectName.textContent = name;
+		this.uiProjectName.title = folder?.fsPath ?? '';
+		this.uiProjectName.classList.toggle('hidden', !name);
 	}
 
 	private syncGoalSurfaceSwitcher(): void {

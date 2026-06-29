@@ -148,7 +148,8 @@ export class SetupGuidePanel extends Disposable {
 
 	private updateControls(state: SetupGuideState): void {
 		const busy = state.isRefreshing || state.isAutoFixRunning;
-		this.autoFixButton.disabled = busy;
+		const canRunAutomaticFixes = state.steps.some(step => step.canAutoFix && step.autoFixLabel && step.status !== 'success' && step.status !== 'skipped');
+		this.autoFixButton.disabled = busy || !canRunAutomaticFixes;
 		this.refreshButton.disabled = busy;
 		this.autoFixButton.textContent = state.isAutoFixRunning
 			? localize('setupGuide.runningAutomatic', 'Running automatic fixes…')
