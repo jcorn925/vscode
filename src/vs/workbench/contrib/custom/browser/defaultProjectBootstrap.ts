@@ -8,7 +8,7 @@ import { localize } from '../../../../nls.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
-import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
 import { IModeService } from '../../../../../custom/mode/ModeService.js';
 import { IDefaultProjectService } from '../../../../../custom/devserver/DefaultProjectService.js';
 
@@ -38,6 +38,15 @@ export class DefaultProjectBootstrapContribution extends Disposable {
 
 	private async maybeBootstrap(): Promise<void> {
 		if (this.bootstrapStarted) {
+			return;
+		}
+
+		const folder = this.workspaceContextService.getWorkbenchState() === WorkbenchState.FOLDER
+			? this.workspaceContextService.getWorkspace().folders[0]?.uri
+			: undefined;
+		if (folder && this.defaultProjectService.isManagedProjectPath(folder)) {
+			this.bootstrapStarted = true;
+			await this.defaultProjectService.openFallbackWorkspace();
 			return;
 		}
 

@@ -26,6 +26,7 @@ export interface IDefaultProjectService {
 	createAndOpenDefaultProject(options?: { silent?: boolean }): Promise<void>;
 	shouldBootstrapAtStartup(): Promise<boolean>;
 	shouldSkipSilentClone(repoUrl: string): boolean;
+	isManagedProjectPath(folder: URI): boolean;
 	openFallbackWorkspace(): Promise<void>;
 }
 

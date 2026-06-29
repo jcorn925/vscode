@@ -83,6 +83,7 @@ const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
 const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
 const GOAL_OVERVIEW_SURFACE_ID = '__goal_overview__';
+const ADD_SURFACE_ID = '__add_surface__';
 
 /**
  * Stringify the shape of an ix JSON response for diagnostic logging when discovery
@@ -123,7 +124,7 @@ class ModeShellContribution extends Disposable {
 
 	static readonly ID = 'workbench.contrib.modeShell';
 
-	private static readonly MODES: readonly Mode[] = ['UI', 'Process', 'Code'];
+	private static readonly MODES: readonly Mode[] = ['UI', 'Code'];
 
 	private readonly container: HTMLElement;
 	private readonly topModeButtons = new Map<Mode, HTMLButtonElement>();
@@ -350,8 +351,8 @@ class ModeShellContribution extends Disposable {
 				display: flex;
 				flex-direction: row;
 				align-items: center;
-				justify-content: center;
-				gap: 6px;
+				justify-content: flex-start;
+				gap: 8px;
 				padding: 0 12px;
 				box-sizing: border-box;
 				border-bottom: 1px solid var(--vscode-panel-border);
@@ -393,6 +394,11 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-tab-activeForeground);
 				border-bottom-color: var(--vscode-tab-activeBorder, var(--vscode-focusBorder));
 				background-color: var(--vscode-tab-activeBackground, transparent);
+			}
+
+			.monaco-workbench .custom-mode-top-modes .custom-mode-top-spacer {
+				flex: 1 1 auto;
+				min-width: 8px;
 			}
 
 			.monaco-workbench .custom-mode-surface {
@@ -778,10 +784,10 @@ class ModeShellContribution extends Disposable {
 				flex: 0 0 auto;
 				align-items: center;
 				gap: 6px;
-				min-height: 34px;
-				padding: 5px 8px;
-				border-bottom: 1px solid var(--vscode-panel-border);
-				background: var(--vscode-editorBackground);
+				min-width: 0;
+				max-width: min(68vw, 900px);
+				height: 100%;
+				padding: 0 2px;
 				overflow-x: auto;
 				overflow-y: hidden;
 			}
@@ -792,29 +798,36 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-ui-surface-button {
 				flex: 0 0 auto;
-				height: 24px;
+				height: 26px;
 				max-width: 180px;
 				padding: 0 10px;
 				border-radius: 4px;
-				border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-panel-border));
-				background: var(--vscode-button-secondaryBackground);
-				color: var(--vscode-button-secondaryForeground);
+				border: 0;
+				border-bottom: 2px solid transparent;
+				background: transparent;
+				color: var(--vscode-tab-inactiveForeground);
 				cursor: pointer;
 				font-size: 12px;
-				line-height: 22px;
+				font-weight: 600;
+				line-height: 1.2;
 				white-space: nowrap;
 				overflow: hidden;
 				text-overflow: ellipsis;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-button:hover {
-				background: var(--vscode-button-secondaryHoverBackground);
+				color: var(--vscode-tab-activeForeground);
+				background: var(--vscode-toolbar-hoverBackground);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-button.active {
-				border-color: var(--vscode-focusBorder);
-				background: var(--vscode-button-background);
-				color: var(--vscode-button-foreground);
+				border-bottom-color: var(--vscode-tab-activeBorder, var(--vscode-focusBorder));
+				background: var(--vscode-tab-activeBackground, transparent);
+				color: var(--vscode-tab-activeForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-button.custom-mode-ui-add-surface {
+				color: var(--vscode-descriptionForeground);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-empty {
@@ -2132,7 +2145,12 @@ class ModeShellContribution extends Disposable {
 			this.uiRuntimeText
 		);
 		this.uiSetup.appendChild(uiStartBar);
-		this.uiCallout = this.createDefaultProjectCallout(localize('customMode.uiCalloutTitle', 'No project open'), localize('customMode.uiCalloutSubtitle', 'Create and open the default project to start coding.'), () => this.defaultProjectService.createAndOpenDefaultProject());
+		this.uiCallout = this.createDefaultProjectCallout(
+			localize('customMode.uiCalloutTitle', 'Create a Goal Workspace'),
+			localize('customMode.uiCalloutSubtitle', 'Describe the business you want to run, then start from a goal-oriented workspace with surfaces for the apps that serve it.'),
+			() => this.defaultProjectService.openFallbackWorkspace(),
+			localize('customMode.openGoalWorkspaceExample', 'Open Goal Workspace Example')
+		);
 		// Avoid eagerly navigating to a conventional dev-server URL. When no server is
 		// active this only produces a Chromium ERR_CONNECTION_REFUSED page and noisy
 		// startup logs. The active URL listener below navigates the preview as soon as
@@ -2168,7 +2186,6 @@ class ModeShellContribution extends Disposable {
 				this.uiSurfaceEmptySubtitle
 			)
 		);
-		this.uiBrowserShell.appendChild(this.uiSurfaceSwitcher);
 		this.uiBrowserShell.appendChild(this.uiSurfaceEmptyState);
 		this.uiBrowserShell.appendChild(this.uiBrowser);
 
@@ -2198,17 +2215,17 @@ class ModeShellContribution extends Disposable {
 		this._register(addDisposableListener(uiCloseBtn, 'click', () => this.setUiChatDismissed(true)));
 		this._register(addDisposableListener(this.uiChatReopenBtn, 'click', () => this.setUiChatDismissed(false)));
 
-		// Show the selection chip + Clear button in the top mode bar, right before the "UI" tab.
-		// Order in DOM: [Clear] [N Selected] [UI tab].
-		const uiTab = this.topModeButtons.get('UI');
-		if (uiTab) {
-			this.modeTopBar.insertBefore(this.uiSelectionPill, uiTab);
-			this.modeTopBar.insertBefore(this.uiSelectionClearBtn, this.uiSelectionPill);
-			this._register(toDisposable(() => {
-				this.uiSelectionPill.remove();
-				this.uiSelectionClearBtn.remove();
-			}));
-		}
+		this.modeTopBar.appendChild(this.uiSurfaceSwitcher);
+		const topBarSpacer = $('div.custom-mode-top-spacer');
+		this.modeTopBar.appendChild(topBarSpacer);
+		this.modeTopBar.appendChild(this.uiSelectionClearBtn);
+		this.modeTopBar.appendChild(this.uiSelectionPill);
+		this._register(toDisposable(() => {
+			this.uiSurfaceSwitcher.remove();
+			topBarSpacer.remove();
+			this.uiSelectionPill.remove();
+			this.uiSelectionClearBtn.remove();
+		}));
 		this._register(addDisposableListener(this.uiSelectionClearBtn, 'click', () => this.clearUiSelection()));
 
 		this.processContainer = $('div.custom-mode-process-container');
@@ -2216,7 +2233,12 @@ class ModeShellContribution extends Disposable {
 			this.processContainer.classList.add('custom-mode-process-chat-dismissed');
 		}
 		this.processMainColumn = $('div.custom-mode-process-main');
-		this.processCallout = this.createDefaultProjectCallout(localize('customMode.processCalloutTitle', 'No project open'), localize('customMode.processCalloutSubtitle', 'Create and open the default project to start coding.'), () => this.defaultProjectService.createAndOpenDefaultProject());
+		this.processCallout = this.createDefaultProjectCallout(
+			localize('customMode.processCalloutTitle', 'No project open'),
+			localize('customMode.processCalloutSubtitle', 'Open the goal workspace example to inspect its code map and process context.'),
+			() => this.defaultProjectService.openFallbackWorkspace(),
+			localize('customMode.openGoalWorkspaceExample', 'Open Goal Workspace Example')
+		);
 		this.processStartHints = $('div.custom-mode-start-hints');
 		this.processSetup = $('div.custom-mode-setup');
 		this.processSetup.style.display = 'none';
@@ -3006,9 +3028,13 @@ class ModeShellContribution extends Disposable {
 
 		const storedSurfaceId = this.storageService.get(STORAGE_SELECTED_GOAL_SURFACE, StorageScope.WORKSPACE);
 		const selectedSurface = this.resolveSelectedSurface(surfaces, storedSurfaceId);
-		this.selectedSurfaceId = selectedSurface?.id ?? GOAL_OVERVIEW_SURFACE_ID;
+		this.selectedSurfaceId = storedSurfaceId === ADD_SURFACE_ID
+			? ADD_SURFACE_ID
+			: selectedSurface?.id ?? GOAL_OVERVIEW_SURFACE_ID;
 		if (selectedSurface) {
 			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, selectedSurface.id, StorageScope.WORKSPACE, StorageTarget.USER);
+		} else if (this.selectedSurfaceId === ADD_SURFACE_ID) {
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
 		} else {
 			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, GOAL_OVERVIEW_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
 		}
@@ -3019,7 +3045,7 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private resolveSelectedSurface(surfaces: readonly GoalSurface[], storedSurfaceId: string | undefined): GoalSurface | undefined {
-		if (this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID || storedSurfaceId === GOAL_OVERVIEW_SURFACE_ID) {
+		if (this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID || this.selectedSurfaceId === ADD_SURFACE_ID || storedSurfaceId === GOAL_OVERVIEW_SURFACE_ID || storedSurfaceId === ADD_SURFACE_ID) {
 			return undefined;
 		}
 
@@ -3062,11 +3088,36 @@ class ModeShellContribution extends Disposable {
 			fragment.appendChild(button);
 		}
 
+		const addSurfaceButton = this.renderAddSurfaceButton();
+		nextButtons.set(ADD_SURFACE_ID, addSurfaceButton);
+		fragment.appendChild(addSurfaceButton);
+
 		this.uiSurfaceButtons.clear();
 		for (const [id, button] of nextButtons) {
 			this.uiSurfaceButtons.set(id, button);
 		}
 		this.uiSurfaceSwitcher.replaceChildren(fragment);
+	}
+
+	private renderAddSurfaceButton(): HTMLButtonElement {
+		let button = this.uiSurfaceButtons.get(ADD_SURFACE_ID);
+		if (!button) {
+			button = $('button.custom-mode-ui-surface-button.custom-mode-ui-add-surface', {
+				type: 'button',
+				role: 'tab'
+			}) as HTMLButtonElement;
+			this._register(addDisposableListener(button, 'click', () => this.selectGoalSurface(ADD_SURFACE_ID)));
+		}
+
+		const isActive = this.selectedSurfaceId === ADD_SURFACE_ID;
+		const label = localize('customMode.addSurfaceTab', '+ Add Surface');
+		const description = localize('customMode.addSurfaceDescription', 'Add a new business surface to this goal workspace');
+		button.textContent = label;
+		button.title = description;
+		button.classList.toggle('active', isActive);
+		button.setAttribute('aria-selected', String(isActive));
+		button.setAttribute('aria-label', description);
+		return button;
 	}
 
 	private renderGoalOverviewButton(): HTMLButtonElement {
@@ -3090,6 +3141,15 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private selectGoalSurface(surfaceId: string): void {
+		if (surfaceId === ADD_SURFACE_ID) {
+			this.selectedSurfaceId = ADD_SURFACE_ID;
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
+			this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
+			this.routeSelectedSurfacePreview();
+			this.refreshStartCommandHints();
+			return;
+		}
+
 		if (surfaceId === GOAL_OVERVIEW_SURFACE_ID) {
 			this.selectedSurfaceId = GOAL_OVERVIEW_SURFACE_ID;
 			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, GOAL_OVERVIEW_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
@@ -3112,7 +3172,7 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private getSelectedSurface(): GoalSurface | undefined {
-		if (!this.selectedSurfaceId || this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID) {
+		if (!this.selectedSurfaceId || this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID || this.selectedSurfaceId === ADD_SURFACE_ID) {
 			return undefined;
 		}
 		return this.goalWorkspaceService.getSurface(this.selectedSurfaceId);
@@ -3127,6 +3187,14 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private routeSelectedSurfacePreview(): void {
+		if (this.selectedSurfaceId === ADD_SURFACE_ID) {
+			this.container.classList.add('custom-mode-ui-surface-selected');
+			this.setAddSurfaceState();
+			this.clearEmbeddedUiUrl();
+			this.pushUiRuntimeLog('[surface] selected add surface');
+			return;
+		}
+
 		if (this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID) {
 			this.container.classList.add('custom-mode-ui-surface-selected');
 			this.setGoalOverviewState();
@@ -3156,6 +3224,16 @@ class ModeShellContribution extends Disposable {
 		}
 		void this.checkUrlReachable(url);
 		this.logSelectedSurfaceRoute(surface, url);
+	}
+
+	private setAddSurfaceState(): void {
+		this.setSurfaceEmptyState({
+			title: localize('customMode.addSurfaceTitle', 'Add a Surface'),
+			subtitle: localize(
+				'customMode.addSurfaceSubtitle',
+				'Describe the business job this surface should handle. The agent should register it in workspace.goal.json, scaffold its app files, and update related domain, event, analytics, and admin surfaces in one plan.'
+			)
+		});
 	}
 
 	private setSurfaceMissingUrlState(surface: GoalSurface | undefined): void {
@@ -3200,6 +3278,17 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private setGoalWorkspaceManifestStateMessage(status: string, diagnostics: readonly { readonly path: string; readonly message: string }[]): void {
+		if (status === 'no-workspace') {
+			this.setSurfaceEmptyState({
+				title: localize('customMode.goalWorkspaceNoWorkspaceTitle', 'Create a Goal Workspace'),
+				subtitle: localize(
+					'customMode.goalWorkspaceNoWorkspaceDetail',
+					'Name the business, describe what it sells, then choose starter surfaces such as Marketing Site, Booking App, Trainer Admin, Analytics, Content Scheduler, and Ads Manager.'
+				)
+			});
+			return;
+		}
+
 		if (status === 'invalid') {
 			const diagnostic = diagnostics[0];
 			this.setSurfaceEmptyState({
@@ -3214,7 +3303,7 @@ class ModeShellContribution extends Disposable {
 		if (status === 'missing') {
 			this.setSurfaceEmptyState({
 				title: localize('customMode.goalWorkspaceMissingTitle', 'No goal workspace manifest'),
-				subtitle: localize('customMode.goalWorkspaceMissingDetail', 'Add workspace.goal.json at the workspace root to show goal surfaces.')
+				subtitle: localize('customMode.goalWorkspaceMissingDetail', 'Add workspace.goal.json at the workspace root or convert this folder into a goal workspace to show business surfaces.')
 			});
 			return;
 		}
@@ -4768,8 +4857,8 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
-	private createDefaultProjectCallout(title: string, subtitle: string, run: () => void): HTMLElement {
-		const button = $('button.custom-mode-callout-button', { type: 'button' }, localize('customMode.createDefaultProject', 'Create Default Project')) as HTMLButtonElement;
+	private createDefaultProjectCallout(title: string, subtitle: string, run: () => void, buttonLabel = localize('customMode.createDefaultProject', 'Create Default Project')): HTMLElement {
+		const button = $('button.custom-mode-callout-button', { type: 'button' }, buttonLabel) as HTMLButtonElement;
 		this._register(addDisposableListener(button, 'click', () => run()));
 
 		return $('div.custom-mode-callout', undefined,
