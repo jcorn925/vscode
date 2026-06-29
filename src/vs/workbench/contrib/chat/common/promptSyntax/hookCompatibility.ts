@@ -9,6 +9,7 @@ import { IHookCommand, toHookType } from './hookSchema.js';
 import { parseClaudeHooks, extractHookCommandsFromItem } from './hookClaudeCompat.js';
 import { resolveCopilotCliHookType } from './hookCopilotCliCompat.js';
 import { HookType } from './hookTypes.js';
+import { getDefaultChatProviderName } from '../chatBranding.js';
 
 /**
  * Represents a hook source with its original and normalized properties.
@@ -196,7 +197,7 @@ export function getHookSourceFormatLabel(format: HookSourceFormat): string {
 		case HookSourceFormat.Claude:
 			return 'Claude';
 		case HookSourceFormat.Copilot:
-			return 'GitHub Copilot';
+			return getDefaultChatProviderName();
 	}
 }
 

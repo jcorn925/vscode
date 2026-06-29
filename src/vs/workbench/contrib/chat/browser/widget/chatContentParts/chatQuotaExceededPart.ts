@@ -13,6 +13,7 @@ import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { assertType } from '../../../../../../base/common/types.js';
 import { IMarkdownRenderer } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { localize } from '../../../../../../nls.js';
+import { getDefaultChatProviderName } from '../../../common/chatBranding.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
 import { defaultButtonStyles } from '../../../../../../platform/theme/browser/defaultStyles.js';
@@ -75,7 +76,7 @@ export class ChatQuotaExceededPart extends Disposable implements IChatContentPar
 					primaryButtonLabel = localize('manageBudget', "Manage Budget");
 					break;
 				case ChatEntitlement.Free:
-					primaryButtonLabel = localize('upgradeToCopilotPro', "Upgrade to GitHub Copilot Pro");
+					primaryButtonLabel = localize('upgradeToCopilotPro', "Upgrade to {0} Pro", getDefaultChatProviderName());
 					break;
 			}
 		}

@@ -7,6 +7,7 @@ import { basename } from '../../../base/common/resources.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
 import { URI } from '../../../base/common/uri.js';
 import { localize } from '../../../nls.js';
+import product from '../../product/common/product.js';
 import { GITHUB_COPILOT_PROTECTED_RESOURCE, IAgentService } from '../common/agentService.js';
 import { ChangesetKind, parseChangesetUri } from '../common/changesetUri.js';
 import { type IChangesetOperationHandler } from '../common/changesetOperation.js';
@@ -84,7 +85,7 @@ export class AgentHostCommitOperationHandler implements IChangesetOperationHandl
 		if (!authToken) {
 			throw new ProtocolError(
 				AHP_AUTH_REQUIRED,
-				localize('agentHost.changeset.commit.authRequired', "Sign in to GitHub Copilot to generate a commit message."),
+				localize('agentHost.changeset.commit.authRequired', "Sign in to {0} to generate a commit message.", product.defaultChatAgent?.provider?.default?.name ?? 'AI'),
 				[GITHUB_COPILOT_PROTECTED_RESOURCE],
 			);
 		}
@@ -105,7 +106,7 @@ export class AgentHostCommitOperationHandler implements IChangesetOperationHandl
 			if (this._isAuthFailure(err)) {
 				throw new ProtocolError(
 					AHP_AUTH_REQUIRED,
-					localize('agentHost.changeset.commit.authExpired', "Authentication is required to generate a commit message. Please sign in to GitHub Copilot and try again."),
+					localize('agentHost.changeset.commit.authExpired', "Authentication is required to generate a commit message. Please sign in to {0} and try again.", product.defaultChatAgent?.provider?.default?.name ?? 'AI'),
 					[GITHUB_COPILOT_PROTECTED_RESOURCE],
 				);
 			}

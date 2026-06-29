@@ -11,6 +11,7 @@ import { Lazy } from '../../../../base/common/lazy.js';
 import { Disposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { IRequestContext } from '../../../../base/parts/request/common/request.js';
 import { localize } from '../../../../nls.js';
+import { getDefaultChatProviderName } from '../../../contrib/chat/common/chatBranding.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
@@ -239,21 +240,22 @@ export function isProUser(chatEntitlement: ChatEntitlement): boolean {
  * @returns The localized full plan name (e.g., "Copilot Pro", "Copilot Free")
  */
 export function getChatPlanName(chatEntitlement: ChatEntitlement): string {
+	const providerName = getDefaultChatProviderName();
 	switch (chatEntitlement) {
 		case ChatEntitlement.EDU:
-			return localize('plan.eduName', 'Copilot Student');
+			return localize('plan.eduName', '{0} Student', providerName);
 		case ChatEntitlement.Pro:
-			return localize('plan.proName', 'Copilot Pro');
+			return localize('plan.proName', '{0} Pro', providerName);
 		case ChatEntitlement.ProPlus:
-			return localize('plan.proPlusName', 'Copilot Pro+');
+			return localize('plan.proPlusName', '{0} Pro+', providerName);
 		case ChatEntitlement.Max:
-			return localize('plan.maxName', 'Copilot Max');
+			return localize('plan.maxName', '{0} Max', providerName);
 		case ChatEntitlement.Business:
-			return localize('plan.businessName', 'Copilot Business');
+			return localize('plan.businessName', '{0} Business', providerName);
 		case ChatEntitlement.Enterprise:
-			return localize('plan.enterpriseName', 'Copilot Enterprise');
+			return localize('plan.enterpriseName', '{0} Enterprise', providerName);
 		default:
-			return localize('plan.freeName', 'Copilot Free');
+			return localize('plan.freeName', '{0} Free', providerName);
 	}
 }
 
@@ -1151,7 +1153,7 @@ export class ChatEntitlementRequests extends Disposable {
 		if (!this.lifecycleService.willShutdown) {
 			const { confirmed } = await this.dialogService.confirm({
 				type: Severity.Error,
-				message: localize('unknownSignUpError', "An error occurred while signing up for the GitHub Copilot Free plan. Would you like to try again?"),
+				message: localize('unknownSignUpError', "An error occurred while signing up for the {0} Free plan. Would you like to try again?", getDefaultChatProviderName()),
 				detail,
 				primaryButton: localize('retry', "Retry")
 			});
@@ -1168,7 +1170,7 @@ export class ChatEntitlementRequests extends Disposable {
 		if (!this.lifecycleService.willShutdown) {
 			this.dialogService.prompt({
 				type: Severity.Error,
-				message: localize('unprocessableSignUpError', "An error occurred while signing up for the GitHub Copilot Free plan."),
+				message: localize('unprocessableSignUpError', "An error occurred while signing up for the {0} Free plan.", getDefaultChatProviderName()),
 				detail: logDetails,
 				buttons: [
 					{

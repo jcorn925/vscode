@@ -5,6 +5,7 @@
 
 import './media/extensionActions.css';
 import { localize, localize2 } from '../../../../nls.js';
+import { getDefaultChatProviderName } from '../../chat/common/chatBranding.js';
 import { IAction, Action, Separator, SubmenuAction, IActionChangeEvent } from '../../../../base/common/actions.js';
 import { Delayer, Promises, Throttler } from '../../../../base/common/async.js';
 import * as DOM from '../../../../base/browser/dom.js';
@@ -2922,7 +2923,7 @@ export class ExtensionStatusAction extends ExtensionAction {
 
 		// Unification
 		if (this.extension.enablementState === EnablementState.DisabledByUnification) {
-			this.updateStatus({ icon: infoIcon, message: new MarkdownString(localize('extension disabled because of unification', "All GitHub Copilot functionality is now being served from the GitHub Copilot Chat extension. To temporarily opt out of this extension unification, toggle the {0} setting.", '`chat.extensionUnification.enabled`')) }, true);
+			this.updateStatus({ icon: infoIcon, message: new MarkdownString(localize('extension disabled because of unification', "All {0} functionality is now being served from the default chat extension. To temporarily opt out of this extension unification, toggle the {1} setting.", getDefaultChatProviderName(), '`chat.extensionUnification.enabled`')) }, true);
 			return;
 		}
 

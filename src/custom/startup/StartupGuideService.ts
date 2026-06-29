@@ -135,7 +135,7 @@ export class StartupGuideService extends Disposable implements IStartupGuideServ
 		if (isWeb) {
 			return false;
 		}
-		if (!Boolean(this.configurationService.getValue<boolean>('custom.startupGuide.showOnIncomplete') ?? true)) {
+		if (!(this.configurationService.getValue<boolean>('custom.startupGuide.showOnIncomplete') ?? true)) {
 			return false;
 		}
 		if (this.storageService.getBoolean(STORAGE_DISMISSED, StorageScope.APPLICATION, false)) {

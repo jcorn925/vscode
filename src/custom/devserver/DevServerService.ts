@@ -44,6 +44,11 @@ export interface IDevServerService {
 	 * "is the dev server already running?".
 	 */
 	findRunningDevServerUrl(preferredUrl: string | undefined): Promise<string | undefined>;
+	/**
+	 * Probes whether a dev server is already listening for the open workspace (e.g. started in an
+	 * external terminal) and, if so, publishes `activeUrl` and `phase: running`.
+	 */
+	syncActiveUrlFromProbe(): Promise<string | undefined>;
 }
 
 export const IDevServerService = createDecorator<IDevServerService>('devServerService');
@@ -160,7 +165,10 @@ export class DevServerService extends Disposable implements IDevServerService {
 		}
 
 		if (this.started) {
-			return this.activeUrl;
+			if (this.activeUrl) {
+				return this.activeUrl;
+			}
+			return this.syncActiveUrlFromProbe();
 		}
 
 		const detected = await this.detectPackageJson(workspaceFolder);
@@ -448,7 +456,8 @@ export class DevServerService extends Disposable implements IDevServerService {
 	}
 
 	private onWorkspaceChanged(): void {
-		this.lastWorkspaceFolder = this.getPrimaryWorkspaceFolder();
+		const folder = this.getPrimaryWorkspaceFolder();
+		this.lastWorkspaceFolder = folder;
 		this.started = false;
 		this.outputBuffer = '';
 		this.script = undefined;
@@ -457,6 +466,42 @@ export class DevServerService extends Disposable implements IDevServerService {
 		this.phase = 'idle';
 		this.setActiveUrl(undefined);
 		this.fireState();
+		void this.probeAlreadyRunningDevServer(folder);
+	}
+
+	async syncActiveUrlFromProbe(): Promise<string | undefined> {
+		const folder = this.getPrimaryWorkspaceFolder();
+		if (!folder) {
+			return undefined;
+		}
+		const detected = await this.detectPackageJson(folder);
+		if (!detected || this.lastWorkspaceFolder?.toString() !== folder.toString()) {
+			return undefined;
+		}
+		const startScript = this.pickStartScript(detected.packageJson);
+		if (!startScript) {
+			return undefined;
+		}
+		const inferredUrl = this.inferDevUrl(detected.packageJson, startScript);
+		const reachableUrl = await this.findRunningDevServerUrl(inferredUrl);
+		if (!reachableUrl || this.lastWorkspaceFolder?.toString() !== folder.toString()) {
+			return undefined;
+		}
+		this.script = startScript;
+		if (this.activeUrl !== reachableUrl || this.phase !== 'running') {
+			this.setActiveUrl(reachableUrl);
+			this.setPhase('running');
+		}
+		this.started = true;
+		return reachableUrl;
+	}
+
+	/** If a dev server is already listening (e.g. started in an external terminal), publish its URL. */
+	private async probeAlreadyRunningDevServer(folder: URI | undefined): Promise<void> {
+		if (!folder || this.lastWorkspaceFolder?.toString() !== folder.toString()) {
+			return;
+		}
+		await this.syncActiveUrlFromProbe();
 	}
 
 	private tryExtractUrlFromTerminalData(data: string): void {

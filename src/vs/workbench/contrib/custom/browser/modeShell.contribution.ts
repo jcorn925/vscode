@@ -77,9 +77,11 @@ import {
 import { IStartupGuideService } from '../../../../../custom/startup/StartupGuideService.js';
 import { IAppLaunchGuideService } from '../../../../../custom/appLaunch/AppLaunchGuideService.js';
 import { SetupGuidePanel } from './setupGuidePanel.js';
+import { IGoalWorkspaceService, type GoalSurface } from '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
+const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
 
 /**
  * Stringify the shape of an ix JSON response for diagnostic logging when discovery
@@ -151,6 +153,13 @@ class ModeShellContribution extends Disposable {
 	private readonly uiStartSubtitle: HTMLElement;
 	private readonly uiStartStatus: HTMLElement;
 	private readonly uiRuntimeText: HTMLElement;
+	private readonly uiSurfaceSwitcher: HTMLElement;
+	private readonly uiSurfaceEmptyState: HTMLElement;
+	private readonly uiSurfaceEmptyTitle: HTMLElement;
+	private readonly uiSurfaceEmptySubtitle: HTMLElement;
+	private readonly uiSurfaceButtons = new Map<string, HTMLButtonElement>();
+	private selectedSurfaceId: string | undefined;
+	private lastSurfaceRoutingLogKey: string | undefined;
 	private lastUiStartHints: DevServerSuggestedCommands | undefined;
 	private autoStartAppAttempted = false;
 	private readonly uiRuntimeLogs: string[] = [];
@@ -158,6 +167,7 @@ class ModeShellContribution extends Disposable {
 	private readonly startHintActionDisposables = this._register(new DisposableStore());
 	private reachabilityUrl: string | undefined;
 	private appReachable = false;
+	private readonly uiDevServerProbeScheduler = this._register(new RunOnceScheduler(() => this.scheduleEmbeddedUiDevServerProbe(), 2500));
 	private readonly chatSessionsCts = this._register(new CancellationTokenSource());
 	private readonly chatSessionManager: ModeShellChatSessionManager;
 	private readonly embeddedChatRefs = {
@@ -242,6 +252,7 @@ class ModeShellContribution extends Disposable {
 		@IOpenerService private readonly openerService: IOpenerService,
 		@IStartupGuideService private readonly startupGuideService: IStartupGuideService,
 		@IAppLaunchGuideService private readonly appLaunchGuideService: IAppLaunchGuideService,
+		@IGoalWorkspaceService private readonly goalWorkspaceService: IGoalWorkspaceService,
 	) {
 		super();
 
@@ -317,6 +328,14 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench.custom-mode-shell-enabled.custom-mode-code .custom-mode-ui-frame {
 				visibility: hidden;
 				pointer-events: none;
+			}
+
+			/* Tab setup guides are HTML overlays; native <webview> would paint over them otherwise. */
+			.monaco-workbench .custom-mode-ui-container.custom-mode-setup-guide-open .custom-mode-ui-webview,
+			.monaco-workbench .custom-mode-ui-container.custom-mode-setup-guide-open .custom-mode-ui-frame {
+				visibility: hidden !important;
+				display: none !important;
+				pointer-events: none !important;
 			}
 
 			.monaco-workbench.custom-mode-shell-enabled > .custom-mode-top-modes {
@@ -753,6 +772,89 @@ class ModeShellContribution extends Disposable {
 				display: contents;
 			}
 
+			.monaco-workbench .custom-mode-ui-surface-switcher {
+				display: none;
+				flex: 0 0 auto;
+				align-items: center;
+				gap: 6px;
+				min-height: 34px;
+				padding: 5px 8px;
+				border-bottom: 1px solid var(--vscode-panel-border);
+				background: var(--vscode-editorBackground);
+				overflow-x: auto;
+				overflow-y: hidden;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-switcher:not(.hidden) {
+				display: flex;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-button {
+				flex: 0 0 auto;
+				height: 24px;
+				max-width: 180px;
+				padding: 0 10px;
+				border-radius: 4px;
+				border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-panel-border));
+				background: var(--vscode-button-secondaryBackground);
+				color: var(--vscode-button-secondaryForeground);
+				cursor: pointer;
+				font-size: 12px;
+				line-height: 22px;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-button:hover {
+				background: var(--vscode-button-secondaryHoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-button.active {
+				border-color: var(--vscode-focusBorder);
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty {
+				display: none;
+				flex: 1 1 auto;
+				min-height: 0;
+				align-items: center;
+				justify-content: center;
+				padding: 24px;
+				background: var(--vscode-editorBackground);
+				color: var(--vscode-foreground);
+				text-align: center;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty:not(.hidden) {
+				display: flex;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-inner {
+				display: flex;
+				flex-direction: column;
+				gap: 8px;
+				max-width: 440px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-title {
+				font-size: 13px;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-subtitle {
+				font-size: 12px;
+				line-height: 1.45;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-missing-url .custom-mode-ui-frame,
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-missing-url .custom-mode-ui-webview {
+				display: none !important;
+			}
+
 			.monaco-workbench .custom-mode-ui-frame,
 			.monaco-workbench .custom-mode-ui-webview {
 				flex: 1 1 auto;
@@ -873,6 +975,10 @@ class ModeShellContribution extends Disposable {
 
 			/* When the dev server is up (or network probe succeeded), hide Start App / runtime panel over the preview. */
 			.monaco-workbench.custom-mode-app-reachable.custom-mode-shell-hasProject .custom-mode-ui-main > .custom-mode-setup {
+				display: none !important;
+			}
+
+			.monaco-workbench.custom-mode-ui-surface-selected.custom-mode-shell-hasProject .custom-mode-ui-main > .custom-mode-setup {
 				display: none !important;
 			}
 
@@ -2033,22 +2139,39 @@ class ModeShellContribution extends Disposable {
 		// active this only produces a Chromium ERR_CONNECTION_REFUSED page and noisy
 		// startup logs. The active URL listener below navigates the preview as soon as
 		// a server is detected.
-		const initialUrl = this.devServerService.getActiveUrl() ?? 'about:blank';
+		const initialUrl = this.getTargetEmbeddedUiUrl();
 		// Use iframe on web and Electron webview on desktop.
 		// Many dev servers (e.g. Next) send headers that block framing (X-Frame-Options / CSP frame-ancestors),
 		// which would make an iframe appear blank even though the server is running.
+		// On desktop, omit an initial `src` when no URL is known yet. Eagerly loading `about:blank`
+		// and then replacing `src` when the dev server URL arrives aborts the first navigation
+		// (ERR_ABORTED -3) and can leave the preview stuck blank even though localhost is up.
 		this.uiBrowser = isWeb
 			? $('iframe.custom-mode-ui-frame', {
-				src: initialUrl,
+				src: initialUrl ?? 'about:blank',
 				title: localize('customMode.uiFrameTitle', 'UI Mode'),
 				allow: 'clipboard-read; clipboard-write'
 			}) as unknown as HTMLElement & { src: string }
 			: $('webview.custom-mode-ui-webview', {
-				src: initialUrl,
+				...(initialUrl ? { src: initialUrl } : {}),
 				allowpopups: 'true'
 			}) as unknown as HTMLElement & { src: string };
 
 		this.uiBrowserShell = $('div.custom-mode-ui-browser-shell');
+		this.uiSurfaceSwitcher = $('div.custom-mode-ui-surface-switcher.hidden', {
+			role: 'tablist',
+			'aria-label': localize('customMode.surfaceSwitcherLabel', 'Goal surfaces')
+		});
+		this.uiSurfaceEmptyTitle = $('div.custom-mode-ui-surface-empty-title');
+		this.uiSurfaceEmptySubtitle = $('div.custom-mode-ui-surface-empty-subtitle');
+		this.uiSurfaceEmptyState = $('div.custom-mode-ui-surface-empty.hidden', undefined,
+			$('div.custom-mode-ui-surface-empty-inner', undefined,
+				this.uiSurfaceEmptyTitle,
+				this.uiSurfaceEmptySubtitle
+			)
+		);
+		this.uiBrowserShell.appendChild(this.uiSurfaceSwitcher);
+		this.uiBrowserShell.appendChild(this.uiSurfaceEmptyState);
 		this.uiBrowserShell.appendChild(this.uiBrowser);
 
 		this.uiMainColumn.appendChild(this.uiCallout);
@@ -2265,16 +2388,19 @@ class ModeShellContribution extends Disposable {
 		this.updateMode(this.modeService.getMode());
 		this._register(this.modeService.onDidChange(mode => this.updateMode(mode)));
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.updateProjectState()));
+		this._register(this.goalWorkspaceService.onDidChangeGoalWorkspace(() => this.syncGoalSurfaceSwitcher()));
 		this._register(this.devServerService.onDidChangeActiveUrl(url => {
-			if (url && this.uiBrowser.src !== url) {
-				// IMPORTANT: Don't set both property + attribute on <webview>.
-				// Doing so can cause a navigation to be canceled by a subsequent
-				// navigation, which shows up as ERR_ABORTED (-3).
-				if (isWeb) {
-					this.uiBrowser.src = url;
-				} else {
-					(this.uiBrowser as unknown as HTMLElement).setAttribute('src', url);
-				}
+			if (!url) {
+				return;
+			}
+			if (this.getSelectedSurface()) {
+				return;
+			}
+			// IMPORTANT: Don't set both property + attribute on <webview>.
+			// Doing so can cause a navigation to be canceled by a subsequent
+			// navigation, which shows up as ERR_ABORTED (-3).
+			if (!this.embeddedUiShowsUrl(url)) {
+				this.setEmbeddedUiUrl(url);
 			}
 		}));
 		this._register(this.devServerService.onDidChangeState(state => this.updateDevServerDebug(state)));
@@ -2285,6 +2411,7 @@ class ModeShellContribution extends Disposable {
 		}
 
 		this.updateProjectState();
+		this.syncGoalSurfaceSwitcher();
 		this.updateDevServerDebug(this.devServerService.getState());
 		this.updateIxDebug(this.ixIntegrationService.getState());
 		// Start the (UI-rendering) discovery only after Process notes UI exists.
@@ -2667,6 +2794,50 @@ class ModeShellContribution extends Disposable {
 		}
 
 		this.syncTabGuides(mode);
+
+		if (isUi) {
+			this.routeSelectedSurfacePreview();
+			this.scheduleEmbeddedUiDevServerProbe();
+		} else {
+			this.uiDevServerProbeScheduler.cancel();
+		}
+	}
+
+	private scheduleEmbeddedUiDevServerProbe(): void {
+		if (isWeb || this.modeService.getMode() !== 'UI') {
+			return;
+		}
+		if (this.getSelectedSurface()) {
+			return;
+		}
+		void this.probeEmbeddedUiDevServer().finally(() => {
+			if (this.modeService.getMode() !== 'UI') {
+				return;
+			}
+			const current = this.getEmbeddedUiUrl();
+			const activeUrl = this.devServerService.getActiveUrl();
+			const needsProbe = !activeUrl
+				|| !this.appReachable
+				|| !current
+				|| current === 'about:blank'
+				|| (activeUrl && !this.embeddedUiShowsUrl(activeUrl));
+			if (needsProbe) {
+				this.uiDevServerProbeScheduler.schedule();
+			}
+		});
+	}
+
+	private async probeEmbeddedUiDevServer(): Promise<void> {
+		if (this.getSelectedSurface()) {
+			return;
+		}
+		const url = await this.devServerService.syncActiveUrlFromProbe();
+		if (!url || this.modeService.getMode() !== 'UI') {
+			return;
+		}
+		if (!this.embeddedUiShowsUrl(url)) {
+			this.setEmbeddedUiUrl(url);
+		}
 	}
 
 	private createEmbeddedChatWidget(container: HTMLElement, viewId: string, defaultInput?: string): ChatWidget {
@@ -2813,6 +2984,155 @@ class ModeShellContribution extends Disposable {
 		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
 		this.container.classList.toggle('custom-mode-shell-hasProject', hasProject);
 		this.refreshStartCommandHints();
+	}
+
+	private syncGoalSurfaceSwitcher(): void {
+		const surfaces = this.goalWorkspaceService.getSurfaces();
+		const hasManifestSurfaces = this.goalWorkspaceService.getState().status === 'loaded' && surfaces.length > 0;
+		this.uiSurfaceSwitcher.classList.toggle('hidden', !hasManifestSurfaces);
+
+		if (!hasManifestSurfaces) {
+			this.selectedSurfaceId = undefined;
+			this.container.classList.remove('custom-mode-ui-surface-selected');
+			this.uiSurfaceButtons.clear();
+			this.uiSurfaceSwitcher.replaceChildren();
+			this.setSurfaceMissingUrlState(undefined);
+
+			const activeUrl = this.devServerService.getActiveUrl();
+			if (activeUrl && !this.embeddedUiShowsUrl(activeUrl)) {
+				this.setEmbeddedUiUrl(activeUrl);
+			}
+			return;
+		}
+
+		const storedSurfaceId = this.storageService.get(STORAGE_SELECTED_GOAL_SURFACE, StorageScope.WORKSPACE);
+		const selectedSurface = this.resolveSelectedSurface(surfaces, storedSurfaceId);
+		this.selectedSurfaceId = selectedSurface?.id;
+		if (selectedSurface) {
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, selectedSurface.id, StorageScope.WORKSPACE, StorageTarget.USER);
+		}
+
+		this.renderGoalSurfaceButtons(surfaces);
+		this.routeSelectedSurfacePreview();
+	}
+
+	private resolveSelectedSurface(surfaces: readonly GoalSurface[], storedSurfaceId: string | undefined): GoalSurface | undefined {
+		const current = this.selectedSurfaceId ? surfaces.find(surface => surface.id === this.selectedSurfaceId) : undefined;
+		if (current) {
+			return current;
+		}
+
+		const stored = storedSurfaceId ? surfaces.find(surface => surface.id === storedSurfaceId) : undefined;
+		return stored ?? surfaces[0];
+	}
+
+	private renderGoalSurfaceButtons(surfaces: readonly GoalSurface[]): void {
+		const nextButtons = new Map<string, HTMLButtonElement>();
+		const fragment = document.createDocumentFragment();
+
+		for (const surface of surfaces) {
+			let button = this.uiSurfaceButtons.get(surface.id);
+			if (!button) {
+				button = $('button.custom-mode-ui-surface-button', {
+					type: 'button',
+					role: 'tab'
+				}) as HTMLButtonElement;
+				this._register(addDisposableListener(button, 'click', () => this.selectGoalSurface(surface.id)));
+			}
+
+			const isActive = surface.id === this.selectedSurfaceId;
+			button.textContent = surface.name;
+			button.title = surface.localUrl
+				? localize('customMode.surfaceButtonTitle', '{0}: {1}', surface.name, surface.localUrl)
+				: surface.name;
+			button.classList.toggle('active', isActive);
+			button.setAttribute('aria-selected', String(isActive));
+			button.setAttribute('aria-label', surface.name);
+
+			nextButtons.set(surface.id, button);
+			fragment.appendChild(button);
+		}
+
+		this.uiSurfaceButtons.clear();
+		for (const [id, button] of nextButtons) {
+			this.uiSurfaceButtons.set(id, button);
+		}
+		this.uiSurfaceSwitcher.replaceChildren(fragment);
+	}
+
+	private selectGoalSurface(surfaceId: string): void {
+		const surface = this.goalWorkspaceService.getSurface(surfaceId);
+		if (!surface) {
+			return;
+		}
+
+		this.selectedSurfaceId = surface.id;
+		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
+		this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
+		this.routeSelectedSurfacePreview();
+	}
+
+	private getSelectedSurface(): GoalSurface | undefined {
+		if (!this.selectedSurfaceId) {
+			return undefined;
+		}
+		return this.goalWorkspaceService.getSurface(this.selectedSurfaceId);
+	}
+
+	private getTargetEmbeddedUiUrl(): string | undefined {
+		const selectedSurface = this.getSelectedSurface();
+		if (selectedSurface) {
+			return selectedSurface.localUrl;
+		}
+		return this.devServerService.getActiveUrl();
+	}
+
+	private routeSelectedSurfacePreview(): void {
+		const surface = this.getSelectedSurface();
+		this.container.classList.toggle('custom-mode-ui-surface-selected', Boolean(surface));
+		if (!surface) {
+			this.setSurfaceMissingUrlState(undefined);
+			return;
+		}
+
+		const url = surface.localUrl;
+		if (!url) {
+			this.setSurfaceMissingUrlState(surface);
+			this.clearEmbeddedUiUrl();
+			this.logSelectedSurfaceRoute(surface, undefined);
+			return;
+		}
+
+		this.setSurfaceMissingUrlState(undefined);
+		if (!this.embeddedUiShowsUrl(url)) {
+			this.setEmbeddedUiUrl(url);
+		}
+		this.logSelectedSurfaceRoute(surface, url);
+	}
+
+	private setSurfaceMissingUrlState(surface: GoalSurface | undefined): void {
+		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-missing-url', Boolean(surface));
+		this.uiSurfaceEmptyState.classList.toggle('hidden', !surface);
+		if (!surface) {
+			this.uiSurfaceEmptyTitle.textContent = '';
+			this.uiSurfaceEmptySubtitle.textContent = '';
+			return;
+		}
+
+		this.uiSurfaceEmptyTitle.textContent = localize('customMode.surfaceMissingUrlTitle', '{0} has no preview URL', surface.name);
+		this.uiSurfaceEmptySubtitle.textContent = localize(
+			'customMode.surfaceMissingUrlSubtitle',
+			'Add localUrl to this surface in workspace.goal.json to route the preview.'
+		);
+	}
+
+	private logSelectedSurfaceRoute(surface: GoalSurface, url: string | undefined): void {
+		const key = `${surface.id}:${url ?? ''}`;
+		if (this.lastSurfaceRoutingLogKey === key) {
+			return;
+		}
+		this.lastSurfaceRoutingLogKey = key;
+		this.pushUiRuntimeLog(`[surface] selected ${surface.id} (${surface.name}) url=${url ?? 'none'}`);
 	}
 
 	private refreshStartCommandHints(): void {
@@ -4142,14 +4462,24 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private reloadEmbeddedUi(): void {
-		const url = this.devServerService.getActiveUrl();
+		const url = this.getTargetEmbeddedUiUrl();
 		if (!url) {
+			return;
+		}
+
+		const current = this.getEmbeddedUiUrl();
+		const isBlank = !current || current === 'about:blank';
+
+		// First navigation after startup: webview is still on about:blank — reload() would only
+		// reload the blank page and leave the preview black while app-reachable hides Start App.
+		if (isBlank || current !== url) {
+			this.setEmbeddedUiUrl(url);
 			return;
 		}
 
 		if (!isWeb && this.isWebviewElement(this.uiBrowser)) {
 			// Electron <webview> exposes `reload()`. This avoids the ERR_ABORTED-from-double-navigation
-			// pitfall we'd hit by toggling `src` rapidly.
+			// pitfall we'd hit by toggling `src` rapidly when we're already on the target URL.
 			const webview = this.uiBrowser as unknown as { reload?: () => void };
 			if (typeof webview.reload === 'function') {
 				try {
@@ -4161,17 +4491,10 @@ class ModeShellContribution extends Disposable {
 			}
 		}
 
-		// Cross-platform fallback: blank the frame, then re-set the URL on the next tick so the
-		// browser/webview treats it as a fresh navigation (assigning the same src is a no-op).
-		const setSrc = (value: string) => {
-			if (isWeb) {
-				this.uiBrowser.src = value;
-			} else {
-				(this.uiBrowser as unknown as HTMLElement).setAttribute('src', value);
-			}
-		};
-		setSrc('about:blank');
-		mainWindow.setTimeout(() => setSrc(url), 0);
+		// Cross-platform fallback: force a fresh navigation without an intermediate `about:blank`
+		// hop — that hop aborts Electron <webview> loads and has been observed to leave the preview black.
+		const reloadUrl = this.withCacheBust(url);
+		this.setEmbeddedUiUrl(reloadUrl);
 	}
 
 	private async checkUrlReachable(url: string): Promise<void> {
@@ -4203,6 +4526,56 @@ class ModeShellContribution extends Disposable {
 
 	private isWebviewElement(el: HTMLElement): boolean {
 		return el.tagName.toLowerCase() === 'webview';
+	}
+
+	private getEmbeddedUiUrl(): string {
+		if (isWeb) {
+			return (this.uiBrowser as unknown as { src: string }).src ?? '';
+		}
+		return (this.uiBrowser as unknown as HTMLElement).getAttribute('src') ?? '';
+	}
+
+	private embeddedUiShowsUrl(targetUrl: string): boolean {
+		const current = this.getEmbeddedUiUrl();
+		if (!current || current === 'about:blank') {
+			return false;
+		}
+		try {
+			const currentUrl = new URL(current);
+			const target = new URL(targetUrl);
+			currentUrl.searchParams.delete('_vscodeUiReload');
+			target.searchParams.delete('_vscodeUiReload');
+			return currentUrl.toString() === target.toString();
+		} catch {
+			return current === targetUrl;
+		}
+	}
+
+	private setEmbeddedUiUrl(url: string): void {
+		if (isWeb) {
+			(this.uiBrowser as unknown as { src: string }).src = url;
+		} else {
+			(this.uiBrowser as unknown as HTMLElement).setAttribute('src', url);
+		}
+	}
+
+	private clearEmbeddedUiUrl(): void {
+		if (isWeb) {
+			(this.uiBrowser as unknown as { src: string }).src = 'about:blank';
+		} else {
+			(this.uiBrowser as unknown as HTMLElement).setAttribute('src', 'about:blank');
+		}
+	}
+
+	private withCacheBust(url: string): string {
+		try {
+			const parsed = new URL(url);
+			parsed.searchParams.set('_vscodeUiReload', String(Date.now()));
+			return parsed.toString();
+		} catch {
+			const sep = url.includes('?') ? '&' : '?';
+			return `${url}${sep}_vscodeUiReload=${Date.now()}`;
+		}
 	}
 
 	private createDefaultProjectCallout(title: string, subtitle: string, run: () => void): HTMLElement {

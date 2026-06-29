@@ -111,9 +111,9 @@ import { AccessibilityWorkbenchSettingId } from '../../../accessibility/browser/
 import { isMcpToolInvocation } from './chatContentParts/toolInvocationParts/chatToolPartUtilities.js';
 import { isAgentHostTarget } from '../agentSessions/agentSessions.js';
 
-const $ = dom.$;
+import { isDefaultChatAgentUsername } from '../../common/chatBranding.js';
 
-const COPILOT_USERNAME = 'GitHub Copilot';
+const $ = dom.$;
 const WORKING_CAUGHT_UP_DEBOUNCE_MS = 750;
 
 export interface IChatListItemTemplate {
@@ -808,8 +808,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		const isSystemInitiatedRequest = isRequestVM(element) && !!element.isSystemInitiated;
 
 		templateData.username.textContent = element.username;
-		templateData.username.classList.toggle('hidden', element.username === COPILOT_USERNAME || this.environmentService.isSessionsWindow || isSystemInitiatedRequest);
-		templateData.avatarContainer.classList.toggle('hidden', element.username === COPILOT_USERNAME || this.environmentService.isSessionsWindow || isSystemInitiatedRequest);
+		templateData.username.classList.toggle('hidden', isDefaultChatAgentUsername(element.username) || this.environmentService.isSessionsWindow || isSystemInitiatedRequest);
+		templateData.avatarContainer.classList.toggle('hidden', isDefaultChatAgentUsername(element.username) || this.environmentService.isSessionsWindow || isSystemInitiatedRequest);
 
 		this.hoverHidden(templateData.requestHover);
 		dom.clearNode(templateData.detail);

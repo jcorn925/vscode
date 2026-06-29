@@ -98,6 +98,8 @@ export class SetupGuidePanel extends Disposable {
 		const wasVisible = this.visible;
 		this.visible = true;
 		this.overlay.classList.remove('hidden');
+		// Electron <webview> is a native layer above DOM; hide it so the guide is visible.
+		this.parent.classList.add('custom-mode-setup-guide-open');
 		// Only probe on first open; refresh() fires state → syncTabGuides → show() caused an OOM loop.
 		if (!wasVisible) {
 			void this.controller.refresh();
@@ -107,6 +109,7 @@ export class SetupGuidePanel extends Disposable {
 	hide(): void {
 		this.visible = false;
 		this.overlay.classList.add('hidden');
+		this.parent.classList.remove('custom-mode-setup-guide-open');
 	}
 
 	isVisible(): boolean {

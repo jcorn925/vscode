@@ -18,6 +18,7 @@ import { IChatResponseErrorDetails } from '../../common/chatService/chatService.
 import { IChatErrorDetailsPart, IChatResponseViewModel } from '../../common/model/chatViewModel.js';
 import { IChatWidgetService } from '../../browser/chat.js';
 import { ChatQuotaExceededPart } from '../../browser/widget/chatContentParts/chatQuotaExceededPart.js';
+import { getDefaultChatProviderName } from '../../common/chatBranding.js';
 
 
 function createMockEntitlementService(entitlement: ChatEntitlement): IChatEntitlementService {
@@ -138,7 +139,7 @@ suite('ChatQuotaExceededPart', () => {
 			assert.strictEqual(button.textContent, 'Manage Budget');
 		});
 
-		test('shows "Upgrade to GitHub Copilot Pro" for Free user', () => {
+		test('shows upgrade button for Free user', () => {
 			const widget = createWidget(ChatEntitlement.Free, {
 				message: 'Quota exceeded',
 				isQuotaExceeded: true,
@@ -146,7 +147,7 @@ suite('ChatQuotaExceededPart', () => {
 
 			const button = getPrimaryButton(widget);
 			assert.ok(button);
-			assert.strictEqual(button.textContent, 'Upgrade to GitHub Copilot Pro');
+			assert.strictEqual(button.textContent, `Upgrade to ${getDefaultChatProviderName()} Pro`);
 		});
 
 		test('shows "Upgrade" for Pro user with additional_spend_limit_reached', () => {

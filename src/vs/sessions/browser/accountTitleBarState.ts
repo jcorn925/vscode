@@ -9,6 +9,7 @@ import { localize } from '../../nls.js';
 import { ChatEntitlement, IChatSentiment, IQuotaSnapshot } from '../../workbench/services/chat/common/chatEntitlementService.js';
 import { IDefaultAccountService } from '../../platform/defaultAccount/common/defaultAccount.js';
 import { IAuthenticationService } from '../../workbench/services/authentication/common/authentication.js';
+import { getDefaultChatProviderName } from '../../workbench/contrib/chat/common/chatBranding.js';
 
 export interface IResolvedAccountInfo {
 	readonly accountName: string;
@@ -158,8 +159,8 @@ function getCopilotPresentation(
 			icon: Codicon.account,
 			label: localize('copilotUnavailable', "Copilot Unavailable"),
 			ariaLabel: sentiment.untrusted
-				? localize('copilotUnavailableUntrustedAria', "GitHub Copilot is unavailable in untrusted workspaces")
-				: localize('copilotUnavailableDisabledAria', "GitHub Copilot is disabled"),
+				? localize('copilotUnavailableUntrustedAria', "{0} is unavailable in untrusted workspaces", getDefaultChatProviderName())
+				: localize('copilotUnavailableDisabledAria', "{0} is disabled", getDefaultChatProviderName()),
 		};
 	}
 
@@ -185,7 +186,7 @@ function getCopilotPresentation(
 			label: localize('copilotTokensRemaining', "Tokens Remaining"),
 			badge: `${remainingPercent}%`,
 			dotBadge: remainingPercent <= 10 ? 'error' : 'warning',
-			ariaLabel: localize('copilotTokensRemainingAria', "{0}% GitHub Copilot tokens remaining", remainingPercent),
+			ariaLabel: localize('copilotTokensRemainingAria', "{0}% {1} tokens remaining", remainingPercent, getDefaultChatProviderName()),
 		};
 	}
 
@@ -209,12 +210,12 @@ function getLowestPositivePercent(...quotas: Array<IQuotaSnapshot | undefined>):
 
 function getQuotaReachedAriaLabel(chatQuotaExceeded: boolean, completionsQuotaExceeded: boolean): string {
 	if (chatQuotaExceeded && completionsQuotaExceeded) {
-		return localize('copilotAllQuotaReachedAria', "GitHub Copilot chat and inline suggestion quota reached");
+		return localize('copilotAllQuotaReachedAria', "{0} chat and inline suggestion quota reached", getDefaultChatProviderName());
 	}
 
 	if (chatQuotaExceeded) {
-		return localize('copilotChatQuotaReachedAria', "GitHub Copilot chat quota reached");
+		return localize('copilotChatQuotaReachedAria', "{0} chat quota reached", getDefaultChatProviderName());
 	}
 
-	return localize('copilotCompletionsQuotaReachedAria', "GitHub Copilot inline suggestion quota reached");
+	return localize('copilotCompletionsQuotaReachedAria', "{0} inline suggestion quota reached", getDefaultChatProviderName());
 }

@@ -12,6 +12,7 @@ import { IDisposable } from '../../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
+import { getDefaultChatProviderName } from '../../../common/chatBranding.js';
 import { MenuItemAction } from '../../../../../../platform/actions/common/actions.js';
 import { IActionWidgetService } from '../../../../../../platform/actionWidget/browser/actionWidget.js';
 import { IActionWidgetDropdownAction, IActionWidgetDropdownActionProvider, IActionWidgetDropdownOptions } from '../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
@@ -259,7 +260,7 @@ export class SessionTypePickerActionItem extends ChatInputPickerActionViewItem {
 
 	private _getUpgradeHover(): MarkdownString {
 		const hover = new MarkdownString('', { isTrusted: { enabledCommands: ['workbench.action.chat.upgradePlan'] }, supportThemeIcons: true });
-		hover.appendMarkdown(localize('chat.sessionTarget.upgradeHover', "[Upgrade to GitHub Copilot Pro](command:workbench.action.chat.upgradePlan) to delegate work to the cloud agent."));
+		hover.appendMarkdown(localize('chat.sessionTarget.upgradeHover', "[Upgrade to {0} Pro](command:workbench.action.chat.upgradePlan) to delegate work to the cloud agent.", getDefaultChatProviderName()));
 		return hover;
 	}
 
