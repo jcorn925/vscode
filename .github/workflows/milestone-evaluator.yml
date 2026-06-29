@@ -1,0 +1,66 @@
+name: Milestone Evaluator
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Apply suggested changes via agent (requires codex/cursor on runner)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      milestone:
+        description: 'Optional single milestone id (empty = all)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+
+      - name: Evaluate milestones
+        run: |
+          ARGS=(--json)
+          if [ -n "${{ inputs.milestone }}" ]; then
+            ARGS+=(--milestone "${{ inputs.milestone }}")
+          fi
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            ARGS+=(--apply --dry-run)
+          fi
+          npm run milestone:evaluate -- "${ARGS[@]}"
+        continue-on-error: true
+
+      - name: Upload milestone reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: milestone-reports
+          path: .agent/milestone-reports/
+          if-no-files-found: ignore
+
+      - name: Upload milestone tasks
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: milestone-tasks
+          path: .agent/milestone-tasks/
+          if-no-files-found: ignore

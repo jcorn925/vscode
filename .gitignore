@@ -27,6 +27,8 @@ product.overrides.json
 .eslintcache
 .vscode-test
 .chat-simulation-data
+.agent/milestone-reports/
+.agent/milestone-tasks/
 vscode-telemetry-docs/
 test-output.json
 test/componentFixtures/.screenshots/*
