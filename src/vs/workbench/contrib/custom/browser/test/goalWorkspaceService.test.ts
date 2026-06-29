@@ -223,6 +223,19 @@ suite('GoalWorkspaceService', () => {
 		assert.strictEqual(service.getSurface('booking'), undefined);
 	});
 
+	test('service returns no-workspace state without workspace folders', async () => {
+		const fileService = new TestGoalWorkspaceFileService(manifestResource, createManifest('booking', 'Booking'));
+		const service = disposables.add(new GoalWorkspaceService(new TestContextService(testWorkspace()), fileService));
+
+		await service.refresh();
+
+		assert.strictEqual(service.getState().status, 'no-workspace');
+		assert.strictEqual(service.getState().workspaceFolder, undefined);
+		assert.strictEqual(service.getState().manifestResource, undefined);
+		assert.strictEqual(service.getGoal(), undefined);
+		assert.deepStrictEqual(service.getSurfaces(), []);
+	});
+
 	test('service refreshes surfaces when manifest changes', async () => {
 		const fileService = new TestGoalWorkspaceFileService(manifestResource, createManifest('booking', 'Booking'));
 		const service = disposables.add(new GoalWorkspaceService(new TestContextService(testWorkspace(workspaceFolder)), fileService));

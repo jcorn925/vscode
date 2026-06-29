@@ -3004,19 +3004,19 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 
-			const storedSurfaceId = this.storageService.get(STORAGE_SELECTED_GOAL_SURFACE, StorageScope.WORKSPACE);
-			const selectedSurface = this.resolveSelectedSurface(surfaces, storedSurfaceId);
-			this.selectedSurfaceId = selectedSurface?.id ?? GOAL_OVERVIEW_SURFACE_ID;
-			if (selectedSurface) {
-				this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, selectedSurface.id, StorageScope.WORKSPACE, StorageTarget.USER);
-			} else {
-				this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, GOAL_OVERVIEW_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
-			}
-
-			this.renderGoalSurfaceButtons(surfaces);
-			this.routeSelectedSurfacePreview();
-			this.refreshStartCommandHints();
+		const storedSurfaceId = this.storageService.get(STORAGE_SELECTED_GOAL_SURFACE, StorageScope.WORKSPACE);
+		const selectedSurface = this.resolveSelectedSurface(surfaces, storedSurfaceId);
+		this.selectedSurfaceId = selectedSurface?.id ?? GOAL_OVERVIEW_SURFACE_ID;
+		if (selectedSurface) {
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, selectedSurface.id, StorageScope.WORKSPACE, StorageTarget.USER);
+		} else {
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, GOAL_OVERVIEW_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
 		}
+
+		this.renderGoalSurfaceButtons(surfaces);
+		this.routeSelectedSurfacePreview();
+		this.refreshStartCommandHints();
+	}
 
 	private resolveSelectedSurface(surfaces: readonly GoalSurface[], storedSurfaceId: string | undefined): GoalSurface | undefined {
 		if (this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID || storedSurfaceId === GOAL_OVERVIEW_SURFACE_ID) {
@@ -3050,13 +3050,13 @@ class ModeShellContribution extends Disposable {
 				this._register(addDisposableListener(button, 'click', () => this.selectGoalSurface(surface.id)));
 			}
 
-				const isActive = surface.id === this.selectedSurfaceId;
-				const description = this.formatGoalSurfaceDescription(surface);
-				button.textContent = surface.name;
-				button.title = description;
-				button.classList.toggle('active', isActive);
-				button.setAttribute('aria-selected', String(isActive));
-				button.setAttribute('aria-label', description);
+			const isActive = surface.id === this.selectedSurfaceId;
+			const description = this.formatGoalSurfaceDescription(surface);
+			button.textContent = surface.name;
+			button.title = description;
+			button.classList.toggle('active', isActive);
+			button.setAttribute('aria-selected', String(isActive));
+			button.setAttribute('aria-label', description);
 
 			nextButtons.set(surface.id, button);
 			fragment.appendChild(button);
@@ -3092,12 +3092,12 @@ class ModeShellContribution extends Disposable {
 	private selectGoalSurface(surfaceId: string): void {
 		if (surfaceId === GOAL_OVERVIEW_SURFACE_ID) {
 			this.selectedSurfaceId = GOAL_OVERVIEW_SURFACE_ID;
-				this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, GOAL_OVERVIEW_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
-				this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
-				this.routeSelectedSurfacePreview();
-				this.refreshStartCommandHints();
-				return;
-			}
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, GOAL_OVERVIEW_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
+			this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
+			this.routeSelectedSurfacePreview();
+			this.refreshStartCommandHints();
+			return;
+		}
 
 		const surface = this.goalWorkspaceService.getSurface(surfaceId);
 		if (!surface) {
@@ -3105,11 +3105,11 @@ class ModeShellContribution extends Disposable {
 		}
 
 		this.selectedSurfaceId = surface.id;
-			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
-			this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
-			this.routeSelectedSurfacePreview();
-			this.refreshStartCommandHints();
-		}
+		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
+		this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
+		this.routeSelectedSurfacePreview();
+		this.refreshStartCommandHints();
+	}
 
 	private getSelectedSurface(): GoalSurface | undefined {
 		if (!this.selectedSurfaceId || this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID) {
@@ -3151,36 +3151,36 @@ class ModeShellContribution extends Disposable {
 		}
 
 		this.setSurfaceEmptyState(undefined);
-			if (!this.embeddedUiShowsUrl(url)) {
-				this.setEmbeddedUiUrl(url);
-			}
-			void this.checkUrlReachable(url);
-			this.logSelectedSurfaceRoute(surface, url);
+		if (!this.embeddedUiShowsUrl(url)) {
+			this.setEmbeddedUiUrl(url);
 		}
+		void this.checkUrlReachable(url);
+		this.logSelectedSurfaceRoute(surface, url);
+	}
 
-		private setSurfaceMissingUrlState(surface: GoalSurface | undefined): void {
-			if (!surface) {
-				this.setSurfaceEmptyState(undefined);
-				return;
+	private setSurfaceMissingUrlState(surface: GoalSurface | undefined): void {
+		if (!surface) {
+			this.setSurfaceEmptyState(undefined);
+			return;
 		}
 
 		this.setSurfaceEmptyState({
 			title: localize('customMode.surfaceMissingUrlTitle', '{0} has no preview URL', surface.name),
 			subtitle: localize(
-			'customMode.surfaceMissingUrlSubtitle',
-			'Add localUrl to this surface in workspace.goal.json to route the preview.'
-				)
-			});
-		}
+				'customMode.surfaceMissingUrlSubtitle',
+				'Add localUrl to this surface in workspace.goal.json to route the preview.'
+			)
+		});
+	}
 
-		private setSurfaceServerDownState(surface: GoalSurface, url: string): void {
-			this.setSurfaceEmptyState({
-				title: localize('customMode.surfaceServerDownTitle', '{0} preview is not reachable', surface.name),
-				subtitle: surface.devCommand?.trim()
-					? localize('customMode.surfaceServerDownWithCommand', 'Click Start App to run `{0}`, then the preview will load {1}.', surface.devCommand.trim(), url)
-					: localize('customMode.surfaceServerDownNoCommand', 'Start the surface dev server for {0}, or add devCommand to this surface in workspace.goal.json.', url)
-			});
-		}
+	private setSurfaceServerDownState(surface: GoalSurface, url: string): void {
+		this.setSurfaceEmptyState({
+			title: localize('customMode.surfaceServerDownTitle', '{0} preview is not reachable', surface.name),
+			subtitle: surface.devCommand?.trim()
+				? localize('customMode.surfaceServerDownWithCommand', 'Click Start App to run `{0}`, then the preview will load {1}.', surface.devCommand.trim(), url)
+				: localize('customMode.surfaceServerDownNoCommand', 'Start the surface dev server for {0}, or add devCommand to this surface in workspace.goal.json.', url)
+		});
+	}
 
 	private setGoalOverviewState(): void {
 		const goal = this.goalWorkspaceService.getGoal();
@@ -3246,8 +3246,17 @@ class ModeShellContribution extends Disposable {
 
 	private formatGoalSurfaceDescription(surface: GoalSurface): string {
 		const parts = [surface.name];
+		if (surface.type) {
+			parts.push(localize('customMode.surfaceDescriptionType', 'Type: {0}', surface.type));
+		}
+		if (surface.path) {
+			parts.push(localize('customMode.surfaceDescriptionPath', 'Path: {0}', surface.path));
+		}
 		if (surface.purpose) {
 			parts.push(surface.purpose);
+		}
+		if (surface.devCommand) {
+			parts.push(localize('customMode.surfaceDescriptionCommand', 'Start command: {0}', surface.devCommand));
 		}
 		if (surface.localUrl) {
 			parts.push(localize('customMode.surfaceDescriptionUrl', 'Preview: {0}', surface.localUrl));
@@ -3260,6 +3269,15 @@ class ModeShellContribution extends Disposable {
 		}
 		if (surface.entities.length) {
 			parts.push(localize('customMode.surfaceDescriptionEntities', 'Entities: {0}', surface.entities.join(', ')));
+		}
+		if (surface.ixSubsystems.length) {
+			parts.push(localize('customMode.surfaceDescriptionIxSubsystems', 'Ix subsystems: {0}', surface.ixSubsystems.join(', ')));
+		}
+		if (surface.ix?.tags.length) {
+			parts.push(localize('customMode.surfaceDescriptionIxTags', 'Ix tags: {0}', surface.ix.tags.join(', ')));
+		}
+		if (surface.ix?.notes) {
+			parts.push(localize('customMode.surfaceDescriptionIxNotes', 'Ix notes: {0}', surface.ix.notes));
 		}
 		return parts.join('\n');
 	}
@@ -3281,39 +3299,39 @@ class ModeShellContribution extends Disposable {
 		});
 	}
 
-		private renderUiStartBar(hints: DevServerSuggestedCommands | undefined): void {
-			this.lastUiStartHints = hints;
-			const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
-			const surface = this.getSelectedSurface();
-			const surfaceCommand = surface?.devCommand?.trim();
+	private renderUiStartBar(hints: DevServerSuggestedCommands | undefined): void {
+		this.lastUiStartHints = hints;
+		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
+		const surface = this.getSelectedSurface();
+		const surfaceCommand = surface?.devCommand?.trim();
 
-			if (!hasProject) {
-				this.uiStartSubtitle.textContent = '';
-				this.updateStartAppControl();
-				return;
+		if (!hasProject) {
+			this.uiStartSubtitle.textContent = '';
+			this.updateStartAppControl();
+			return;
+		}
+
+		if (surface) {
+			if (!surfaceCommand) {
+				this.uiStartSubtitle.textContent = localize(
+					'customMode.surfaceStartNoCommand',
+					'Add devCommand to {0} in workspace.goal.json to start this surface from UI Mode.',
+					surface.name
+				);
+			} else {
+				const urlPart = surface.localUrl
+					? localize('customMode.surfaceStartWillLoadUrl', ' Opens {0} when the server is ready.', surface.localUrl)
+					: '';
+				this.uiStartSubtitle.textContent = localize('customMode.surfaceStartSubtitleRun', 'Runs for {0}: {1}.{2}', surface.name, surfaceCommand, urlPart);
 			}
+			this.updateStartAppControl();
+			this.maybeAutoStartApp();
+			return;
+		}
 
-			if (surface) {
-				if (!surfaceCommand) {
-					this.uiStartSubtitle.textContent = localize(
-						'customMode.surfaceStartNoCommand',
-						'Add devCommand to {0} in workspace.goal.json to start this surface from UI Mode.',
-						surface.name
-					);
-				} else {
-					const urlPart = surface.localUrl
-						? localize('customMode.surfaceStartWillLoadUrl', ' Opens {0} when the server is ready.', surface.localUrl)
-						: '';
-					this.uiStartSubtitle.textContent = localize('customMode.surfaceStartSubtitleRun', 'Runs for {0}: {1}.{2}', surface.name, surfaceCommand, urlPart);
-				}
-				this.updateStartAppControl();
-				this.maybeAutoStartApp();
-				return;
-			}
-
-			if (!hints) {
-				this.uiStartSubtitle.textContent = localize('customMode.startAppNoPackageJson', 'Open a folder whose root contains package.json to start the app.');
-				this.updateStartAppControl();
+		if (!hints) {
+			this.uiStartSubtitle.textContent = localize('customMode.startAppNoPackageJson', 'Open a folder whose root contains package.json to start the app.');
+			this.updateStartAppControl();
 			return;
 		}
 
@@ -3334,26 +3352,26 @@ class ModeShellContribution extends Disposable {
 		this.maybeAutoStartApp();
 	}
 
-		private updateStartAppControl(): void {
-			const state = this.devServerService.getState();
-			const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
-			const hints = this.lastUiStartHints;
-			const surfaceCommand = this.getSelectedSurface()?.devCommand?.trim();
-			const canStart = hasProject && Boolean(surfaceCommand || hints?.primaryRunCommand);
-			const busy = state.phase === 'installing' || state.phase === 'starting';
-			this.uiStartAppButton.disabled = !canStart || busy;
-		}
+	private updateStartAppControl(): void {
+		const state = this.devServerService.getState();
+		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
+		const hints = this.lastUiStartHints;
+		const surfaceCommand = this.getSelectedSurface()?.devCommand?.trim();
+		const canStart = hasProject && Boolean(surfaceCommand || hints?.primaryRunCommand);
+		const busy = state.phase === 'installing' || state.phase === 'starting';
+		this.uiStartAppButton.disabled = !canStart || busy;
+	}
 
-		private async onStartAppClicked(): Promise<void> {
-			try {
-				const surface = this.getSelectedSurface();
-				const surfaceCommand = surface?.devCommand?.trim();
-				const url = surfaceCommand
-					? await this.devServerService.ensureRunningWithCommand(surfaceCommand, surface?.localUrl, surface?.name)
-					: await this.devServerService.ensureRunning();
-				if (url === undefined) {
-					const st = this.devServerService.getState();
-					this.notificationService.notify({
+	private async onStartAppClicked(): Promise<void> {
+		try {
+			const surface = this.getSelectedSurface();
+			const surfaceCommand = surface?.devCommand?.trim();
+			const url = surfaceCommand
+				? await this.devServerService.ensureRunningWithCommand(surfaceCommand, surface?.localUrl, surface?.name)
+				: await this.devServerService.ensureRunning();
+			if (url === undefined) {
+				const st = this.devServerService.getState();
+				this.notificationService.notify({
 					severity: Severity.Warning,
 					message: st.lastError ?? localize('customMode.startAppFailedGeneric', 'Could not start the app. See the status below or check package.json scripts.')
 				});
@@ -3371,12 +3389,12 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 
-			const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
-			const hints = this.lastUiStartHints;
-			const surfaceCommand = this.getSelectedSurface()?.devCommand?.trim();
-			if (!hasProject || !(surfaceCommand || hints?.primaryRunCommand)) {
-				return;
-			}
+		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
+		const hints = this.lastUiStartHints;
+		const surfaceCommand = this.getSelectedSurface()?.devCommand?.trim();
+		if (!hasProject || !(surfaceCommand || hints?.primaryRunCommand)) {
+			return;
+		}
 
 		const state = this.devServerService.getState();
 		if (state.phase !== 'idle') {
@@ -4661,32 +4679,32 @@ class ModeShellContribution extends Disposable {
 		this.setEmbeddedUiUrl(reloadUrl);
 	}
 
-		private async checkUrlReachable(url: string): Promise<void> {
-			this.reachabilityUrl = url;
-			// Delegate to the dev server service so we share one authoritative probe implementation
-			// (which also tries `port+1`/`port+2` for frameworks that bump when the primary is busy).
-			const reachable = (await this.devServerService.findRunningDevServerUrl(url)) !== undefined;
-			if (this.reachabilityUrl !== url) {
-				return;
+	private async checkUrlReachable(url: string): Promise<void> {
+		this.reachabilityUrl = url;
+		// Delegate to the dev server service so we share one authoritative probe implementation
+		// (which also tries `port+1`/`port+2` for frameworks that bump when the primary is busy).
+		const reachable = (await this.devServerService.findRunningDevServerUrl(url)) !== undefined;
+		if (this.reachabilityUrl !== url) {
+			return;
+		}
+		if (reachable) {
+			this.setAppReachable(true);
+			const surface = this.getSelectedSurface();
+			if (surface?.localUrl === url) {
+				this.setSurfaceEmptyState(undefined);
 			}
-			if (reachable) {
-				this.setAppReachable(true);
-				const surface = this.getSelectedSurface();
-				if (surface?.localUrl === url) {
-					this.setSurfaceEmptyState(undefined);
-				}
-				return;
-			}
-			// Don't clear when the dev server already reported running (avoids spurious false
-			// negatives from a transiently stalled probe).
-			if (this.devServerService.getState().phase !== 'running') {
-				this.setAppReachable(false);
-				const surface = this.getSelectedSurface();
-				if (surface?.localUrl === url) {
-					this.setSurfaceServerDownState(surface, url);
-				}
+			return;
+		}
+		// Don't clear when the dev server already reported running (avoids spurious false
+		// negatives from a transiently stalled probe).
+		if (this.devServerService.getState().phase !== 'running') {
+			this.setAppReachable(false);
+			const surface = this.getSelectedSurface();
+			if (surface?.localUrl === url) {
+				this.setSurfaceServerDownState(surface, url);
 			}
 		}
+	}
 
 	private pushUiRuntimeLog(line: string): void {
 		this.uiRuntimeLogs.push(line);
