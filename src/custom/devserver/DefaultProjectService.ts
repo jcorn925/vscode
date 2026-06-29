@@ -115,7 +115,14 @@ export class DefaultProjectService extends Disposable implements IDefaultProject
 		if (!appRoot) {
 			return;
 		}
-		await this.openFolder(URI.file(appRoot));
+		const folderUri = URI.file(appRoot);
+		await this.hostService.openWindow([
+			{ folderUri },
+			{ fileUri: joinPath(folderUri, 'src/custom/goalWorkspace/examples/workspace.goal.json') },
+		], {
+			forceReuseWindow: true,
+			remoteAuthority: this.workbenchEnvironmentService.remoteAuthority
+		});
 	}
 
 	shouldSkipSilentClone(repoUrl: string): boolean {
