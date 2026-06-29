@@ -115,6 +115,71 @@ export interface GoalWorkspaceIxState {
 	readonly overlay: GoalWorkspaceIxOverlay | undefined;
 }
 
+export interface GoalWorkspaceCrossAppWorkflow {
+	readonly id: string;
+	readonly label: string;
+	readonly taskKinds: readonly string[];
+	readonly requiredFields: readonly string[];
+	readonly affectedCapabilities: readonly string[];
+	readonly fallbackSurfaceIds: readonly string[];
+}
+
+export interface GoalWorkspaceTrainingPackageDraft {
+	readonly id: string;
+	readonly name: string;
+	readonly durationWeeks: number;
+	readonly priceCents: number;
+	readonly billingModel: 'one_time' | 'monthly';
+	readonly status: 'draft' | 'active';
+	readonly description: string;
+	readonly features: readonly string[];
+}
+
+export interface GoalWorkspaceSurfaceImpact {
+	readonly surfaceId: string;
+	readonly surfaceName: string;
+	readonly path?: string;
+	readonly purpose?: string;
+	readonly reason: string;
+	readonly matchedCapabilities: readonly string[];
+	readonly contextSummary?: string;
+	readonly ixSubsystemIds: readonly string[];
+	readonly ixSubsystemLabels: readonly string[];
+}
+
+export interface GoalWorkspaceSharedContextBundle {
+	readonly domainFiles: readonly string[];
+	readonly eventFiles: readonly string[];
+	readonly workflowFiles: readonly string[];
+	readonly globalContextFiles: readonly string[];
+}
+
+export interface GoalWorkspaceCrossAppContextBundle {
+	readonly taskKind: string;
+	readonly goalId?: string;
+	readonly goalName?: string;
+	readonly packageDraft: GoalWorkspaceTrainingPackageDraft;
+	readonly affectedSurfaces: readonly GoalWorkspaceSurfaceImpact[];
+	readonly sharedContext: GoalWorkspaceSharedContextBundle;
+	readonly priorDecisions: readonly string[];
+	readonly ixCommand?: string;
+}
+
+export interface GoalWorkspaceCrossAppPlanStep {
+	readonly surfaceId: string;
+	readonly title: string;
+	readonly details: readonly string[];
+}
+
+export interface GoalWorkspaceCrossAppPlan {
+	readonly workflow: GoalWorkspaceCrossAppWorkflow;
+	readonly context: GoalWorkspaceCrossAppContextBundle;
+	readonly steps: readonly GoalWorkspaceCrossAppPlanStep[];
+	readonly unknowns: readonly string[];
+	readonly validation: readonly GoalWorkspaceCrossAppPlanStep[];
+	readonly memoryUpdates: readonly string[];
+}
+
 export interface GoalWorkspace {
 	readonly workspaceFolder: URI;
 	readonly manifestResource: URI;
@@ -155,6 +220,8 @@ export interface IGoalWorkspaceService {
 	getIx(): GoalWorkspaceIxState;
 	getSurfaceIxOverlay(surfaceId: string): GoalWorkspaceIxSurfaceOverlay | undefined;
 	getAffectedSurfacesForIxSubsystem(subsystem: string): readonly GoalSurface[];
+	getCrossAppWorkflow(id: string): GoalWorkspaceCrossAppWorkflow | undefined;
+	buildCrossAppWorkflowPlan(id: string, packageDraft?: Partial<GoalWorkspaceTrainingPackageDraft>): GoalWorkspaceCrossAppPlan | undefined;
 	refresh(): Promise<GoalWorkspaceState>;
 }
 
@@ -172,6 +239,21 @@ const EMPTY_IX: GoalWorkspaceIxState = {
 	overlayResource: undefined,
 	overlay: undefined
 };
+
+export const ADD_TRAINING_PACKAGE_WORKFLOW_ID = 'add-training-package';
+
+const ADD_TRAINING_PACKAGE_WORKFLOW: GoalWorkspaceCrossAppWorkflow = {
+	id: ADD_TRAINING_PACKAGE_WORKFLOW_ID,
+	label: 'Add Training Package',
+	taskKinds: ['create-package', 'add-offer', 'add-training-program'],
+	requiredFields: ['name', 'durationWeeks', 'priceCents', 'billingModel', 'description', 'features', 'status'],
+	affectedCapabilities: ['display-offers', 'package-selection', 'billing-plans', 'package-management', 'package-analytics', 'campaigns'],
+	fallbackSurfaceIds: ['marketing', 'booking', 'subscriptions', 'admin', 'analytics', 'content']
+};
+
+const CROSS_APP_WORKFLOWS: readonly GoalWorkspaceCrossAppWorkflow[] = [
+	ADD_TRAINING_PACKAGE_WORKFLOW
+];
 
 export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceService {
 	readonly _serviceBrand: undefined;
@@ -263,6 +345,18 @@ export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceSe
 				...(overlay?.subsystemLabels ?? []),
 			].some(value => normalizeIxMatchText(value) === normalized);
 		});
+	}
+
+	getCrossAppWorkflow(id: string): GoalWorkspaceCrossAppWorkflow | undefined {
+		return CROSS_APP_WORKFLOWS.find(workflow => workflow.id === id);
+	}
+
+	buildCrossAppWorkflowPlan(id: string, packageDraft: Partial<GoalWorkspaceTrainingPackageDraft> = {}): GoalWorkspaceCrossAppPlan | undefined {
+		const workflow = this.getCrossAppWorkflow(id);
+		if (!workflow || this.state.status !== 'loaded') {
+			return undefined;
+		}
+		return buildCrossAppWorkflowPlan(this.state, workflow, packageDraft);
 	}
 
 	async refresh(): Promise<GoalWorkspaceState> {
@@ -490,6 +584,298 @@ function createEmptyIxState(workspaceFolder: URI | undefined): GoalWorkspaceIxSt
 
 function withIxOverlay(state: GoalWorkspaceState, ix: GoalWorkspaceIxState): GoalWorkspaceState {
 	return { ...state, ix };
+}
+
+export function createDefaultEightWeekTrainingPackageDraft(overrides: Partial<GoalWorkspaceTrainingPackageDraft> = {}): GoalWorkspaceTrainingPackageDraft {
+	return {
+		id: overrides.id ?? 'strength-reset-8-week',
+		name: overrides.name ?? '8-Week Strength Reset',
+		durationWeeks: overrides.durationWeeks ?? 8,
+		priceCents: overrides.priceCents ?? 49900,
+		billingModel: overrides.billingModel ?? 'one_time',
+		status: overrides.status ?? 'draft',
+		description: overrides.description ?? 'An 8-week training program for clients who want structured strength training, weekly accountability, and measurable progress.',
+		features: overrides.features ?? [
+			'Personalized training plan',
+			'Weekly check-ins',
+			'Progress tracking',
+			'Optional intro consultation'
+		]
+	};
+}
+
+export function buildCrossAppWorkflowPlan(state: GoalWorkspaceState, workflow: GoalWorkspaceCrossAppWorkflow, packageDraftOverrides: Partial<GoalWorkspaceTrainingPackageDraft> = {}): GoalWorkspaceCrossAppPlan | undefined {
+	if (state.status !== 'loaded' || !state.workspace) {
+		return undefined;
+	}
+
+	const packageDraft = createDefaultEightWeekTrainingPackageDraft(packageDraftOverrides);
+	const affectedSurfaces = resolveAffectedSurfaces(state, workflow);
+	const sharedContext = buildSharedContextBundle(state);
+	const priorDecisions = state.context.globalFiles
+		.filter(file => file.kind === 'decisions')
+		.map(file => `${file.relativePath}: ${file.summary}`);
+	const context: GoalWorkspaceCrossAppContextBundle = {
+		taskKind: 'create-package',
+		goalId: state.workspace.goal.id,
+		goalName: state.workspace.goal.name,
+		packageDraft,
+		affectedSurfaces,
+		sharedContext,
+		priorDecisions,
+		ixCommand: state.ix.overlay?.command
+	};
+
+	return {
+		workflow,
+		context,
+		steps: buildAddTrainingPackageSteps(packageDraft, affectedSurfaces),
+		unknowns: [
+			'External billing provider plan IDs are not inferred by this workflow. Create package billing metadata as draft/manual unless provider IDs already exist.',
+			'Real ad/social publishing remains out of scope; content changes should create launch drafts only.',
+			'Surface adapters should prefer central package/domain config over duplicated per-app constants.'
+		],
+		validation: buildAddTrainingPackageValidation(packageDraft, affectedSurfaces),
+		memoryUpdates: [
+			'.agent/decisions.md: record package id, price, status, affected surfaces, and billing-provider caveat.',
+			'.agent/apps/booking.md: record package preselection route and package-selection ownership.',
+			'.agent/apps/analytics.md: record packageId segmentation expectations.',
+			'.agent/apps/content.md: record launch campaign draft ownership.'
+		]
+	};
+}
+
+export function formatCrossAppWorkflowPlanMarkdown(plan: GoalWorkspaceCrossAppPlan): string {
+	const dollars = `$${(plan.context.packageDraft.priceCents / 100).toFixed(0)}`;
+	const lines: string[] = [
+		`# ${plan.workflow.label}`,
+		'',
+		`Goal: ${plan.context.goalName ?? '(unknown goal)'}`,
+		`Workflow: \`${plan.workflow.id}\``,
+		'',
+		'## Package Draft',
+		'',
+		`- id: \`${plan.context.packageDraft.id}\``,
+		`- name: ${plan.context.packageDraft.name}`,
+		`- duration: ${plan.context.packageDraft.durationWeeks} weeks`,
+		`- price: ${dollars}`,
+		`- billing model: ${plan.context.packageDraft.billingModel}`,
+		`- status: ${plan.context.packageDraft.status}`,
+		`- description: ${plan.context.packageDraft.description}`,
+		'- features:',
+		...plan.context.packageDraft.features.map(feature => `  - ${feature}`),
+		'',
+		'## Affected Surfaces',
+		'',
+		...plan.context.affectedSurfaces.flatMap(surface => [
+			`### ${surface.surfaceName} (\`${surface.surfaceId}\`)`,
+			'',
+			`Reason: ${surface.reason}`,
+			...(surface.path ? [`Path: \`${surface.path}\``] : []),
+			...(surface.matchedCapabilities.length ? [`Matched capabilities: ${surface.matchedCapabilities.map(capability => `\`${capability}\``).join(', ')}`] : []),
+			...(surface.ixSubsystemLabels.length ? [`Ix subsystems: ${surface.ixSubsystemLabels.map(label => `\`${label}\``).join(', ')}`] : []),
+			...(surface.contextSummary ? [`Context: ${surface.contextSummary}`] : []),
+			''
+		]),
+		'## Cross-App Plan',
+		'',
+		...plan.steps.flatMap(step => [
+			`### ${step.title}`,
+			'',
+			...step.details.map(detail => `- ${detail}`),
+			''
+		]),
+		'## Validation',
+		'',
+		...plan.validation.flatMap(step => [
+			`### ${step.title}`,
+			'',
+			...step.details.map(detail => `- ${detail}`),
+			''
+		]),
+		'## Memory Updates',
+		'',
+		...plan.memoryUpdates.map(update => `- ${update}`),
+		'',
+		'## Unknowns',
+		'',
+		...plan.unknowns.map(unknown => `- ${unknown}`),
+		'',
+		'## Shared Context',
+		'',
+		`- domain files: ${plan.context.sharedContext.domainFiles.length ? plan.context.sharedContext.domainFiles.map(file => `\`${file}\``).join(', ') : '(none discovered)'}`,
+		`- event files: ${plan.context.sharedContext.eventFiles.length ? plan.context.sharedContext.eventFiles.map(file => `\`${file}\``).join(', ') : '(none discovered)'}`,
+		`- workflow files: ${plan.context.sharedContext.workflowFiles.length ? plan.context.sharedContext.workflowFiles.map(file => `\`${file}\``).join(', ') : '(none discovered)'}`,
+		`- global context: ${plan.context.sharedContext.globalContextFiles.length ? plan.context.sharedContext.globalContextFiles.map(file => `\`${file}\``).join(', ') : '(none discovered)'}`,
+		...(plan.context.ixCommand ? ['', `Ix command: \`${plan.context.ixCommand}\``] : [])
+	];
+	return `${lines.join('\n')}\n`;
+}
+
+function resolveAffectedSurfaces(state: GoalWorkspaceState, workflow: GoalWorkspaceCrossAppWorkflow): readonly GoalWorkspaceSurfaceImpact[] {
+	const surfaces = state.workspace?.surfaces ?? [];
+	const affected = new Map<string, GoalWorkspaceSurfaceImpact>();
+	for (const surface of surfaces) {
+		const matchedCapabilities = surface.capabilities.filter(capability => workflow.affectedCapabilities.some(required => normalizeCapability(required) === normalizeCapability(capability)));
+		const isFallbackSurface = workflow.fallbackSurfaceIds.some(id => normalizeCapability(id) === normalizeCapability(surface.id));
+		if (!matchedCapabilities.length && !isFallbackSurface) {
+			continue;
+		}
+
+		const overlay = state.ix.overlay?.surfaces.find(item => item.surfaceId === surface.id);
+		const contextSummary = state.context.surfaceSummaries.find(summary => summary.surfaceId === surface.id)?.summary;
+		affected.set(surface.id, {
+			surfaceId: surface.id,
+			surfaceName: surface.name,
+			path: surface.path,
+			purpose: surface.purpose,
+			reason: surfaceImpactReason(surface, matchedCapabilities),
+			matchedCapabilities,
+			contextSummary: contextSummary || undefined,
+			ixSubsystemIds: uniqueStrings([...(surface.ix?.subsystemIds ?? []), ...(overlay?.subsystemIds ?? [])]),
+			ixSubsystemLabels: uniqueStrings([...(surface.ix?.subsystemLabels ?? []), ...surface.ixSubsystems, ...(overlay?.subsystemLabels ?? [])])
+		});
+	}
+
+	return workflow.fallbackSurfaceIds
+		.map(id => affected.get(id))
+		.filter((impact): impact is GoalWorkspaceSurfaceImpact => Boolean(impact))
+		.concat(Array.from(affected.values()).filter(impact => !workflow.fallbackSurfaceIds.includes(impact.surfaceId)));
+}
+
+function buildSharedContextBundle(state: GoalWorkspaceState): GoalWorkspaceSharedContextBundle {
+	const shared = state.workspace?.shared ?? EMPTY_SHARED;
+	const sharedPaths = [shared.domain, shared.events, shared.workflows].filter((path): path is string => Boolean(path));
+	return {
+		domainFiles: uniqueStrings([
+			...(shared.domain ? [shared.domain] : []),
+			...state.context.globalFiles.filter(file => file.kind === 'domain').map(file => file.relativePath)
+		]),
+		eventFiles: uniqueStrings([
+			...(shared.events ? [shared.events] : []),
+			...state.context.globalFiles.filter(file => file.kind === 'events').map(file => file.relativePath)
+		]),
+		workflowFiles: uniqueStrings([
+			...(shared.workflows ? [shared.workflows] : []),
+			...sharedPaths.filter(path => path.toLowerCase().includes('workflow'))
+		]),
+		globalContextFiles: state.context.globalFiles.map(file => file.relativePath)
+	};
+}
+
+function buildAddTrainingPackageSteps(packageDraft: GoalWorkspaceTrainingPackageDraft, affectedSurfaces: readonly GoalWorkspaceSurfaceImpact[]): readonly GoalWorkspaceCrossAppPlanStep[] {
+	const steps: GoalWorkspaceCrossAppPlanStep[] = [{
+		surfaceId: 'shared-domain',
+		title: 'Shared Domain',
+		details: [
+			`Add \`${packageDraft.id}\` to the central training package/offer definition.`,
+			'Include duration, price, billing model, status, description, and feature list.',
+			'Use this central definition from surfaces instead of duplicating package constants.'
+		]
+	}];
+	for (const surface of affectedSurfaces) {
+		steps.push({
+			surfaceId: surface.surfaceId,
+			title: surface.surfaceName,
+			details: addTrainingPackageSurfacePlanDetails(surface.surfaceId, packageDraft)
+		});
+	}
+	return steps;
+}
+
+function buildAddTrainingPackageValidation(packageDraft: GoalWorkspaceTrainingPackageDraft, affectedSurfaces: readonly GoalWorkspaceSurfaceImpact[]): readonly GoalWorkspaceCrossAppPlanStep[] {
+	return affectedSurfaces.map(surface => ({
+		surfaceId: surface.surfaceId,
+		title: `${surface.surfaceName} Validation`,
+		details: addTrainingPackageSurfaceValidationDetails(surface.surfaceId, packageDraft)
+	}));
+}
+
+function addTrainingPackageSurfacePlanDetails(surfaceId: string, packageDraft: GoalWorkspaceTrainingPackageDraft): readonly string[] {
+	switch (surfaceId) {
+		case 'marketing':
+			return [
+				`Add a public or draft offer card for ${packageDraft.name}.`,
+				`Point the CTA to \`/booking?package=${packageDraft.id}\`.`
+			];
+		case 'booking':
+			return [
+				'Add the package to the package selector.',
+				`Support preselection with \`?package=${packageDraft.id}\`.`,
+				'Ensure booking creation includes packageId.'
+			];
+		case 'subscriptions':
+			return [
+				'Add billing plan metadata for the package.',
+				'Use draft/manual provider metadata when no live provider plan ID exists.'
+			];
+		case 'admin':
+			return [
+				'Expose the package in package management.',
+				'Add package filters for client lists or enrollment views.'
+			];
+		case 'analytics':
+			return [
+				'Add packageId as a funnel/revenue segment dimension.',
+				'Render the package in dashboards even before metrics exist.'
+			];
+		case 'content':
+			return [
+				'Create launch campaign drafts for social and email.',
+				`Use the booking CTA \`/booking?package=${packageDraft.id}\`.`
+			];
+		default:
+			return ['Review this surface for package-related capability changes.'];
+	}
+}
+
+function addTrainingPackageSurfaceValidationDetails(surfaceId: string, packageDraft: GoalWorkspaceTrainingPackageDraft): readonly string[] {
+	switch (surfaceId) {
+		case 'marketing':
+			return [`Preview contains "${packageDraft.name}".`, `CTA contains \`package=${packageDraft.id}\`.`];
+		case 'booking':
+			return [`Package selector contains "${packageDraft.name}".`, `URL preselection works for \`package=${packageDraft.id}\`.`];
+		case 'subscriptions':
+			return [`Billing metadata exists for \`${packageDraft.id}\`.`, 'Draft/manual provider status is explicit when provider IDs are absent.'];
+		case 'admin':
+			return [`Package list/filter contains "${packageDraft.name}".`];
+		case 'analytics':
+			return [`Package segment list contains \`${packageDraft.id}\`.`];
+		case 'content':
+			return [`Launch campaign drafts reference "${packageDraft.name}".`, `Draft CTAs contain \`package=${packageDraft.id}\`.`];
+		default:
+			return [`Surface references \`${packageDraft.id}\` only where relevant.`];
+	}
+}
+
+function surfaceImpactReason(surface: GoalSurface, matchedCapabilities: readonly string[]): string {
+	const id = surface.id.toLowerCase();
+	if (id === 'marketing') {
+		return 'Public offer/pricing pages need to show the new package and route visitors into booking.';
+	}
+	if (id === 'booking') {
+		return 'Leads need to select the package before scheduling an intro call or training session.';
+	}
+	if (id === 'subscriptions') {
+		return 'The package needs billing/subscription metadata before it can be sold or tracked.';
+	}
+	if (id === 'admin') {
+		return 'The trainer needs operational visibility for clients enrolled in this package.';
+	}
+	if (id === 'analytics') {
+		return 'Conversion, revenue, and retention dashboards need package-level segmentation.';
+	}
+	if (id === 'content') {
+		return 'Launch content and campaign drafts should promote the new offer.';
+	}
+	if (matchedCapabilities.length) {
+		return `Surface matches package workflow capabilities: ${matchedCapabilities.join(', ')}.`;
+	}
+	return surface.purpose ? `Surface purpose may be affected: ${surface.purpose}` : 'Surface is part of the workflow fallback set.';
+}
+
+function normalizeCapability(value: string): string {
+	return value.trim().toLowerCase().replace(/[\s_]+/g, '-');
 }
 
 function parseGoalWorkspaceIxOverlay(raw: unknown, resource: URI): GoalWorkspaceIxOverlay | undefined {
