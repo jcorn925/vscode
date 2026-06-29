@@ -36,6 +36,7 @@ export interface IDevServerService {
 	getActiveUrl(): string | undefined;
 	getState(): DevServerState;
 	ensureRunning(): Promise<string | undefined>;
+	ensureRunningWithCommand(command: string, preferredUrl: string | undefined): Promise<string | undefined>;
 	getSuggestedStartCommands(): Promise<DevServerSuggestedCommands | undefined>;
 	/**
 	 * Probes `preferredUrl` (and a couple of fallback ports such as `port+1`, `port+2`) to see
@@ -238,6 +239,49 @@ export class DevServerService extends Disposable implements IDevServerService {
 		instance.sendText(fullCommand, true);
 
 		this.started = true;
+		return this.activeUrl;
+	}
+
+	async ensureRunningWithCommand(command: string, preferredUrl: string | undefined): Promise<string | undefined> {
+		const workspaceFolder = this.getPrimaryWorkspaceFolder();
+		const explicitCommand = command.trim();
+		if (!workspaceFolder || !explicitCommand) {
+			return undefined;
+		}
+
+		if (!this.lastWorkspaceFolder || this.lastWorkspaceFolder.toString() !== workspaceFolder.toString()) {
+			this.onWorkspaceChanged();
+		}
+
+		const reachableUrl = await this.findRunningDevServerUrl(preferredUrl);
+		if (reachableUrl) {
+			this.command = explicitCommand;
+			this.setActiveUrl(reachableUrl);
+			this.setPhase('running');
+			this.started = true;
+			return this.activeUrl;
+		}
+
+		const { instance } = await this.getOrCreateDevServerTerminal(workspaceFolder);
+		this.terminalService.setActiveInstance(instance);
+		await this.terminalService.revealTerminal(instance, true);
+		this.attachTerminalDataListener(instance);
+
+		this.script = undefined;
+		this.command = explicitCommand;
+		this.lastError = undefined;
+		this.setPhase('starting');
+		await this.waitForReasonableTerminalWidth(instance);
+		instance.sendText(explicitCommand, true);
+
+		this.started = true;
+		if (preferredUrl) {
+			const detectedUrl = await this.findRunningDevServerUrl(preferredUrl);
+			if (detectedUrl) {
+				this.setActiveUrl(detectedUrl);
+				this.setPhase('running');
+			}
+		}
 		return this.activeUrl;
 	}
 

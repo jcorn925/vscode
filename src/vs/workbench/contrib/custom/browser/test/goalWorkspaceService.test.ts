@@ -140,6 +140,63 @@ suite('GoalWorkspaceService', () => {
 		]);
 	});
 
+	test('rejects unsafe workspace paths', () => {
+		const state = parseGoalWorkspaceManifest({
+			goal: { id: 'personal-training-business', name: 'Online Personal Training Business' },
+			surfaces: [
+				{ id: 'absolute', name: 'Absolute', path: '/tmp/app' },
+				{ id: 'traversal', name: 'Traversal', path: '../outside' },
+				{ id: 'uri', name: 'Uri', path: 'file:///workspace/apps/uri' },
+				{ id: 'windows', name: 'Windows', path: 'C:\\workspace\\apps\\windows' }
+			],
+			shared: {
+				domain: 'packages/domain',
+				events: '../events'
+			}
+		}, workspaceFolder, manifestResource);
+
+		assert.strictEqual(state.status, 'invalid');
+		assert.deepStrictEqual(state.diagnostics.map(d => d.path), [
+			'$.surfaces[0].path',
+			'$.surfaces[1].path',
+			'$.surfaces[2].path',
+			'$.surfaces[3].path',
+			'$.shared.events'
+		]);
+	});
+
+	test('validates local preview urls', () => {
+		const valid = parseGoalWorkspaceManifest({
+			goal: { id: 'personal-training-business', name: 'Online Personal Training Business' },
+			surfaces: [
+				{ id: 'booking', name: 'Booking', localUrl: 'http://localhost:3001' },
+				{ id: 'analytics', name: 'Analytics', localUrl: 'https://127.0.0.1:4443/dashboard' }
+			]
+		}, workspaceFolder, manifestResource);
+
+		assert.strictEqual(valid.status, 'loaded');
+		assert.deepStrictEqual(valid.workspace?.surfaces.map(surface => surface.localUrl), [
+			'http://localhost:3001',
+			'https://127.0.0.1:4443/dashboard'
+		]);
+
+		const invalid = parseGoalWorkspaceManifest({
+			goal: { id: 'personal-training-business', name: 'Online Personal Training Business' },
+			surfaces: [
+				{ id: 'external', name: 'External', localUrl: 'https://example.com' },
+				{ id: 'ftp', name: 'Ftp', localUrl: 'ftp://localhost/app' },
+				{ id: 'bad', name: 'Bad', localUrl: 'not a url' }
+			]
+		}, workspaceFolder, manifestResource);
+
+		assert.strictEqual(invalid.status, 'invalid');
+		assert.deepStrictEqual(invalid.diagnostics.map(d => d.path), [
+			'$.surfaces[0].localUrl',
+			'$.surfaces[1].localUrl',
+			'$.surfaces[2].localUrl'
+		]);
+	});
+
 	test('service exposes goal and normalized surfaces', async () => {
 		const fileService = new TestGoalWorkspaceFileService(manifestResource, createManifest('booking', 'Booking'));
 		const service = disposables.add(new GoalWorkspaceService(new TestContextService(testWorkspace(workspaceFolder)), fileService));

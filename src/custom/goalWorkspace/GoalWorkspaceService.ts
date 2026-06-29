@@ -1014,9 +1014,9 @@ function parseSurface(raw: unknown, index: number, diagnostics: GoalWorkspaceDia
 		id,
 		name,
 		type: optionalString(raw, 'type', `${basePath}.type`, diagnostics),
-		path: optionalString(raw, 'path', `${basePath}.path`, diagnostics),
+		path: optionalWorkspaceRelativePath(raw, 'path', `${basePath}.path`, diagnostics),
 		devCommand: optionalString(raw, 'devCommand', `${basePath}.devCommand`, diagnostics),
-		localUrl: optionalString(raw, 'localUrl', `${basePath}.localUrl`, diagnostics),
+		localUrl: optionalLocalPreviewUrl(raw, 'localUrl', `${basePath}.localUrl`, diagnostics),
 		purpose: optionalString(raw, 'purpose', `${basePath}.purpose`, diagnostics),
 		capabilities: optionalStringArray(raw, 'capabilities', `${basePath}.capabilities`, diagnostics),
 		events: optionalStringArray(raw, 'events', `${basePath}.events`, diagnostics),
@@ -1059,11 +1059,11 @@ function parseShared(raw: unknown, diagnostics: GoalWorkspaceDiagnostic[]): Goal
 		return EMPTY_SHARED;
 	}
 	return {
-		domain: optionalString(raw, 'domain', '$.shared.domain', diagnostics),
-		events: optionalString(raw, 'events', '$.shared.events', diagnostics),
-		ui: optionalString(raw, 'ui', '$.shared.ui', diagnostics),
-		auth: optionalString(raw, 'auth', '$.shared.auth', diagnostics),
-		workflows: optionalString(raw, 'workflows', '$.shared.workflows', diagnostics)
+		domain: optionalWorkspaceRelativePath(raw, 'domain', '$.shared.domain', diagnostics),
+		events: optionalWorkspaceRelativePath(raw, 'events', '$.shared.events', diagnostics),
+		ui: optionalWorkspaceRelativePath(raw, 'ui', '$.shared.ui', diagnostics),
+		auth: optionalWorkspaceRelativePath(raw, 'auth', '$.shared.auth', diagnostics),
+		workflows: optionalWorkspaceRelativePath(raw, 'workflows', '$.shared.workflows', diagnostics)
 	};
 }
 
@@ -1099,6 +1099,59 @@ function optionalString(raw: Record<string, unknown>, key: string, path: string,
 	}
 	diagnostics.push({ path, message: 'Expected a string.' });
 	return undefined;
+}
+
+function optionalWorkspaceRelativePath(raw: Record<string, unknown>, key: string, path: string, diagnostics: GoalWorkspaceDiagnostic[]): string | undefined {
+	const value = optionalString(raw, key, path, diagnostics);
+	if (value === undefined) {
+		return undefined;
+	}
+	const normalized = value.replace(/\\/g, '/');
+	if (normalized.startsWith('/') || /^[a-zA-Z]:\//.test(normalized)) {
+		diagnostics.push({ path, message: 'Expected a workspace-relative path.' });
+		return undefined;
+	}
+	if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(normalized)) {
+		diagnostics.push({ path, message: 'Expected a workspace-relative path, not a URI.' });
+		return undefined;
+	}
+	const segments = normalized.split('/').filter(segment => segment.length > 0);
+	if (segments.some(segment => segment === '.' || segment === '..')) {
+		diagnostics.push({ path, message: 'Path must not contain "." or ".." segments.' });
+		return undefined;
+	}
+	return normalized;
+}
+
+function optionalLocalPreviewUrl(raw: Record<string, unknown>, key: string, path: string, diagnostics: GoalWorkspaceDiagnostic[]): string | undefined {
+	const value = optionalString(raw, key, path, diagnostics);
+	if (value === undefined) {
+		return undefined;
+	}
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		diagnostics.push({ path, message: 'Expected a valid localhost http(s) URL.' });
+		return undefined;
+	}
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+		diagnostics.push({ path, message: 'Expected an http(s) URL.' });
+		return undefined;
+	}
+	if (!isLocalPreviewHostname(url.hostname)) {
+		diagnostics.push({ path, message: 'Expected a localhost preview URL.' });
+		return undefined;
+	}
+	return value;
+}
+
+function isLocalPreviewHostname(hostname: string): boolean {
+	const normalized = hostname.toLowerCase();
+	return normalized === 'localhost'
+		|| normalized === '127.0.0.1'
+		|| normalized === '::1'
+		|| normalized === '[::1]';
 }
 
 function optionalStringArray(raw: Record<string, unknown>, key: string, path: string, diagnostics: GoalWorkspaceDiagnostic[]): readonly string[] {

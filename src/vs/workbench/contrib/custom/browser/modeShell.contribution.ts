@@ -82,6 +82,7 @@ import { IGoalWorkspaceService, type GoalSurface } from '../../../../../custom/g
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
 const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
+const GOAL_OVERVIEW_SURFACE_ID = '__goal_overview__';
 
 /**
  * Stringify the shape of an ix JSON response for diagnostic logging when discovery
@@ -844,11 +845,12 @@ class ModeShellContribution extends Disposable {
 				font-weight: 600;
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-empty-subtitle {
-				font-size: 12px;
-				line-height: 1.45;
-				color: var(--vscode-descriptionForeground);
-			}
+				.monaco-workbench .custom-mode-ui-surface-empty-subtitle {
+					font-size: 12px;
+					line-height: 1.45;
+					color: var(--vscode-descriptionForeground);
+					white-space: pre-line;
+				}
 
 			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-missing-url .custom-mode-ui-frame,
 			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-missing-url .custom-mode-ui-webview {
@@ -2987,8 +2989,9 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private syncGoalSurfaceSwitcher(): void {
+		const state = this.goalWorkspaceService.getState();
 		const surfaces = this.goalWorkspaceService.getSurfaces();
-		const hasManifestSurfaces = this.goalWorkspaceService.getState().status === 'loaded' && surfaces.length > 0;
+		const hasManifestSurfaces = state.status === 'loaded' && surfaces.length > 0;
 		this.uiSurfaceSwitcher.classList.toggle('hidden', !hasManifestSurfaces);
 
 		if (!hasManifestSurfaces) {
@@ -2996,39 +2999,49 @@ class ModeShellContribution extends Disposable {
 			this.container.classList.remove('custom-mode-ui-surface-selected');
 			this.uiSurfaceButtons.clear();
 			this.uiSurfaceSwitcher.replaceChildren();
-			this.setSurfaceMissingUrlState(undefined);
+			this.setGoalWorkspaceManifestStateMessage(state.status, state.diagnostics);
 
 			const activeUrl = this.devServerService.getActiveUrl();
-			if (activeUrl && !this.embeddedUiShowsUrl(activeUrl)) {
+			if (!this.uiBrowserShell.classList.contains('custom-mode-ui-surface-missing-url') && activeUrl && !this.embeddedUiShowsUrl(activeUrl)) {
 				this.setEmbeddedUiUrl(activeUrl);
 			}
 			return;
 		}
 
-		const storedSurfaceId = this.storageService.get(STORAGE_SELECTED_GOAL_SURFACE, StorageScope.WORKSPACE);
-		const selectedSurface = this.resolveSelectedSurface(surfaces, storedSurfaceId);
-		this.selectedSurfaceId = selectedSurface?.id;
-		if (selectedSurface) {
-			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, selectedSurface.id, StorageScope.WORKSPACE, StorageTarget.USER);
-		}
+			const storedSurfaceId = this.storageService.get(STORAGE_SELECTED_GOAL_SURFACE, StorageScope.WORKSPACE);
+			const selectedSurface = this.resolveSelectedSurface(surfaces, storedSurfaceId);
+			this.selectedSurfaceId = selectedSurface?.id ?? GOAL_OVERVIEW_SURFACE_ID;
+			if (selectedSurface) {
+				this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, selectedSurface.id, StorageScope.WORKSPACE, StorageTarget.USER);
+			} else {
+				this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, GOAL_OVERVIEW_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
+			}
 
 		this.renderGoalSurfaceButtons(surfaces);
 		this.routeSelectedSurfacePreview();
 	}
 
 	private resolveSelectedSurface(surfaces: readonly GoalSurface[], storedSurfaceId: string | undefined): GoalSurface | undefined {
+		if (this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID || storedSurfaceId === GOAL_OVERVIEW_SURFACE_ID) {
+			return undefined;
+		}
+
 		const current = this.selectedSurfaceId ? surfaces.find(surface => surface.id === this.selectedSurfaceId) : undefined;
 		if (current) {
 			return current;
 		}
 
 		const stored = storedSurfaceId ? surfaces.find(surface => surface.id === storedSurfaceId) : undefined;
-		return stored ?? surfaces[0];
+		return stored;
 	}
 
 	private renderGoalSurfaceButtons(surfaces: readonly GoalSurface[]): void {
 		const nextButtons = new Map<string, HTMLButtonElement>();
 		const fragment = document.createDocumentFragment();
+
+		const overviewButton = this.renderGoalOverviewButton();
+		nextButtons.set(GOAL_OVERVIEW_SURFACE_ID, overviewButton);
+		fragment.appendChild(overviewButton);
 
 		for (const surface of surfaces) {
 			let button = this.uiSurfaceButtons.get(surface.id);
@@ -3040,14 +3053,13 @@ class ModeShellContribution extends Disposable {
 				this._register(addDisposableListener(button, 'click', () => this.selectGoalSurface(surface.id)));
 			}
 
-			const isActive = surface.id === this.selectedSurfaceId;
-			button.textContent = surface.name;
-			button.title = surface.localUrl
-				? localize('customMode.surfaceButtonTitle', '{0}: {1}', surface.name, surface.localUrl)
-				: surface.name;
-			button.classList.toggle('active', isActive);
-			button.setAttribute('aria-selected', String(isActive));
-			button.setAttribute('aria-label', surface.name);
+				const isActive = surface.id === this.selectedSurfaceId;
+				const description = this.formatGoalSurfaceDescription(surface);
+				button.textContent = surface.name;
+				button.title = description;
+				button.classList.toggle('active', isActive);
+				button.setAttribute('aria-selected', String(isActive));
+				button.setAttribute('aria-label', description);
 
 			nextButtons.set(surface.id, button);
 			fragment.appendChild(button);
@@ -3060,7 +3072,35 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceSwitcher.replaceChildren(fragment);
 	}
 
+	private renderGoalOverviewButton(): HTMLButtonElement {
+		let button = this.uiSurfaceButtons.get(GOAL_OVERVIEW_SURFACE_ID);
+		if (!button) {
+			button = $('button.custom-mode-ui-surface-button', {
+				type: 'button',
+				role: 'tab'
+			}) as HTMLButtonElement;
+			this._register(addDisposableListener(button, 'click', () => this.selectGoalSurface(GOAL_OVERVIEW_SURFACE_ID)));
+		}
+
+		const isActive = this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID;
+		const label = localize('customMode.goalOverviewSurface', 'Goal Overview');
+		button.textContent = label;
+		button.title = this.formatGoalOverviewDescription();
+		button.classList.toggle('active', isActive);
+		button.setAttribute('aria-selected', String(isActive));
+		button.setAttribute('aria-label', button.title);
+		return button;
+	}
+
 	private selectGoalSurface(surfaceId: string): void {
+		if (surfaceId === GOAL_OVERVIEW_SURFACE_ID) {
+			this.selectedSurfaceId = GOAL_OVERVIEW_SURFACE_ID;
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, GOAL_OVERVIEW_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
+			this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
+			this.routeSelectedSurfacePreview();
+			return;
+		}
+
 		const surface = this.goalWorkspaceService.getSurface(surfaceId);
 		if (!surface) {
 			return;
@@ -3073,7 +3113,7 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private getSelectedSurface(): GoalSurface | undefined {
-		if (!this.selectedSurfaceId) {
+		if (!this.selectedSurfaceId || this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID) {
 			return undefined;
 		}
 		return this.goalWorkspaceService.getSurface(this.selectedSurfaceId);
@@ -3088,10 +3128,18 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private routeSelectedSurfacePreview(): void {
+		if (this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID) {
+			this.container.classList.add('custom-mode-ui-surface-selected');
+			this.setGoalOverviewState();
+			this.clearEmbeddedUiUrl();
+			this.pushUiRuntimeLog('[surface] selected goal overview');
+			return;
+		}
+
 		const surface = this.getSelectedSurface();
 		this.container.classList.toggle('custom-mode-ui-surface-selected', Boolean(surface));
 		if (!surface) {
-			this.setSurfaceMissingUrlState(undefined);
+			this.setSurfaceEmptyState(undefined);
 			return;
 		}
 
@@ -3103,7 +3151,7 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 
-		this.setSurfaceMissingUrlState(undefined);
+		this.setSurfaceEmptyState(undefined);
 		if (!this.embeddedUiShowsUrl(url)) {
 			this.setEmbeddedUiUrl(url);
 		}
@@ -3111,19 +3159,100 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private setSurfaceMissingUrlState(surface: GoalSurface | undefined): void {
-		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-missing-url', Boolean(surface));
-		this.uiSurfaceEmptyState.classList.toggle('hidden', !surface);
 		if (!surface) {
-			this.uiSurfaceEmptyTitle.textContent = '';
-			this.uiSurfaceEmptySubtitle.textContent = '';
+			this.setSurfaceEmptyState(undefined);
 			return;
 		}
 
-		this.uiSurfaceEmptyTitle.textContent = localize('customMode.surfaceMissingUrlTitle', '{0} has no preview URL', surface.name);
-		this.uiSurfaceEmptySubtitle.textContent = localize(
+		this.setSurfaceEmptyState({
+			title: localize('customMode.surfaceMissingUrlTitle', '{0} has no preview URL', surface.name),
+			subtitle: localize(
 			'customMode.surfaceMissingUrlSubtitle',
 			'Add localUrl to this surface in workspace.goal.json to route the preview.'
-		);
+			)
+		});
+	}
+
+	private setGoalOverviewState(): void {
+		const goal = this.goalWorkspaceService.getGoal();
+		const surfaces = this.goalWorkspaceService.getSurfaces();
+		const title = goal?.name
+			? localize('customMode.goalOverviewTitle', 'Goal: {0}', goal.name)
+			: localize('customMode.goalOverviewFallbackTitle', 'Goal Workspace');
+		const parts: string[] = [];
+		if (goal?.description) {
+			parts.push(goal.description);
+		}
+		if (goal?.northStarMetric) {
+			parts.push(localize('customMode.goalOverviewNorthStar', 'North-star metric: {0}.', goal.northStarMetric));
+		}
+		parts.push(localize('customMode.goalOverviewSurfaceCount', '{0} surface(s): {1}.', surfaces.length, surfaces.map(surface => surface.name).join(', ')));
+		this.setSurfaceEmptyState({ title, subtitle: parts.join('\n') });
+	}
+
+	private setGoalWorkspaceManifestStateMessage(status: string, diagnostics: readonly { readonly path: string; readonly message: string }[]): void {
+		if (status === 'invalid') {
+			const diagnostic = diagnostics[0];
+			this.setSurfaceEmptyState({
+				title: localize('customMode.goalWorkspaceInvalidTitle', 'Invalid workspace.goal.json'),
+				subtitle: diagnostic
+					? localize('customMode.goalWorkspaceInvalidDetail', '{0}: {1}', diagnostic.path, diagnostic.message)
+					: localize('customMode.goalWorkspaceInvalidGeneric', 'Fix the manifest diagnostics to show goal surfaces.')
+			});
+			return;
+		}
+
+		if (status === 'missing') {
+			this.setSurfaceEmptyState({
+				title: localize('customMode.goalWorkspaceMissingTitle', 'No goal workspace manifest'),
+				subtitle: localize('customMode.goalWorkspaceMissingDetail', 'Add workspace.goal.json at the workspace root to show goal surfaces.')
+			});
+			return;
+		}
+
+		this.setSurfaceEmptyState(undefined);
+	}
+
+	private setSurfaceEmptyState(message: { readonly title: string; readonly subtitle: string } | undefined): void {
+		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-missing-url', Boolean(message));
+		this.uiSurfaceEmptyState.classList.toggle('hidden', !message);
+		this.uiSurfaceEmptyTitle.textContent = message?.title ?? '';
+		this.uiSurfaceEmptySubtitle.textContent = message?.subtitle ?? '';
+	}
+
+	private formatGoalOverviewDescription(): string {
+		const goal = this.goalWorkspaceService.getGoal();
+		if (!goal) {
+			return localize('customMode.goalOverviewDescriptionFallback', 'Goal overview');
+		}
+		const parts = [goal.name];
+		if (goal.description) {
+			parts.push(goal.description);
+		}
+		if (goal.northStarMetric) {
+			parts.push(localize('customMode.goalOverviewDescriptionMetric', 'North-star metric: {0}', goal.northStarMetric));
+		}
+		return parts.join('\n');
+	}
+
+	private formatGoalSurfaceDescription(surface: GoalSurface): string {
+		const parts = [surface.name];
+		if (surface.purpose) {
+			parts.push(surface.purpose);
+		}
+		if (surface.localUrl) {
+			parts.push(localize('customMode.surfaceDescriptionUrl', 'Preview: {0}', surface.localUrl));
+		}
+		if (surface.capabilities.length) {
+			parts.push(localize('customMode.surfaceDescriptionCapabilities', 'Capabilities: {0}', surface.capabilities.join(', ')));
+		}
+		if (surface.events.length) {
+			parts.push(localize('customMode.surfaceDescriptionEvents', 'Events: {0}', surface.events.join(', ')));
+		}
+		if (surface.entities.length) {
+			parts.push(localize('customMode.surfaceDescriptionEntities', 'Entities: {0}', surface.entities.join(', ')));
+		}
+		return parts.join('\n');
 	}
 
 	private logSelectedSurfaceRoute(surface: GoalSurface, url: string | undefined): void {
