@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { timeout } from '../../vs/base/common/async.js';
+import { VSBuffer } from '../../vs/base/common/buffer.js';
 import { Disposable, DisposableStore } from '../../vs/base/common/lifecycle.js';
 import { join } from '../../vs/base/common/path.js';
 import { joinPath, isEqualOrParent } from '../../vs/base/common/resources.js';
@@ -33,6 +34,24 @@ export interface IDefaultProjectService {
 export const IDefaultProjectService = createDecorator<IDefaultProjectService>('defaultProjectService');
 
 const STORAGE_FAILED_REPO_URL = 'custom.defaultProject/failedRepoUrl';
+const FALLBACK_GOAL_WORKSPACE_FOLDER = 'GoalWorkspace';
+const FALLBACK_GOAL_WORKSPACE_MANIFEST = `{
+\t"goal": {
+\t\t"id": "personal-training-business",
+\t\t"name": "Online Personal Training Business",
+\t\t"description": "Acquire clients and run coaching operations across workspace surfaces.",
+\t\t"northStarMetric": "active_paid_clients"
+\t},
+\t"surfaces": [],
+\t"shared": {
+\t\t"domain": "packages/domain",
+\t\t"events": "packages/events",
+\t\t"ui": "packages/ui",
+\t\t"auth": "packages/auth",
+\t\t"workflows": "workflows"
+\t}
+}
+`;
 
 export class DefaultProjectService extends Disposable implements IDefaultProjectService {
 	readonly _serviceBrand: undefined;
@@ -112,18 +131,23 @@ export class DefaultProjectService extends Disposable implements IDefaultProject
 	}
 
 	async openFallbackWorkspace(): Promise<void> {
-		const appRoot = this.environmentService.appRoot;
-		if (!appRoot) {
-			return;
-		}
-		const folderUri = URI.file(appRoot);
+		const folderUri = joinPath(this.getCustomProjectsBaseDir(), FALLBACK_GOAL_WORKSPACE_FOLDER);
+		await this.ensureFallbackGoalWorkspace(folderUri);
 		await this.hostService.openWindow([
 			{ folderUri },
-			{ fileUri: joinPath(folderUri, 'src/custom/goalWorkspace/examples/workspace.goal.json') },
+			{ fileUri: joinPath(folderUri, 'workspace.goal.json') },
 		], {
 			forceReuseWindow: true,
 			remoteAuthority: this.workbenchEnvironmentService.remoteAuthority
 		});
+	}
+
+	private async ensureFallbackGoalWorkspace(folderUri: URI): Promise<void> {
+		await this.fileService.createFolder(folderUri);
+		const manifestUri = joinPath(folderUri, 'workspace.goal.json');
+		if (!(await this.fileService.exists(manifestUri))) {
+			await this.fileService.writeFile(manifestUri, VSBuffer.fromString(FALLBACK_GOAL_WORKSPACE_MANIFEST));
+		}
 	}
 
 	shouldSkipSilentClone(repoUrl: string): boolean {
@@ -253,10 +277,10 @@ export class DefaultProjectService extends Disposable implements IDefaultProject
 	private formatCloneFailureMessage(repoUrl: string, output: string): string {
 		const tail = output.split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(-4).join(' ');
 		if (/could not read Username|Authentication failed|Permission denied/i.test(output)) {
-			return `Default project clone failed: ${repoUrl} requires GitHub authentication or is private. Set custom.defaultProject.repoUrl to a public repo you can access, or use Startup setup to open the vscode folder instead.${tail ? ` (${tail})` : ''}`;
+			return `Default project clone failed: ${repoUrl} requires GitHub authentication or is private. Set custom.defaultProject.repoUrl to a public repo you can access, or use Startup setup to open a managed goal workspace instead.${tail ? ` (${tail})` : ''}`;
 		}
 		if (/Repository not found|does not exist|404/i.test(output)) {
-			return `Default project clone failed: ${repoUrl} was not found (404). Update custom.defaultProject.repoUrl in settings, or use Startup setup → Run automatic fixes to open this repo instead.${tail ? ` (${tail})` : ''}`;
+			return `Default project clone failed: ${repoUrl} was not found (404). Update custom.defaultProject.repoUrl in settings, or use Startup setup → Run automatic fixes to open a managed goal workspace instead.${tail ? ` (${tail})` : ''}`;
 		}
 		return `Default project clone failed for ${repoUrl}. Check the Process tab log or update custom.defaultProject.repoUrl.${tail ? ` ${tail}` : ''}`;
 	}

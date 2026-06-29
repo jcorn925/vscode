@@ -3431,9 +3431,16 @@ class ModeShellContribution extends Disposable {
 		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
 		const surface = this.getSelectedSurface();
 		const surfaceCommand = surface?.devCommand?.trim();
+		const goalWorkspaceState = this.goalWorkspaceService.getState();
 
 		if (!hasProject) {
 			this.uiStartSubtitle.textContent = '';
+			this.updateStartAppControl();
+			return;
+		}
+
+		if (goalWorkspaceState.status === 'loaded' && (goalWorkspaceState.workspace?.surfaces.length ?? 0) === 0) {
+			this.uiStartSubtitle.textContent = localize('customMode.startAppNoSurfaces', 'No app surface is registered yet. Add a surface to workspace.goal.json when there is an app to launch.');
 			this.updateStartAppControl();
 			return;
 		}

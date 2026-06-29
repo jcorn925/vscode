@@ -17,6 +17,7 @@ import { IWorkspaceContextService, WorkbenchState } from '../../vs/platform/work
 import { ITerminalService } from '../../vs/workbench/contrib/terminal/browser/terminal.js';
 import { IDefaultProjectService } from '../devserver/DefaultProjectService.js';
 import { IDevServerService } from '../devserver/DevServerService.js';
+import { IGoalWorkspaceService } from '../goalWorkspace/GoalWorkspaceService.js';
 import type { SetupGuideController, SetupGuideState, SetupGuideStepSnapshot, SetupGuideStepStatus } from '../setup/setupGuideTypes.js';
 import { localize } from '../../vs/nls.js';
 
@@ -67,6 +68,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IStorageService private readonly storageService: IStorageService,
+		@IGoalWorkspaceService private readonly goalWorkspaceService: IGoalWorkspaceService,
 	) {
 		super();
 
@@ -79,6 +81,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => void this.scheduleRefresh()));
 		this._register(this.workspaceContextService.onDidChangeWorkbenchState(() => void this.scheduleRefresh()));
 		this._register(this.devServerService.onDidChangeState(() => void this.scheduleRefresh()));
+		this._register(this.goalWorkspaceService.onDidChangeGoalWorkspace(() => void this.scheduleRefresh()));
 
 		void this.refresh();
 	}
@@ -95,6 +98,9 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 			return false;
 		}
 		if (this.storageService.getBoolean(STORAGE_DISMISSED, StorageScope.APPLICATION, false)) {
+			return false;
+		}
+		if (this.shouldSkipForEmptyGoalWorkspace()) {
 			return false;
 		}
 		return this.snapshot().incompleteCount > 0;
@@ -239,11 +245,29 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 	}
 
 	private async doRefresh(): Promise<void> {
+		if (this.shouldSkipForEmptyGoalWorkspace()) {
+			this.skipAllSteps(localize('appLaunchGuide.noSurfaces', 'No app surfaces are registered yet. Add a surface to workspace.goal.json when there is an app to launch.'));
+			return;
+		}
 		await this.probeWorkspace();
 		await this.probePackageJson();
 		await this.probeDevScript();
 		await this.probeDependencies();
 		await this.probeDevServer();
+	}
+
+	private shouldSkipForEmptyGoalWorkspace(): boolean {
+		const goalWorkspaceState = this.goalWorkspaceService.getState();
+		return goalWorkspaceState.status === 'loaded' && (goalWorkspaceState.workspace?.surfaces.length ?? 0) === 0;
+	}
+
+	private skipAllSteps(detail: string): void {
+		for (const step of this.steps) {
+			step.status = 'skipped';
+			step.detail = detail;
+		}
+		this.lastWorkspaceFolder = undefined;
+		this.lastHintsInstallCommand = undefined;
 	}
 
 	private async probeWorkspace(): Promise<void> {
