@@ -15,6 +15,7 @@ import { mock, TestContextService } from '../../../../test/common/workbenchTestS
 import {
 	createMissingGoalWorkspaceState,
 	GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER,
+	GOAL_WORKSPACE_IX_OVERLAY_FILE,
 	GOAL_WORKSPACE_MANIFEST,
 	GoalWorkspaceService,
 	parseGoalWorkspaceManifest,
@@ -47,7 +48,13 @@ suite('GoalWorkspaceService', () => {
 					capabilities: ['booking'],
 					events: ['booking.started', 'booking.completed'],
 					entities: ['Lead', 'Booking'],
-					ixSubsystems: ['booking-ui']
+					ixSubsystems: ['legacy-booking-ui'],
+					ix: {
+						subsystems: ['Booking UI'],
+						subsystemIds: ['ix-booking-ui'],
+						tags: ['frontend'],
+						notes: 'Maps the booking product surface to Ix frontend regions.'
+					}
 				}
 			],
 			shared: {
@@ -77,7 +84,13 @@ suite('GoalWorkspaceService', () => {
 			capabilities: ['booking'],
 			events: ['booking.started', 'booking.completed'],
 			entities: ['Lead', 'Booking'],
-			ixSubsystems: ['booking-ui']
+			ixSubsystems: ['legacy-booking-ui', 'Booking UI'],
+			ix: {
+				subsystemIds: ['ix-booking-ui'],
+				subsystemLabels: ['Booking UI'],
+				tags: ['frontend'],
+				notes: 'Maps the booking product surface to Ix frontend regions.'
+			}
 		});
 	});
 
@@ -103,7 +116,7 @@ suite('GoalWorkspaceService', () => {
 		const state = parseGoalWorkspaceManifest({
 			goal: { id: '', name: 42 },
 			surfaces: [
-				{ id: 'booking', name: 'Booking', capabilities: ['booking', ''] },
+				{ id: 'booking', name: 'Booking', capabilities: ['booking', ''], ix: { subsystemIds: ['ok'], tags: [42] } },
 				{ id: 'booking', name: 'Duplicate Booking' },
 				{ id: 'analytics', events: 'analytics.viewed' }
 			],
@@ -115,6 +128,7 @@ suite('GoalWorkspaceService', () => {
 		assert.deepStrictEqual(state.diagnostics.map(d => d.path), [
 			'$.goal.id',
 			'$.goal.name',
+			'$.surfaces[0].ix.tags[0]',
 			'$.surfaces[0].capabilities[1]',
 			'$.surfaces[1].id',
 			'$.surfaces[2].name',
@@ -208,6 +222,34 @@ suite('GoalWorkspaceService', () => {
 
 		assert.deepStrictEqual(service.getSurfaceContext('booking')?.files.map(file => file.summary), ['Booking Context']);
 	});
+
+	test('service reads Ix surface overlay and resolves affected surfaces', async () => {
+		const fileService = new TestGoalWorkspaceFileService(manifestResource, createManifest('booking', 'Booking', {
+			ix: {
+				subsystems: ['Declared Booking Subsystem'],
+				subsystemIds: ['declared-booking']
+			}
+		}));
+		fileService.setFile(agentContextResource(workspaceFolder, GOAL_WORKSPACE_IX_OVERLAY_FILE), JSON.stringify({
+			generatedAt: '2026-06-29T00:00:00.000Z',
+			command: 'ix subsystems --list --detailed --sort importance --format json',
+			discoveredSubsystems: [
+				{ id: 'ix-booking', label: 'Booking UI', kind: 'subsystem', path: 'apps/booking/page.tsx', fileCount: 4 }
+			],
+			surfaces: [
+				{ surfaceId: 'booking', subsystemIds: ['ix-booking'], subsystemLabels: ['Booking UI'], matchReason: 'heuristic name/path match' }
+			]
+		}));
+		const service = disposables.add(new GoalWorkspaceService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+
+		await service.refresh();
+
+		assert.strictEqual(service.getIx().overlay?.generatedAt, '2026-06-29T00:00:00.000Z');
+		assert.strictEqual(service.getIx().overlay?.discoveredSubsystems[0]?.label, 'Booking UI');
+		assert.deepStrictEqual(service.getSurfaceIxOverlay('booking')?.subsystemLabels, ['Booking UI']);
+		assert.deepStrictEqual(service.getAffectedSurfacesForIxSubsystem('Booking UI').map(surface => surface.id), ['booking']);
+		assert.deepStrictEqual(service.getAffectedSurfacesForIxSubsystem('declared-booking').map(surface => surface.id), ['booking']);
+	});
 });
 
 class TestGoalWorkspaceFileService extends mock<IFileService>() {
@@ -274,7 +316,7 @@ class TestGoalWorkspaceFileService extends mock<IFileService>() {
 	}
 }
 
-function createManifest(surfaceId: string, surfaceName: string): string {
+function createManifest(surfaceId: string, surfaceName: string, extraSurfaceFields: Record<string, unknown> = {}): string {
 	return JSON.stringify({
 		goal: {
 			id: 'personal-training-business',
@@ -289,7 +331,8 @@ function createManifest(surfaceId: string, surfaceName: string): string {
 				path: `apps/${surfaceId}`,
 				localUrl: 'http://localhost:3001',
 				devCommand: `npm run dev --workspace apps/${surfaceId}`,
-				purpose: 'Support the goal workspace'
+				purpose: 'Support the goal workspace',
+				...extraSurfaceFields
 			}
 		]
 	});

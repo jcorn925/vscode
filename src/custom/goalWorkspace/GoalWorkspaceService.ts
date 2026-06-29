@@ -14,6 +14,7 @@ import { IWorkspaceContextService } from '../../vs/platform/workspace/common/wor
 
 export const GOAL_WORKSPACE_MANIFEST = 'workspace.goal.json';
 export const GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER = '.agent';
+export const GOAL_WORKSPACE_IX_OVERLAY_FILE = 'ix-surface-map.json';
 
 const GLOBAL_AGENT_CONTEXT_FILES = [
 	{ id: 'workspace', relativePath: 'workspace.md' },
@@ -41,9 +42,17 @@ export interface GoalWorkspaceSurface {
 	readonly events: readonly string[];
 	readonly entities: readonly string[];
 	readonly ixSubsystems: readonly string[];
+	readonly ix?: GoalSurfaceIxMetadata;
 }
 
 export type GoalSurface = GoalWorkspaceSurface;
+
+export interface GoalSurfaceIxMetadata {
+	readonly subsystemIds: readonly string[];
+	readonly subsystemLabels: readonly string[];
+	readonly tags: readonly string[];
+	readonly notes?: string;
+}
 
 export interface GoalWorkspaceShared {
 	readonly domain?: string;
@@ -77,6 +86,35 @@ export interface GoalWorkspaceContext {
 	readonly surfaceSummaries: readonly GoalSurfaceContextSummary[];
 }
 
+export interface GoalWorkspaceIxDiscoveredSubsystem {
+	readonly id: string;
+	readonly label: string;
+	readonly kind?: string;
+	readonly path?: string;
+	readonly fileCount?: number;
+}
+
+export interface GoalWorkspaceIxSurfaceOverlay {
+	readonly surfaceId: string;
+	readonly subsystemIds: readonly string[];
+	readonly subsystemLabels: readonly string[];
+	readonly matchReason?: string;
+}
+
+export interface GoalWorkspaceIxOverlay {
+	readonly resource: URI;
+	readonly generatedAt: string | undefined;
+	readonly command: string | undefined;
+	readonly discoveredSubsystems: readonly GoalWorkspaceIxDiscoveredSubsystem[];
+	readonly surfaces: readonly GoalWorkspaceIxSurfaceOverlay[];
+}
+
+export interface GoalWorkspaceIxState {
+	readonly root: URI | undefined;
+	readonly overlayResource: URI | undefined;
+	readonly overlay: GoalWorkspaceIxOverlay | undefined;
+}
+
 export interface GoalWorkspace {
 	readonly workspaceFolder: URI;
 	readonly manifestResource: URI;
@@ -98,6 +136,7 @@ export interface GoalWorkspaceState {
 	readonly manifestResource: URI | undefined;
 	readonly workspace: GoalWorkspace | undefined;
 	readonly context: GoalWorkspaceContext;
+	readonly ix: GoalWorkspaceIxState;
 	readonly diagnostics: readonly GoalWorkspaceDiagnostic[];
 }
 
@@ -113,6 +152,9 @@ export interface IGoalWorkspaceService {
 	getSurface(id: string): GoalSurface | undefined;
 	getContext(): GoalWorkspaceContext;
 	getSurfaceContext(surfaceId: string): GoalSurfaceContextSummary | undefined;
+	getIx(): GoalWorkspaceIxState;
+	getSurfaceIxOverlay(surfaceId: string): GoalWorkspaceIxSurfaceOverlay | undefined;
+	getAffectedSurfacesForIxSubsystem(subsystem: string): readonly GoalSurface[];
 	refresh(): Promise<GoalWorkspaceState>;
 }
 
@@ -124,6 +166,11 @@ const EMPTY_CONTEXT: GoalWorkspaceContext = {
 	globalFiles: [],
 	surfaceFiles: [],
 	surfaceSummaries: []
+};
+const EMPTY_IX: GoalWorkspaceIxState = {
+	root: undefined,
+	overlayResource: undefined,
+	overlay: undefined
 };
 
 export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceService {
@@ -186,6 +233,38 @@ export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceSe
 		return this.state.context.surfaceSummaries.find(summary => summary.surfaceId === surfaceId);
 	}
 
+	getIx(): GoalWorkspaceIxState {
+		return this.state.ix;
+	}
+
+	getSurfaceIxOverlay(surfaceId: string): GoalWorkspaceIxSurfaceOverlay | undefined {
+		return this.state.ix.overlay?.surfaces.find(surface => surface.surfaceId === surfaceId);
+	}
+
+	getAffectedSurfacesForIxSubsystem(subsystem: string): readonly GoalSurface[] {
+		const normalized = normalizeIxMatchText(subsystem);
+		if (!normalized) {
+			return [];
+		}
+		return this.getSurfaces().filter(surface => {
+			const declaredMatches = [
+				...surface.ixSubsystems,
+				...(surface.ix?.subsystemIds ?? []),
+				...(surface.ix?.subsystemLabels ?? []),
+				...(surface.ix?.tags ?? []),
+			].some(value => normalizeIxMatchText(value) === normalized);
+			if (declaredMatches) {
+				return true;
+			}
+
+			const overlay = this.getSurfaceIxOverlay(surface.id);
+			return [
+				...(overlay?.subsystemIds ?? []),
+				...(overlay?.subsystemLabels ?? []),
+			].some(value => normalizeIxMatchText(value) === normalized);
+		});
+	}
+
 	async refresh(): Promise<GoalWorkspaceState> {
 		const workspaceFolder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceFolder) {
@@ -194,15 +273,17 @@ export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceSe
 
 		const manifestResource = joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST);
 		const context = await this.readAgentContext(workspaceFolder, []);
+		const ix = await this.readIxOverlay(workspaceFolder);
 		if (!(await this.fileService.exists(manifestResource))) {
-			return this.setState(createMissingGoalWorkspaceState(workspaceFolder, manifestResource, context));
+			return this.setState(createMissingGoalWorkspaceState(workspaceFolder, manifestResource, context, ix));
 		}
 
 		try {
 			const content = (await this.fileService.readFile(manifestResource)).value.toString();
 			const parsed = parseGoalWorkspaceManifestText(content, workspaceFolder, manifestResource);
 			const parsedContext = await this.readAgentContext(workspaceFolder, parsed.workspace?.surfaces ?? []);
-			return this.setState(withAgentContext(parsed, parsedContext));
+			const parsedIx = await this.readIxOverlay(workspaceFolder);
+			return this.setState(withIxOverlay(withAgentContext(parsed, parsedContext), parsedIx));
 		} catch (e: unknown) {
 			return this.setState({
 				status: 'invalid',
@@ -210,6 +291,7 @@ export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceSe
 				manifestResource,
 				workspace: undefined,
 				context,
+				ix,
 				diagnostics: [{ path: '$', message: `Failed to read ${GOAL_WORKSPACE_MANIFEST}: ${String((e as Error)?.message ?? e)}` }]
 			});
 		}
@@ -217,6 +299,10 @@ export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceSe
 
 	private async readAgentContext(workspaceFolder: URI, surfaces: readonly GoalSurface[]): Promise<GoalWorkspaceContext> {
 		return discoverGoalWorkspaceContext(this.fileService, workspaceFolder, surfaces);
+	}
+
+	private async readIxOverlay(workspaceFolder: URI): Promise<GoalWorkspaceIxState> {
+		return discoverGoalWorkspaceIxOverlay(this.fileService, workspaceFolder);
 	}
 
 	private setState(state: GoalWorkspaceState): GoalWorkspaceState {
@@ -234,17 +320,19 @@ export function createNoWorkspaceGoalWorkspaceState(): GoalWorkspaceState {
 		manifestResource: undefined,
 		workspace: undefined,
 		context: EMPTY_CONTEXT,
+		ix: EMPTY_IX,
 		diagnostics: []
 	};
 }
 
-export function createMissingGoalWorkspaceState(workspaceFolder: URI, manifestResource: URI, context: GoalWorkspaceContext = createEmptyAgentContext(workspaceFolder)): GoalWorkspaceState {
+export function createMissingGoalWorkspaceState(workspaceFolder: URI, manifestResource: URI, context: GoalWorkspaceContext = createEmptyAgentContext(workspaceFolder), ix: GoalWorkspaceIxState = createEmptyIxState(workspaceFolder)): GoalWorkspaceState {
 	return {
 		status: 'missing',
 		workspaceFolder,
 		manifestResource,
 		workspace: undefined,
 		context,
+		ix,
 		diagnostics: []
 	};
 }
@@ -260,6 +348,7 @@ export function parseGoalWorkspaceManifestText(text: string, workspaceFolder: UR
 			manifestResource,
 			workspace: undefined,
 			context: createEmptyAgentContext(workspaceFolder),
+			ix: createEmptyIxState(workspaceFolder),
 			diagnostics: [{ path: '$', message: `Invalid JSON: ${String((e as Error)?.message ?? e)}` }]
 		};
 	}
@@ -324,6 +413,7 @@ export function parseGoalWorkspaceManifest(raw: unknown, workspaceFolder: URI, m
 			shared
 		},
 		context: createEmptyAgentContext(workspaceFolder),
+		ix: createEmptyIxState(workspaceFolder),
 		diagnostics: []
 	};
 }
@@ -367,6 +457,101 @@ function createEmptyAgentContext(workspaceFolder: URI | undefined): GoalWorkspac
 
 function withAgentContext(state: GoalWorkspaceState, context: GoalWorkspaceContext): GoalWorkspaceState {
 	return { ...state, context };
+}
+
+export async function discoverGoalWorkspaceIxOverlay(fileService: IFileService, workspaceFolder: URI): Promise<GoalWorkspaceIxState> {
+	const root = joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER);
+	const overlayResource = joinPath(root, GOAL_WORKSPACE_IX_OVERLAY_FILE);
+	if (!(await safeExists(fileService, overlayResource))) {
+		return createEmptyIxState(workspaceFolder);
+	}
+
+	try {
+		const raw = JSON.parse((await fileService.readFile(overlayResource)).value.toString());
+		const overlay = parseGoalWorkspaceIxOverlay(raw, overlayResource);
+		return {
+			root,
+			overlayResource,
+			overlay
+		};
+	} catch {
+		return createEmptyIxState(workspaceFolder);
+	}
+}
+
+function createEmptyIxState(workspaceFolder: URI | undefined): GoalWorkspaceIxState {
+	const root = workspaceFolder ? joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER) : undefined;
+	return {
+		root,
+		overlayResource: root ? joinPath(root, GOAL_WORKSPACE_IX_OVERLAY_FILE) : undefined,
+		overlay: undefined
+	};
+}
+
+function withIxOverlay(state: GoalWorkspaceState, ix: GoalWorkspaceIxState): GoalWorkspaceState {
+	return { ...state, ix };
+}
+
+function parseGoalWorkspaceIxOverlay(raw: unknown, resource: URI): GoalWorkspaceIxOverlay | undefined {
+	if (!isRecord(raw)) {
+		return undefined;
+	}
+	return {
+		resource,
+		generatedAt: typeof raw.generatedAt === 'string' ? raw.generatedAt : undefined,
+		command: typeof raw.command === 'string' ? raw.command : undefined,
+		discoveredSubsystems: parseIxDiscoveredSubsystems(raw.discoveredSubsystems),
+		surfaces: parseIxSurfaceOverlays(raw.surfaces)
+	};
+}
+
+function parseIxDiscoveredSubsystems(raw: unknown): readonly GoalWorkspaceIxDiscoveredSubsystem[] {
+	if (!Array.isArray(raw)) {
+		return [];
+	}
+	const result: GoalWorkspaceIxDiscoveredSubsystem[] = [];
+	for (const item of raw) {
+		if (!isRecord(item)) {
+			continue;
+		}
+		const id = optionalStringValue(item.id);
+		const label = optionalStringValue(item.label);
+		if (!id || !label) {
+			continue;
+		}
+		const fileCount = typeof item.fileCount === 'number' && Number.isFinite(item.fileCount) ? item.fileCount : undefined;
+		result.push({
+			id,
+			label,
+			kind: optionalStringValue(item.kind),
+			path: optionalStringValue(item.path),
+			fileCount
+		});
+	}
+	return result;
+}
+
+function parseIxSurfaceOverlays(raw: unknown): readonly GoalWorkspaceIxSurfaceOverlay[] {
+	if (!Array.isArray(raw)) {
+		return [];
+	}
+	const result: GoalWorkspaceIxSurfaceOverlay[] = [];
+	for (const item of raw) {
+		if (!isRecord(item)) {
+			continue;
+		}
+		const surfaceId = optionalStringValue(item.surfaceId);
+		if (!surfaceId) {
+			continue;
+		}
+		result.push({
+			surfaceId,
+			subsystemIds: stringArrayValue(item.subsystemIds),
+			subsystemLabels: stringArrayValue(item.subsystemLabels),
+			matchReason: optionalStringValue(item.matchReason)
+		});
+	}
+	return result;
 }
 
 async function readAgentContextFile(fileService: IFileService, root: URI, relativePath: string, id: string, kind: GoalWorkspaceContextFileKind): Promise<GoalWorkspaceContextFile | undefined> {
@@ -432,6 +617,8 @@ function parseSurface(raw: unknown, index: number, diagnostics: GoalWorkspaceDia
 	if (!id || !name) {
 		return undefined;
 	}
+	const ix = parseSurfaceIxMetadata(raw.ix, `${basePath}.ix`, diagnostics);
+	const legacyIxSubsystems = optionalStringArray(raw, 'ixSubsystems', `${basePath}.ixSubsystems`, diagnostics);
 
 	return {
 		id,
@@ -444,7 +631,32 @@ function parseSurface(raw: unknown, index: number, diagnostics: GoalWorkspaceDia
 		capabilities: optionalStringArray(raw, 'capabilities', `${basePath}.capabilities`, diagnostics),
 		events: optionalStringArray(raw, 'events', `${basePath}.events`, diagnostics),
 		entities: optionalStringArray(raw, 'entities', `${basePath}.entities`, diagnostics),
-		ixSubsystems: optionalStringArray(raw, 'ixSubsystems', `${basePath}.ixSubsystems`, diagnostics)
+		ixSubsystems: uniqueStrings([...legacyIxSubsystems, ...(ix?.subsystemLabels ?? [])]),
+		ix
+	};
+}
+
+function parseSurfaceIxMetadata(raw: unknown, path: string, diagnostics: GoalWorkspaceDiagnostic[]): GoalSurfaceIxMetadata | undefined {
+	if (raw === undefined) {
+		return undefined;
+	}
+	if (!isRecord(raw)) {
+		diagnostics.push({ path, message: 'Ix metadata must be an object.' });
+		return undefined;
+	}
+
+	const subsystemLabels = uniqueStrings([
+		...optionalStringArray(raw, 'subsystems', `${path}.subsystems`, diagnostics),
+		...optionalStringArray(raw, 'subsystemLabels', `${path}.subsystemLabels`, diagnostics),
+	]);
+	const subsystemIds = optionalStringArray(raw, 'subsystemIds', `${path}.subsystemIds`, diagnostics);
+	const tags = optionalStringArray(raw, 'tags', `${path}.tags`, diagnostics);
+	const notes = optionalString(raw, 'notes', `${path}.notes`, diagnostics);
+	return {
+		subsystemIds,
+		subsystemLabels,
+		tags,
+		notes
 	};
 }
 
@@ -472,6 +684,7 @@ function invalidState(workspaceFolder: URI, manifestResource: URI, diagnostics: 
 		manifestResource,
 		workspace: undefined,
 		context: createEmptyAgentContext(workspaceFolder),
+		ix: createEmptyIxState(workspaceFolder),
 		diagnostics
 	};
 }
@@ -518,6 +731,40 @@ function optionalStringArray(raw: Record<string, unknown>, key: string, path: st
 		}
 	}
 	return result;
+}
+
+function optionalStringValue(value: unknown): string | undefined {
+	if (typeof value !== 'string') {
+		return undefined;
+	}
+	const trimmed = value.trim();
+	return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function stringArrayValue(value: unknown): readonly string[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	return uniqueStrings(value.map(optionalStringValue).filter((item): item is string => Boolean(item)));
+}
+
+function uniqueStrings(values: readonly string[]): readonly string[] {
+	const result: string[] = [];
+	const seen = new Set<string>();
+	for (const value of values) {
+		const trimmed = value.trim();
+		const key = trimmed.toLowerCase();
+		if (!trimmed || seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		result.push(trimmed);
+	}
+	return result;
+}
+
+function normalizeIxMatchText(value: string): string {
+	return value.trim().toLowerCase();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
