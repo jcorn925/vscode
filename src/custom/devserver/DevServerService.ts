@@ -36,7 +36,7 @@ export interface IDevServerService {
 	getActiveUrl(): string | undefined;
 	getState(): DevServerState;
 	ensureRunning(): Promise<string | undefined>;
-	ensureRunningWithCommand(command: string, preferredUrl: string | undefined): Promise<string | undefined>;
+	ensureRunningWithCommand(command: string, preferredUrl: string | undefined, label?: string): Promise<string | undefined>;
 	getSuggestedStartCommands(): Promise<DevServerSuggestedCommands | undefined>;
 	/**
 	 * Probes `preferredUrl` (and a couple of fallback ports such as `port+1`, `port+2`) to see
@@ -242,7 +242,7 @@ export class DevServerService extends Disposable implements IDevServerService {
 		return this.activeUrl;
 	}
 
-	async ensureRunningWithCommand(command: string, preferredUrl: string | undefined): Promise<string | undefined> {
+	async ensureRunningWithCommand(command: string, preferredUrl: string | undefined, label?: string): Promise<string | undefined> {
 		const workspaceFolder = this.getPrimaryWorkspaceFolder();
 		const explicitCommand = command.trim();
 		if (!workspaceFolder || !explicitCommand) {
@@ -262,7 +262,7 @@ export class DevServerService extends Disposable implements IDevServerService {
 			return this.activeUrl;
 		}
 
-		const { instance } = await this.getOrCreateDevServerTerminal(workspaceFolder);
+		const { instance } = await this.getOrCreateDevServerTerminal(workspaceFolder, label);
 		this.terminalService.setActiveInstance(instance);
 		await this.terminalService.revealTerminal(instance, true);
 		this.attachTerminalDataListener(instance);
@@ -366,18 +366,19 @@ export class DevServerService extends Disposable implements IDevServerService {
 		return Number.isFinite(port) ? port : undefined;
 	}
 
-	private getDevServerTerminalTitle(folder: URI): string {
-		return `Dev Server — ${basename(folder)}`;
+	private getDevServerTerminalTitle(folder: URI, label?: string): string {
+		const suffix = label?.trim();
+		return suffix ? `Dev Server — ${basename(folder)} — ${suffix}` : `Dev Server — ${basename(folder)}`;
 	}
 
-	private async getOrCreateDevServerTerminal(folder: URI): Promise<{ instance: ITerminalInstance; isExisting: boolean }> {
-		const expectedTitle = this.getDevServerTerminalTitle(folder);
+	private async getOrCreateDevServerTerminal(folder: URI, label?: string): Promise<{ instance: ITerminalInstance; isExisting: boolean }> {
+		const expectedTitle = this.getDevServerTerminalTitle(folder, label);
 		// Match strictly: only a terminal we previously labelled "Dev Server …". The looser
 		// "any terminal whose cwd is the workspace folder" match would pick up the user's
 		// regular shell terminals and cause us to send `npm run dev` into them.
 		const existing = this.terminalService.instances.find(i =>
 			i.title === expectedTitle
-			|| (typeof i.title === 'string' && i.title.startsWith('Dev Server') && this.terminalLaunchCwdMatches(i, folder))
+			|| (!label && typeof i.title === 'string' && i.title.startsWith('Dev Server') && this.terminalLaunchCwdMatches(i, folder))
 		);
 		if (existing) {
 			return { instance: existing, isExisting: true };
