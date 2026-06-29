@@ -13,6 +13,14 @@ import { FileChangeType, IFileService } from '../../vs/platform/files/common/fil
 import { IWorkspaceContextService } from '../../vs/platform/workspace/common/workspace.js';
 
 export const GOAL_WORKSPACE_MANIFEST = 'workspace.goal.json';
+export const GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER = '.agent';
+
+const GLOBAL_AGENT_CONTEXT_FILES = [
+	{ id: 'workspace', relativePath: 'workspace.md' },
+	{ id: 'domain', relativePath: 'domain.md' },
+	{ id: 'events', relativePath: 'events.md' },
+	{ id: 'decisions', relativePath: 'decisions.md' },
+] as const;
 
 export interface GoalWorkspaceGoal {
 	readonly id: string;
@@ -45,6 +53,30 @@ export interface GoalWorkspaceShared {
 	readonly workflows?: string;
 }
 
+export type GoalWorkspaceContextFileKind = 'workspace' | 'domain' | 'events' | 'decisions' | 'surface';
+
+export interface GoalWorkspaceContextFile {
+	readonly id: string;
+	readonly kind: GoalWorkspaceContextFileKind;
+	readonly resource: URI;
+	readonly relativePath: string;
+	readonly summary: string;
+}
+
+export interface GoalSurfaceContextSummary {
+	readonly surfaceId: string;
+	readonly surfaceName: string;
+	readonly files: readonly GoalWorkspaceContextFile[];
+	readonly summary: string;
+}
+
+export interface GoalWorkspaceContext {
+	readonly root: URI | undefined;
+	readonly globalFiles: readonly GoalWorkspaceContextFile[];
+	readonly surfaceFiles: readonly GoalWorkspaceContextFile[];
+	readonly surfaceSummaries: readonly GoalSurfaceContextSummary[];
+}
+
 export interface GoalWorkspace {
 	readonly workspaceFolder: URI;
 	readonly manifestResource: URI;
@@ -65,6 +97,7 @@ export interface GoalWorkspaceState {
 	readonly workspaceFolder: URI | undefined;
 	readonly manifestResource: URI | undefined;
 	readonly workspace: GoalWorkspace | undefined;
+	readonly context: GoalWorkspaceContext;
 	readonly diagnostics: readonly GoalWorkspaceDiagnostic[];
 }
 
@@ -78,12 +111,20 @@ export interface IGoalWorkspaceService {
 	getGoalWorkspace(): GoalWorkspace | undefined;
 	getSurfaces(): readonly GoalSurface[];
 	getSurface(id: string): GoalSurface | undefined;
+	getContext(): GoalWorkspaceContext;
+	getSurfaceContext(surfaceId: string): GoalSurfaceContextSummary | undefined;
 	refresh(): Promise<GoalWorkspaceState>;
 }
 
 export const IGoalWorkspaceService = createDecorator<IGoalWorkspaceService>('goalWorkspaceService');
 
 const EMPTY_SHARED: GoalWorkspaceShared = {};
+const EMPTY_CONTEXT: GoalWorkspaceContext = {
+	root: undefined,
+	globalFiles: [],
+	surfaceFiles: [],
+	surfaceSummaries: []
+};
 
 export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceService {
 	readonly _serviceBrand: undefined;
@@ -105,7 +146,12 @@ export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceSe
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => void this.refresh()));
 		this._register(this.fileService.onDidFilesChange(e => {
 			const manifestResource = this.state.manifestResource;
+			const agentContextRoot = this.state.workspaceFolder ? joinPath(this.state.workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER) : undefined;
 			if (manifestResource && e.contains(manifestResource, FileChangeType.ADDED, FileChangeType.UPDATED, FileChangeType.DELETED)) {
+				void this.refresh();
+				return;
+			}
+			if (agentContextRoot && e.affects(agentContextRoot, FileChangeType.ADDED, FileChangeType.UPDATED, FileChangeType.DELETED)) {
 				void this.refresh();
 			}
 		}));
@@ -132,6 +178,14 @@ export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceSe
 		return this.getSurfaces().find(surface => surface.id === id);
 	}
 
+	getContext(): GoalWorkspaceContext {
+		return this.state.context;
+	}
+
+	getSurfaceContext(surfaceId: string): GoalSurfaceContextSummary | undefined {
+		return this.state.context.surfaceSummaries.find(summary => summary.surfaceId === surfaceId);
+	}
+
 	async refresh(): Promise<GoalWorkspaceState> {
 		const workspaceFolder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceFolder) {
@@ -139,23 +193,30 @@ export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceSe
 		}
 
 		const manifestResource = joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST);
+		const context = await this.readAgentContext(workspaceFolder, []);
 		if (!(await this.fileService.exists(manifestResource))) {
-			return this.setState(createMissingGoalWorkspaceState(workspaceFolder, manifestResource));
+			return this.setState(createMissingGoalWorkspaceState(workspaceFolder, manifestResource, context));
 		}
 
 		try {
 			const content = (await this.fileService.readFile(manifestResource)).value.toString();
 			const parsed = parseGoalWorkspaceManifestText(content, workspaceFolder, manifestResource);
-			return this.setState(parsed);
+			const parsedContext = await this.readAgentContext(workspaceFolder, parsed.workspace?.surfaces ?? []);
+			return this.setState(withAgentContext(parsed, parsedContext));
 		} catch (e: unknown) {
 			return this.setState({
 				status: 'invalid',
 				workspaceFolder,
 				manifestResource,
 				workspace: undefined,
+				context,
 				diagnostics: [{ path: '$', message: `Failed to read ${GOAL_WORKSPACE_MANIFEST}: ${String((e as Error)?.message ?? e)}` }]
 			});
 		}
+	}
+
+	private async readAgentContext(workspaceFolder: URI, surfaces: readonly GoalSurface[]): Promise<GoalWorkspaceContext> {
+		return discoverGoalWorkspaceContext(this.fileService, workspaceFolder, surfaces);
 	}
 
 	private setState(state: GoalWorkspaceState): GoalWorkspaceState {
@@ -172,16 +233,18 @@ export function createNoWorkspaceGoalWorkspaceState(): GoalWorkspaceState {
 		workspaceFolder: undefined,
 		manifestResource: undefined,
 		workspace: undefined,
+		context: EMPTY_CONTEXT,
 		diagnostics: []
 	};
 }
 
-export function createMissingGoalWorkspaceState(workspaceFolder: URI, manifestResource: URI): GoalWorkspaceState {
+export function createMissingGoalWorkspaceState(workspaceFolder: URI, manifestResource: URI, context: GoalWorkspaceContext = createEmptyAgentContext(workspaceFolder)): GoalWorkspaceState {
 	return {
 		status: 'missing',
 		workspaceFolder,
 		manifestResource,
 		workspace: undefined,
+		context,
 		diagnostics: []
 	};
 }
@@ -196,6 +259,7 @@ export function parseGoalWorkspaceManifestText(text: string, workspaceFolder: UR
 			workspaceFolder,
 			manifestResource,
 			workspace: undefined,
+			context: createEmptyAgentContext(workspaceFolder),
 			diagnostics: [{ path: '$', message: `Invalid JSON: ${String((e as Error)?.message ?? e)}` }]
 		};
 	}
@@ -259,8 +323,101 @@ export function parseGoalWorkspaceManifest(raw: unknown, workspaceFolder: URI, m
 			surfaces,
 			shared
 		},
+		context: createEmptyAgentContext(workspaceFolder),
 		diagnostics: []
 	};
+}
+
+export async function discoverGoalWorkspaceContext(fileService: IFileService, workspaceFolder: URI, surfaces: readonly GoalSurface[]): Promise<GoalWorkspaceContext> {
+	const root = joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER);
+	const globalFiles: GoalWorkspaceContextFile[] = [];
+	const surfaceFiles: GoalWorkspaceContextFile[] = [];
+
+	for (const file of GLOBAL_AGENT_CONTEXT_FILES) {
+		const contextFile = await readAgentContextFile(fileService, root, file.relativePath, file.id, file.id);
+		if (contextFile) {
+			globalFiles.push(contextFile);
+		}
+	}
+
+	for (const surface of surfaces) {
+		const relativePath = `apps/${surface.id}.md`;
+		const contextFile = await readAgentContextFile(fileService, root, relativePath, surface.id, 'surface');
+		if (contextFile) {
+			surfaceFiles.push(contextFile);
+		}
+	}
+
+	return {
+		root,
+		globalFiles,
+		surfaceFiles,
+		surfaceSummaries: surfaces.map(surface => createSurfaceContextSummary(surface, globalFiles, surfaceFiles.filter(file => file.id === surface.id)))
+	};
+}
+
+function createEmptyAgentContext(workspaceFolder: URI | undefined): GoalWorkspaceContext {
+	return {
+		root: workspaceFolder ? joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER) : undefined,
+		globalFiles: [],
+		surfaceFiles: [],
+		surfaceSummaries: []
+	};
+}
+
+function withAgentContext(state: GoalWorkspaceState, context: GoalWorkspaceContext): GoalWorkspaceState {
+	return { ...state, context };
+}
+
+async function readAgentContextFile(fileService: IFileService, root: URI, relativePath: string, id: string, kind: GoalWorkspaceContextFileKind): Promise<GoalWorkspaceContextFile | undefined> {
+	const resource = joinPath(root, ...relativePath.split('/'));
+	if (!(await safeExists(fileService, resource))) {
+		return undefined;
+	}
+
+	try {
+		const content = (await fileService.readFile(resource)).value.toString();
+		return {
+			id,
+			kind,
+			resource,
+			relativePath: `${GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER}/${relativePath}`,
+			summary: summarizeAgentContextMarkdown(content)
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function createSurfaceContextSummary(surface: GoalSurface, globalFiles: readonly GoalWorkspaceContextFile[], surfaceFiles: readonly GoalWorkspaceContextFile[]): GoalSurfaceContextSummary {
+	const parts = [...globalFiles, ...surfaceFiles]
+		.map(file => `${file.relativePath}: ${file.summary}`)
+		.filter(part => part.trim().length > 0);
+
+	return {
+		surfaceId: surface.id,
+		surfaceName: surface.name,
+		files: surfaceFiles,
+		summary: parts.join('\n')
+	};
+}
+
+function summarizeAgentContextMarkdown(content: string): string {
+	const lines = content.split(/\r?\n/)
+		.map(line => line.trim())
+		.filter(line => line.length > 0);
+
+	const heading = lines.find(line => line.startsWith('#'))?.replace(/^#+\s*/, '').trim();
+	if (heading) {
+		return heading;
+	}
+
+	const firstContentLine = lines.find(line => !line.startsWith('<!--'));
+	if (!firstContentLine) {
+		return '';
+	}
+
+	return firstContentLine.length > 160 ? `${firstContentLine.slice(0, 157)}...` : firstContentLine;
 }
 
 function parseSurface(raw: unknown, index: number, diagnostics: GoalWorkspaceDiagnostic[]): GoalWorkspaceSurface | undefined {
@@ -314,6 +471,7 @@ function invalidState(workspaceFolder: URI, manifestResource: URI, diagnostics: 
 		workspaceFolder,
 		manifestResource,
 		workspace: undefined,
+		context: createEmptyAgentContext(workspaceFolder),
 		diagnostics
 	};
 }
@@ -364,6 +522,14 @@ function optionalStringArray(raw: Record<string, unknown>, key: string, path: st
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function safeExists(fileService: IFileService, resource: URI): Promise<boolean> {
+	try {
+		return await fileService.exists(resource);
+	} catch {
+		return false;
+	}
 }
 
 registerSingleton(IGoalWorkspaceService, GoalWorkspaceService, InstantiationType.Delayed);
