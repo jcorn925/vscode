@@ -255,6 +255,10 @@ const CROSS_APP_WORKFLOWS: readonly GoalWorkspaceCrossAppWorkflow[] = [
 	ADD_TRAINING_PACKAGE_WORKFLOW
 ];
 
+export function getGoalWorkspaceCrossAppWorkflow(id: string): GoalWorkspaceCrossAppWorkflow | undefined {
+	return CROSS_APP_WORKFLOWS.find(workflow => workflow.id === id);
+}
+
 export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceService {
 	readonly _serviceBrand: undefined;
 
@@ -348,7 +352,7 @@ export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceSe
 	}
 
 	getCrossAppWorkflow(id: string): GoalWorkspaceCrossAppWorkflow | undefined {
-		return CROSS_APP_WORKFLOWS.find(workflow => workflow.id === id);
+		return getGoalWorkspaceCrossAppWorkflow(id);
 	}
 
 	buildCrossAppWorkflowPlan(id: string, packageDraft: Partial<GoalWorkspaceTrainingPackageDraft> = {}): GoalWorkspaceCrossAppPlan | undefined {

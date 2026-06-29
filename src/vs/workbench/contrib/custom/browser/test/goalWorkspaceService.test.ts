@@ -13,7 +13,11 @@ import { FileChangesEvent, FileChangeType, IFileContent, IFileService } from '..
 import { testWorkspace } from '../../../../../platform/workspace/test/common/testWorkspace.js';
 import { mock, TestContextService } from '../../../../test/common/workbenchTestServices.js';
 import {
+	ADD_TRAINING_PACKAGE_WORKFLOW_ID,
+	buildCrossAppWorkflowPlan,
 	createMissingGoalWorkspaceState,
+	formatCrossAppWorkflowPlanMarkdown,
+	getGoalWorkspaceCrossAppWorkflow,
 	GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER,
 	GOAL_WORKSPACE_IX_OVERLAY_FILE,
 	GOAL_WORKSPACE_MANIFEST,
@@ -250,6 +254,72 @@ suite('GoalWorkspaceService', () => {
 		assert.deepStrictEqual(service.getAffectedSurfacesForIxSubsystem('Booking UI').map(surface => surface.id), ['booking']);
 		assert.deepStrictEqual(service.getAffectedSurfacesForIxSubsystem('declared-booking').map(surface => surface.id), ['booking']);
 	});
+
+	test('builds add-training-package cross-app workflow plan from surface capabilities', async () => {
+		const fileService = new TestGoalWorkspaceFileService(manifestResource, createPersonalTrainingManifest());
+		fileService.setFile(agentContextResource(workspaceFolder, 'workspace.md'), '# Workspace Context\nRun an online personal training business.');
+		fileService.setFile(agentContextResource(workspaceFolder, 'domain.md'), '# Domain Context\nTrainingPackage, Lead, Booking, SubscriptionPlan, Campaign.');
+		fileService.setFile(agentContextResource(workspaceFolder, 'events.md'), '# Event Context\nbooking.started and subscription.started carry packageId.');
+		fileService.setFile(agentContextResource(workspaceFolder, 'decisions.md'), '# Decisions\nUse draft status until billing provider IDs exist.');
+		fileService.setFile(agentContextResource(workspaceFolder, 'apps/booking.md'), '# Booking Surface\nOwns package selection and intro-call scheduling.');
+		fileService.setFile(agentContextResource(workspaceFolder, 'apps/analytics.md'), '# Analytics Surface\nSegments conversion and revenue by packageId.');
+		fileService.setFile(agentContextResource(workspaceFolder, GOAL_WORKSPACE_IX_OVERLAY_FILE), JSON.stringify({
+			generatedAt: '2026-06-29T00:00:00.000Z',
+			command: 'ix subsystems --list --detailed --sort importance --format json',
+			discoveredSubsystems: [
+				{ id: 'ix-booking', label: 'Booking Package Selection', kind: 'subsystem', path: 'apps/booking', fileCount: 3 }
+			],
+			surfaces: [
+				{ surfaceId: 'booking', subsystemIds: ['ix-booking'], subsystemLabels: ['Booking Package Selection'], matchReason: 'heuristic name/path match' }
+			]
+		}));
+		const service = disposables.add(new GoalWorkspaceService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+
+		await service.refresh();
+		const plan = service.buildCrossAppWorkflowPlan(ADD_TRAINING_PACKAGE_WORKFLOW_ID);
+
+		assert.ok(plan);
+		assert.deepStrictEqual(plan.context.affectedSurfaces.map(surface => surface.surfaceId), [
+			'marketing',
+			'booking',
+			'subscriptions',
+			'admin',
+			'analytics',
+			'content'
+		]);
+		assert.strictEqual(plan.context.packageDraft.id, 'strength-reset-8-week');
+		assert.strictEqual(plan.context.sharedContext.domainFiles[0], 'packages/domain');
+		assert.match(plan.context.affectedSurfaces.find(surface => surface.surfaceId === 'booking')?.contextSummary ?? '', /Booking Surface/);
+		assert.deepStrictEqual(plan.context.affectedSurfaces.find(surface => surface.surfaceId === 'booking')?.ixSubsystemLabels, ['Booking Package Selection']);
+		assert.match(plan.steps.find(step => step.surfaceId === 'marketing')?.details.join('\n') ?? '', /booking\?package=strength-reset-8-week/);
+		assert.match(formatCrossAppWorkflowPlanMarkdown(plan), /## Affected Surfaces/);
+	});
+
+	test('returns no cross-app plan when goal workspace is missing', async () => {
+		const fileService = new TestGoalWorkspaceFileService(manifestResource);
+		const service = disposables.add(new GoalWorkspaceService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+
+		await service.refresh();
+
+		assert.strictEqual(service.buildCrossAppWorkflowPlan(ADD_TRAINING_PACKAGE_WORKFLOW_ID), undefined);
+	});
+
+	test('pure plan builder supports package draft overrides', () => {
+		const state = parseGoalWorkspaceManifestText(createPersonalTrainingManifest(), workspaceFolder, manifestResource);
+		const workflow = getGoalWorkspaceCrossAppWorkflow(ADD_TRAINING_PACKAGE_WORKFLOW_ID);
+		assert.ok(workflow);
+
+		const plan = buildCrossAppWorkflowPlan(state, workflow, {
+			id: 'mobility-reset-8-week',
+			name: '8-Week Mobility Reset',
+			priceCents: 39900
+		});
+
+		assert.ok(plan);
+		assert.strictEqual(plan.context.packageDraft.id, 'mobility-reset-8-week');
+		assert.strictEqual(plan.context.packageDraft.name, '8-Week Mobility Reset');
+		assert.match(plan.steps.find(step => step.surfaceId === 'content')?.details.join('\n') ?? '', /mobility-reset-8-week/);
+	});
 });
 
 class TestGoalWorkspaceFileService extends mock<IFileService>() {
@@ -335,6 +405,65 @@ function createManifest(surfaceId: string, surfaceName: string, extraSurfaceFiel
 				...extraSurfaceFields
 			}
 		]
+	});
+}
+
+function createPersonalTrainingManifest(): string {
+	return JSON.stringify({
+		goal: {
+			id: 'personal-training-business',
+			name: 'Online Personal Training Business',
+			northStarMetric: 'active_paid_clients'
+		},
+		surfaces: [
+			{
+				id: 'marketing',
+				name: 'Marketing',
+				path: 'apps/marketing',
+				purpose: 'Convert visitors into leads by presenting offers and calls to action.',
+				capabilities: ['display-offers', 'lead-capture']
+			},
+			{
+				id: 'booking',
+				name: 'Booking',
+				path: 'apps/booking',
+				purpose: 'Let leads select a package and schedule intro sessions.',
+				capabilities: ['package-selection', 'schedule-session']
+			},
+			{
+				id: 'subscriptions',
+				name: 'Subscriptions',
+				path: 'apps/subscriptions',
+				purpose: 'Manage package billing, renewals, cancellations, and subscription state.',
+				capabilities: ['billing-plans', 'subscription-management']
+			},
+			{
+				id: 'admin',
+				name: 'Admin',
+				path: 'apps/admin',
+				purpose: 'Let the trainer manage clients, packages, sessions, and operations.',
+				capabilities: ['package-management', 'client-management']
+			},
+			{
+				id: 'analytics',
+				name: 'Analytics',
+				path: 'apps/analytics',
+				purpose: 'Track conversion, revenue, retention, and campaign performance.',
+				capabilities: ['package-analytics', 'conversion', 'revenue']
+			},
+			{
+				id: 'content',
+				name: 'Content',
+				path: 'apps/content',
+				purpose: 'Plan and schedule content that promotes offers and campaigns.',
+				capabilities: ['campaigns', 'social-posts']
+			}
+		],
+		shared: {
+			domain: 'packages/domain',
+			events: 'packages/events',
+			workflows: 'workflows'
+		}
 	});
 }
 
