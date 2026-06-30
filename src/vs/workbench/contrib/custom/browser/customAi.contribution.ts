@@ -101,7 +101,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		'custom.ai.edit.applyMode': {
 			type: 'string',
 			enum: ['review', 'direct'],
-			default: 'direct',
+			default: 'review',
 			enumDescriptions: [
 				localize('custom.ai.edit.applyMode.review', 'Show a diff in the chat and require the user to accept the edit (only works in Edit or Agent mode; falls back to direct write otherwise).'),
 				localize('custom.ai.edit.applyMode.direct', 'Apply Custom AI edits to disk immediately without a review step.'),
@@ -111,8 +111,8 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		},
 		'custom.ai.systemPrompt': {
 			type: 'string',
-			default: 'You are a helpful coding assistant inside VS Code.',
-			description: localize('custom.ai.systemPrompt', 'Optional system prompt prepended to each conversation.'),
+			default: '',
+			description: localize('custom.ai.systemPrompt', 'Optional extra system prompt appended after the built-in goal-workspace agent guidance.'),
 			scope: ConfigurationScope.APPLICATION,
 		},
 	},

@@ -51,10 +51,30 @@ import {
 	pickCustomAiOpenAiCompatibleModelId,
 } from '../common/customAiConstants.js';
 import { CustomAiInvalidApiKeyError, readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
+import { IGoalWorkspaceService, type GoalWorkspaceContextFile, type GoalWorkspaceState, type GoalSurface } from '../../goalWorkspace/GoalWorkspaceService.js';
 
 const MAX_TOOL_ROUNDS = 15;
 const ATTACHMENT_MAX_BYTES_PER_FILE = 64 * 1024;
 const ATTACHMENT_MAX_BYTES_TOTAL = 256 * 1024;
+const MAX_GOAL_CONTEXT_FILES = 8;
+const MAX_GOAL_SURFACES = 12;
+
+export const CUSTOM_AI_PRODUCT_SYSTEM_PROMPT = [
+	'You are Custom AI inside a goal-workspace IDE.',
+	'The user is usually creating or editing a collection of related app surfaces that serve one business goal.',
+	'Use the goal workspace as the product model: goal, surfaces, shared domain, events, workflows, analytics, durable memory, and Ix/code metadata.',
+	'For business/product changes, first identify the affected surfaces and shared context, then make cohesive edits across the manifest, app files, shared packages, and agent memory as needed.',
+	'When creating a new surface, register it in workspace.goal.json, scaffold its app files, connect it to relevant shared workflows/entities/events, and note memory/Ix updates.',
+	'Ask one focused question only when a missing business decision would materially change the implementation.'
+].join('\n');
+
+const CUSTOM_AI_EDIT_TOOL_SYSTEM_PROMPT = [
+	'You have a function-calling tool named `editFile` that modifies or creates files in the user\'s workspace.',
+	'When the user asks you to change, write, refactor, fix, or create code and the needed context is clear, call `editFile` with the new file contents.',
+	'For goal-workspace changes, plan affected surfaces and shared context before editing, then include all needed manifest, app, shared workflow/domain/event, memory, and Ix metadata updates.',
+	'Do not tell the user to make changes manually if you can call the tool.',
+	'When proposing an edit, return the full updated file in the `code` argument and use the workspace-relative path in `uri`.'
+].join(' ');
 
 function isFailedToFetchError(err: unknown): boolean {
 	if (!(err instanceof Error)) {
@@ -104,6 +124,95 @@ function formatCustomAiChatError(
 	return localize('customAi.error.networkGeneric', 'Network request failed ({0}). Check your model backend URL and connectivity.', raw);
 }
 
+export function buildCustomAiGoalWorkspaceContextBlock(state: GoalWorkspaceState): string | undefined {
+	if (state.status === 'no-workspace') {
+		return undefined;
+	}
+
+	if (state.status === 'missing') {
+		return [
+			'Goal workspace context:',
+			'- A workspace is open, but workspace.goal.json is missing.',
+			'- If the user is starting a business goal workspace, create workspace.goal.json before scaffolding surfaces.'
+		].join('\n');
+	}
+
+	if (state.status === 'invalid') {
+		const diagnostics = state.diagnostics.slice(0, 6).map(diagnostic => `  - ${diagnostic.path}: ${diagnostic.message}`);
+		return [
+			'Goal workspace context:',
+			'- workspace.goal.json is present but invalid.',
+			...diagnostics,
+			'- Fix the manifest before relying on surface metadata.'
+		].join('\n');
+	}
+
+	const workspace = state.workspace;
+	if (!workspace) {
+		return undefined;
+	}
+
+	const lines: string[] = [
+		'Goal workspace context:',
+		`- Goal: ${workspace.goal.name} (${workspace.goal.id})`,
+		...(workspace.goal.description ? [`- Description: ${workspace.goal.description}`] : []),
+		...(workspace.goal.northStarMetric ? [`- North-star metric: ${workspace.goal.northStarMetric}`] : []),
+		`- Surfaces: ${workspace.surfaces.length ? workspace.surfaces.slice(0, MAX_GOAL_SURFACES).map(formatSurfaceSummary).join('; ') : 'none registered yet'}`,
+	];
+
+	const sharedEntries = Object.entries(workspace.shared).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0);
+	if (sharedEntries.length) {
+		lines.push(`- Shared paths: ${sharedEntries.map(([key, value]) => `${key}=${value}`).join(', ')}`);
+	}
+
+	const contextFiles = [
+		...state.context.globalFiles,
+		...state.context.surfaceFiles
+	].slice(0, MAX_GOAL_CONTEXT_FILES);
+	if (contextFiles.length) {
+		lines.push('- Durable memory/context:');
+		for (const file of contextFiles) {
+			lines.push(`  - ${formatContextFile(file)}`);
+		}
+	}
+
+	if (state.ix.overlay) {
+		const subsystemCount = state.ix.overlay.discoveredSubsystems.length;
+		const surfaceMapCount = state.ix.overlay.surfaces.length;
+		lines.push(`- Ix overlay: ${subsystemCount} subsystem(s), ${surfaceMapCount} surface mapping(s).`);
+	}
+
+	lines.push('- For new or changed surfaces, keep workspace.goal.json, app files, shared workflows/domain/events, durable memory, and Ix metadata coherent.');
+	return lines.join('\n');
+}
+
+function formatSurfaceSummary(surface: GoalSurface): string {
+	const parts = [`${surface.name} (${surface.id})`];
+	if (surface.path) {
+		parts.push(`path=${surface.path}`);
+	}
+	if (surface.purpose) {
+		parts.push(`purpose=${surface.purpose}`);
+	}
+	if (surface.capabilities.length) {
+		parts.push(`capabilities=${surface.capabilities.join(',')}`);
+	}
+	if (surface.events.length) {
+		parts.push(`events=${surface.events.join(',')}`);
+	}
+	if (surface.entities.length) {
+		parts.push(`entities=${surface.entities.join(',')}`);
+	}
+	if (surface.ixSubsystems.length) {
+		parts.push(`ix=${surface.ixSubsystems.join(',')}`);
+	}
+	return parts.join(' ');
+}
+
+function formatContextFile(file: GoalWorkspaceContextFile): string {
+	return `${file.relativePath} (${file.kind}): ${file.summary}`;
+}
+
 export class CustomAiChatAgent extends Disposable implements IChatAgentImplementation {
 
 	constructor(
@@ -116,6 +225,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 		@IRequestService private readonly _requestService: IRequestService,
 		@IFileService private readonly _fileService: IFileService,
 		@IModelService private readonly _modelService: IModelService,
+		@IGoalWorkspaceService private readonly _goalWorkspaceService: IGoalWorkspaceService,
 	) {
 		super();
 	}
@@ -324,7 +434,44 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 	}
 
 	async provideFollowups(_request: IChatAgentRequest, _result: IChatAgentResult, _history: IChatAgentHistoryEntry[], _token: CancellationToken): Promise<IChatFollowup[]> {
-		return [];
+		const state = this._goalWorkspaceService.getState();
+		if (state.status === 'loaded' && state.workspace) {
+			const firstSurface = state.workspace.surfaces[0];
+			return [
+				{
+					kind: 'reply',
+					agentId: 'custom.ai',
+					title: localize('customAi.followup.crossAppImpactTitle', 'Analyze cross-app impact'),
+					message: localize('customAi.followup.crossAppImpactMessage', 'Identify the affected surfaces, shared workflows, memory updates, and validation steps for my next business change.')
+				},
+				{
+					kind: 'reply',
+					agentId: 'custom.ai',
+					title: firstSurface
+						? localize('customAi.followup.explainSurfaceTitle', 'Explain first surface')
+						: localize('customAi.followup.createSurfaceTitle', 'Create first surface'),
+					message: firstSurface
+						? localize('customAi.followup.explainSurfaceMessage', 'Explain what the {0} surface does, which files own it, and how it connects to the rest of the goal workspace.', firstSurface.name)
+						: localize('customAi.followup.createSurfaceMessage', 'Create the first surface for this goal workspace. Register it in workspace.goal.json, scaffold the app, and update shared memory and Ix metadata.')
+				}
+			];
+		}
+
+		if (state.status === 'missing') {
+			return [{
+				kind: 'reply',
+				agentId: 'custom.ai',
+				title: localize('customAi.followup.createGoalWorkspaceTitle', 'Create goal workspace'),
+				message: localize('customAi.followup.createGoalWorkspaceMessage', 'Create workspace.goal.json for this business goal, then propose the first surfaces and shared context files.')
+			}];
+		}
+
+		return [{
+			kind: 'reply',
+			agentId: 'custom.ai',
+			title: localize('customAi.followup.describeGoalTitle', 'Describe business goal'),
+			message: localize('customAi.followup.describeGoalMessage', 'Help me turn this project into a goal workspace with surfaces, shared workflows, durable memory, and Ix metadata.')
+		}];
 	}
 
 	private async _checkOllamaReady(base: string, configuredModel: string, token: CancellationToken): Promise<{ ok: true } | { ok: false; reason: 'offline' | 'missingModel' }> {
@@ -435,16 +582,16 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 		const messages: IChatMessage[] = [];
 		const system = this._configurationService.getValue<string>('custom.ai.systemPrompt');
 		const systemParts: string[] = [];
+		systemParts.push(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT);
+		const goalWorkspaceContext = buildCustomAiGoalWorkspaceContextBlock(this._goalWorkspaceService.getState());
+		if (goalWorkspaceContext) {
+			systemParts.push(goalWorkspaceContext);
+		}
 		if (system?.trim()) {
 			systemParts.push(system);
 		}
 		if (this._configurationService.getValue<boolean>('custom.ai.tools.enabled') !== false) {
-			systemParts.push(
-				'You have a function-calling tool named `editFile` that modifies or creates files in the user\'s workspace. ' +
-				'When the user asks you to change, write, refactor, fix, or create code, you MUST call `editFile` with the new file contents. ' +
-				'Never tell the user to make changes manually if you can call the tool. ' +
-				'When proposing an edit, return the full updated file in the `code` argument and use the workspace-relative path in `uri`.'
-			);
+			systemParts.push(CUSTOM_AI_EDIT_TOOL_SYSTEM_PROMPT);
 		}
 		if (systemParts.length) {
 			messages.push({ role: ChatMessageRole.System, content: [{ type: 'text', value: systemParts.join('\n\n') }] });
