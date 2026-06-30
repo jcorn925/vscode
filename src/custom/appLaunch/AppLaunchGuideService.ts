@@ -59,6 +59,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 	private refreshInFlight: Promise<void> | undefined;
 	private lastHintsInstallCommand: string | undefined;
 	private lastWorkspaceFolder: URI | undefined;
+	private deferGoalWorkspaceLaunch = false;
 
 	constructor(
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
@@ -73,6 +74,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		super();
 
 		this.steps = this.buildSteps();
+		this.deferGoalWorkspaceLaunch = this.goalWorkspaceService.getState().status === 'loaded';
 
 		if (isWeb) {
 			return;
@@ -100,7 +102,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		if (this.storageService.getBoolean(STORAGE_DISMISSED, StorageScope.APPLICATION, false)) {
 			return false;
 		}
-		if (this.shouldSkipForEmptyGoalWorkspace()) {
+		if (this.deferGoalWorkspaceLaunch) {
 			return false;
 		}
 		return this.snapshot().incompleteCount > 0;
@@ -245,8 +247,10 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 	}
 
 	private async doRefresh(): Promise<void> {
-		if (this.shouldSkipForEmptyGoalWorkspace()) {
-			this.skipAllSteps(localize('appLaunchGuide.noSurfaces', 'No app surfaces are registered yet. Add a surface to workspace.goal.json when there is an app to launch.'));
+		const deferReason = await this.getGoalWorkspaceDeferReason();
+		this.deferGoalWorkspaceLaunch = deferReason !== undefined;
+		if (deferReason) {
+			this.skipAllSteps(deferReason);
 			return;
 		}
 		await this.probeWorkspace();
@@ -256,9 +260,16 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		await this.probeDevServer();
 	}
 
-	private shouldSkipForEmptyGoalWorkspace(): boolean {
+	private getGoalWorkspaceDeferReason(): string | undefined {
 		const goalWorkspaceState = this.goalWorkspaceService.getState();
-		return goalWorkspaceState.status === 'loaded' && (goalWorkspaceState.workspace?.surfaces.length ?? 0) === 0;
+		if (goalWorkspaceState.status !== 'loaded') {
+			return undefined;
+		}
+
+		return localize(
+			'appLaunchGuide.goalWorkspaceDeferred',
+			'Goal workspace surfaces launch from their registered app paths and dev commands; the root App Launch checklist is deferred.'
+		);
 	}
 
 	private skipAllSteps(detail: string): void {

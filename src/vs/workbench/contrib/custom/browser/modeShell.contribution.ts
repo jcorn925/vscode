@@ -6,6 +6,7 @@
 import { $, addDisposableListener } from '../../../../base/browser/dom.js';
 import { createStyleSheet } from '../../../../base/browser/domStylesheets.js';
 import { mainWindow } from '../../../../base/browser/window.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { Disposable, DisposableStore, type IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { isWeb, isWindows } from '../../../../base/common/platform.js';
@@ -78,10 +79,24 @@ import { IStartupGuideService } from '../../../../../custom/startup/StartupGuide
 import { IAppLaunchGuideService } from '../../../../../custom/appLaunch/AppLaunchGuideService.js';
 import { SetupGuidePanel } from './setupGuidePanel.js';
 import { IGoalWorkspaceService, type GoalSurface } from '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
+import {
+	buildSurfaceSetupAgentPlan,
+	inferSurfaceSetupStep,
+	loadContextTopicContents,
+	loadSurfaceSetupDraft,
+	nextSurfaceSetupStep,
+	resolveContextTopicStatus,
+	saveSurfaceSetupDraft,
+	SURFACE_SETUP_CONTEXT_TOPICS,
+	SURFACE_SETUP_STEPS,
+	type SurfaceSetupContextStatus,
+	type SurfaceSetupStep,
+} from '../../../../../custom/goalWorkspace/goalWorkspaceSurfaceSetup.js';
 import { CUSTOM_AI_SURFACE_SETUP_PROMPT_SUFFIX } from '../../../../../custom/ai/common/customAiSurfaceScaffold.js';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
+const STORAGE_CONTEXT_GATHERING_OPEN = 'modeShell.contextGatheringOpen';
 const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
 const GOAL_OVERVIEW_SURFACE_ID = '__goal_overview__';
 const ADD_SURFACE_ID = '__add_surface__';
@@ -95,6 +110,8 @@ const STARTER_SURFACES: readonly { readonly name: string; readonly workflow: str
 	{ name: 'Ads Manager', workflow: 'campaign setup, audience targeting, creative testing, and spend analysis' },
 	{ name: 'Subscriptions', workflow: 'plans, billing status, cancellations, and lifecycle events' },
 ];
+
+const PRIMARY_STARTER_SURFACE_COUNT = 4;
 
 /**
  * Stringify the shape of an ix JSON response for diagnostic logging when discovery
@@ -135,7 +152,7 @@ class ModeShellContribution extends Disposable {
 
 	static readonly ID = 'workbench.contrib.modeShell';
 
-	private static readonly MODES: readonly Mode[] = ['UI', 'Code'];
+	private static readonly MODES: readonly Mode[] = ['Code'];
 
 	private readonly container: HTMLElement;
 	private readonly topModeButtons = new Map<Mode, HTMLButtonElement>();
@@ -173,6 +190,16 @@ class ModeShellContribution extends Disposable {
 	private readonly uiSurfaceSetupGoalTitle: HTMLElement;
 	private readonly uiSurfaceSetupGoalDescription: HTMLElement;
 	private readonly uiSurfaceSetupGoalMetric: HTMLElement;
+	private uiSurfaceSetupAgentNotesTextarea!: HTMLTextAreaElement;
+	private uiSurfaceSetupSavedLabel!: HTMLElement;
+	private uiSurfaceSetupAgentPlanContent!: HTMLElement;
+	private uiSurfaceSetupPrimaryAction!: HTMLButtonElement;
+	private readonly uiSurfaceSetupSteps = new Map<SurfaceSetupStep, HTMLButtonElement>();
+	private readonly uiSurfaceSetupStepPanels = new Map<SurfaceSetupStep, HTMLElement>();
+	private readonly uiSurfaceSetupContextRows = new Map<string, { statusEl: HTMLElement; actionBtn: HTMLButtonElement }>();
+	private surfaceSetupCurrentStep: SurfaceSetupStep = 'context';
+	private surfaceSetupDraftDirty = false;
+	private contextGatheringOpen = true;
 	private readonly uiSurfaceEmptyState: HTMLElement;
 	private readonly uiSurfaceEmptyTitle: HTMLElement;
 	private readonly uiSurfaceEmptySubtitle: HTMLElement;
@@ -272,11 +299,13 @@ class ModeShellContribution extends Disposable {
 		@IStartupGuideService private readonly startupGuideService: IStartupGuideService,
 		@IAppLaunchGuideService private readonly appLaunchGuideService: IAppLaunchGuideService,
 		@IGoalWorkspaceService private readonly goalWorkspaceService: IGoalWorkspaceService,
+		@IQuickInputService private readonly quickInputService: IQuickInputService,
 	) {
 		super();
 
 		this._processChatDismissed = this.storageService.get(STORAGE_PROCESS_CHAT_DISMISSED, StorageScope.PROFILE) === '1';
 		this._uiChatDismissed = this.storageService.get(STORAGE_UI_CHAT_DISMISSED, StorageScope.PROFILE) === '1';
+		this.contextGatheringOpen = this.storageService.get(STORAGE_CONTEXT_GATHERING_OPEN, StorageScope.PROFILE) !== '0';
 
 		this.chatSessionManager = new ModeShellChatSessionManager(this.chatService, this.chatWidgetService, this.storageService);
 		this.processNotesStore = this._register(new ProcessNotesStore(this.fileService, this.workspaceContextService, this.configurationService));
@@ -433,7 +462,23 @@ class ModeShellContribution extends Disposable {
 				font-size: 12px;
 				font-weight: 600;
 				line-height: 1;
-				padding-right: 4px;
+				padding: 2px 6px;
+				margin: 0;
+				border: 0;
+				border-radius: 4px;
+				background: transparent;
+				cursor: pointer;
+				-webkit-app-region: no-drag;
+			}
+
+			.monaco-workbench .custom-mode-ui-project-name:hover {
+				background-color: var(--vscode-toolbar-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-project-name.active,
+			.monaco-workbench.custom-mode-context-gathering-open .custom-mode-ui-project-name {
+				color: var(--vscode-textLink-foreground);
+				background-color: var(--vscode-list-hoverBackground);
 			}
 
 			.monaco-workbench .custom-mode-ui-project-name.hidden {
@@ -939,6 +984,10 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-descriptionForeground);
 				font-size: 12px;
 				line-height: 1.3;
+				cursor: pointer;
+				border: 0;
+				text-align: left;
+				font-family: inherit;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-step.active {
@@ -1108,6 +1157,45 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-symbolIcon-classForeground);
 				font-size: 16px;
 				text-align: center;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-icon.codicon {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				width: 28px;
+				height: 28px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-step-panel {
+				display: none;
+				flex-direction: column;
+				gap: 16px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-step-panel.active {
+				display: flex;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-saved.unsaved {
+				color: var(--vscode-editorWarning-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-saved.saving {
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-surface-builder-open.custom-mode-ui-chat-dismissed .custom-mode-ui-chat-column,
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-surface-builder-open:not(.custom-mode-ui-surface-builder-handoff) .custom-mode-ui-chat-column {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-surface-builder-handoff .custom-mode-ui-surface-agent-plan {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-plan-check.pending {
+				color: var(--vscode-descriptionForeground);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-context-title {
@@ -2525,8 +2613,13 @@ class ModeShellContribution extends Disposable {
 		`;
 
 		this.modeTopBar = $('div.custom-mode-top-modes', { role: 'tablist' });
-		this.uiProjectName = $('span.custom-mode-ui-project-name.hidden');
+		this.uiProjectName = $('button.custom-mode-ui-project-name.hidden', {
+			type: 'button',
+			title: localize('customMode.workspaceNameToggle', 'Toggle goal workspace context'),
+			'aria-pressed': 'false',
+		}) as HTMLButtonElement;
 		this.modeTopBar.appendChild(this.uiProjectName);
+		this._register(addDisposableListener(this.uiProjectName, 'click', () => this.toggleWorkspaceContextGathering()));
 		for (const mode of ModeShellContribution.MODES) {
 			const button = $('button.custom-mode-top-tab', {
 				type: 'button',
@@ -2843,9 +2936,13 @@ class ModeShellContribution extends Disposable {
 		this.processChatWidget = this.createEmbeddedChatWidget(this.processChatContainer, 'customModeShellProcess', 'how does the scrape videos process work');
 
 		this.updateMode(this.modeService.getMode());
+		this.syncContextGatheringUi();
 		this._register(this.modeService.onDidChange(mode => this.updateMode(mode)));
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.updateProjectState()));
-		this._register(this.goalWorkspaceService.onDidChangeGoalWorkspace(() => this.syncGoalSurfaceSwitcher()));
+		this._register(this.goalWorkspaceService.onDidChangeGoalWorkspace(() => {
+			this.syncGoalSurfaceSwitcher();
+			void this.refreshSurfaceSetupDashboard();
+		}));
 		this._register(this.devServerService.onDidChangeActiveUrl(url => {
 			if (!url) {
 				return;
@@ -3448,6 +3545,9 @@ class ModeShellContribution extends Disposable {
 		this._uiChatDismissed = dismissed;
 		this.uiContainer.classList.toggle('custom-mode-ui-chat-dismissed', dismissed);
 		this.storageService.store(STORAGE_UI_CHAT_DISMISSED, dismissed ? '1' : '0', StorageScope.PROFILE, StorageTarget.USER);
+		if (dismissed) {
+			this.setSurfaceSetupBuilderHandoff(false);
+		}
 		const inUi = this.modeService.getMode() === 'UI';
 		const showUiChat = inUi && !dismissed;
 		this.uiChatContainer.classList.toggle('visible', showUiChat);
@@ -3511,176 +3611,141 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private createSurfaceSetupDashboard(): HTMLElement {
-		const primaryAction = $('button.custom-mode-ui-surface-setup-primary', { type: 'button' }, localize('customMode.surfaceSetupPrimary', 'Generate Surfaces')) as HTMLButtonElement;
-		this._register(addDisposableListener(primaryAction, 'click', () => this.draftSurfacePrompt(localize('customMode.surfaceSetupGenericSurface', 'first surface'), localize('customMode.surfaceSetupGenericWorkflow', 'the first customer-facing workflow this business needs'))));
+		const primaryAction = $('button.custom-mode-ui-surface-setup-primary', { type: 'button' }, localize('customMode.surfaceSetupContinue', 'Continue')) as HTMLButtonElement;
+		this.uiSurfaceSetupPrimaryAction = primaryAction;
+		this._register(addDisposableListener(primaryAction, 'click', () => void this.onSurfaceSetupPrimaryAction()));
 
 		const secondaryAction = $('button.custom-mode-ui-surface-setup-secondary', { type: 'button' }, localize('customMode.surfaceSetupSecondary', 'Save Draft')) as HTMLButtonElement;
-		this._register(addDisposableListener(secondaryAction, 'click', () => this.notificationService.info(localize('customMode.surfaceSetupDraftSaved', 'Goal workspace draft saved.'))));
+		this._register(addDisposableListener(secondaryAction, 'click', () => void this.saveSurfaceSetupDraft()));
 
 		const starterButtons = $('div.custom-mode-ui-surface-starters');
-		for (const starter of STARTER_SURFACES) {
-			const button = $('button.custom-mode-ui-surface-starter', {
-				type: 'button',
-				title: localize('customMode.surfaceStarterTitle', 'Draft a prompt for {0}', starter.name)
-			}, starter.name) as HTMLButtonElement;
-			this._register(addDisposableListener(button, 'click', () => this.draftSurfacePrompt(starter.name, starter.workflow)));
-			starterButtons.appendChild(button);
+		for (const starter of STARTER_SURFACES.slice(0, PRIMARY_STARTER_SURFACE_COUNT)) {
+			starterButtons.appendChild(this.createStarterSurfaceButton(starter.name, starter.workflow));
 		}
+		const moreStartersButton = $('button.custom-mode-ui-surface-starter', {
+			type: 'button',
+			title: localize('customMode.surfaceStarterMoreTitle', 'Show more starter surfaces')
+		}, localize('customMode.surfaceStarterMore', 'More…')) as HTMLButtonElement;
+		this._register(addDisposableListener(moreStartersButton, 'click', () => void this.pickAdditionalStarterSurface()));
+		starterButtons.appendChild(moreStartersButton);
 
 		const contextList = $('ul.custom-mode-ui-surface-context-list');
-		for (const item of [
-			{
-				icon: 'C',
-				title: localize('customMode.surfaceContextCustomerTitle', 'Customer & Pain'),
-				prompt: localize('customMode.surfaceContextCustomerPrompt', 'Who are your customers and what core problems are you solving?'),
-				status: localize('customMode.surfaceContextStatusComplete', 'Complete'),
-				statusClass: 'complete',
-				action: localize('customMode.surfaceContextReview', 'Review')
-			},
-			{
-				icon: '$',
-				title: localize('customMode.surfaceContextOffersTitle', 'Offers & Pricing'),
-				prompt: localize('customMode.surfaceContextOffersPrompt', 'What coaching offers, packages, and pricing do you provide?'),
-				status: localize('customMode.surfaceContextStatusComplete', 'Complete'),
-				statusClass: 'complete',
-				action: localize('customMode.surfaceContextReview', 'Review')
-			},
-			{
-				icon: 'B',
-				title: localize('customMode.surfaceContextBookingTitle', 'Booking Flow'),
-				prompt: localize('customMode.surfaceContextBookingPrompt', 'How do customers discover, book, and start their coaching?'),
-				status: localize('customMode.surfaceContextStatusProgress', 'In progress'),
-				statusClass: 'progress',
-				action: localize('customMode.surfaceContextAddDetails', 'Add details')
-			},
-			{
-				icon: 'P',
-				title: localize('customMode.surfaceContextPaymentsTitle', 'Payments'),
-				prompt: localize('customMode.surfaceContextPaymentsPrompt', 'How are payments, subscriptions, and cancellations handled?'),
-				status: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
-				statusClass: '',
-				action: localize('customMode.surfaceContextAddDetails', 'Add details')
-			},
-			{
-				icon: 'A',
-				title: localize('customMode.surfaceContextAcquisitionTitle', 'Acquisition'),
-				prompt: localize('customMode.surfaceContextAcquisitionPrompt', 'How do you attract and convert new clients?'),
-				status: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
-				statusClass: '',
-				action: localize('customMode.surfaceContextAddDetails', 'Add details')
-			},
-			{
-				icon: '#',
-				title: localize('customMode.surfaceContextAnalyticsTitle', 'Analytics'),
-				prompt: localize('customMode.surfaceContextAnalyticsPrompt', 'What metrics and reports are most important?'),
-				status: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
-				statusClass: '',
-				action: localize('customMode.surfaceContextAddDetails', 'Add details')
-			},
-		]) {
-			const action = $('button.custom-mode-ui-surface-context-action', { type: 'button' }, item.action) as HTMLButtonElement;
-			this._register(addDisposableListener(action, 'click', () => this.draftContextPrompt(item.title, item.prompt)));
+		for (const topic of SURFACE_SETUP_CONTEXT_TOPICS) {
+			const copy = this.getSurfaceSetupContextCopy(topic.id);
+			const action = $('button.custom-mode-ui-surface-context-action', { type: 'button' }, copy.action) as HTMLButtonElement;
+			const statusEl = $('div.custom-mode-ui-surface-context-status', undefined, copy.statusLabel);
+			const iconEl = $('div.custom-mode-ui-surface-context-icon.codicon' + ThemeIcon.asCSSSelector(topic.icon));
 			contextList.appendChild($('li.custom-mode-ui-surface-context-item', undefined,
-				$('div.custom-mode-ui-surface-context-icon', undefined, item.icon),
+				iconEl,
 				$('div', undefined,
-					$('div.custom-mode-ui-surface-context-title', undefined, item.title),
-					$('div.custom-mode-ui-surface-context-prompt', undefined, item.prompt)
+					$('div.custom-mode-ui-surface-context-title', undefined, copy.title),
+					$('div.custom-mode-ui-surface-context-prompt', undefined, copy.prompt)
 				),
-				$('div.custom-mode-ui-surface-context-status' + (item.statusClass ? ` ${item.statusClass}` : ''), undefined, item.status),
+				statusEl,
 				action
 			));
+			this.uiSurfaceSetupContextRows.set(topic.id, { statusEl, actionBtn: action });
+			this._register(addDisposableListener(action, 'click', () => void this.draftContextPrompt(copy.title, copy.prompt, topic.id)));
 		}
 
-		const createStep = (index: string, label: string, active = false) => $('div.custom-mode-ui-surface-setup-step' + (active ? ' active' : ''), undefined,
-			$('span.custom-mode-ui-surface-setup-step-index', undefined, index),
-			$('span.custom-mode-ui-surface-setup-step-label', undefined, label)
-		);
+		const stepsContainer = $('div.custom-mode-ui-surface-setup-steps');
+		const stepLabels: Record<SurfaceSetupStep, string> = {
+			goal: localize('customMode.surfaceSetupStepGoal', 'Goal'),
+			context: localize('customMode.surfaceSetupStepContext', 'Context'),
+			surfaces: localize('customMode.surfaceSetupStepSurfaces', 'Surfaces'),
+			generate: localize('customMode.surfaceSetupStepGenerate', 'Generate'),
+		};
+		SURFACE_SETUP_STEPS.forEach((step, index) => {
+			const button = $('button.custom-mode-ui-surface-setup-step', {
+				type: 'button',
+				'aria-current': 'false',
+			}, $('span.custom-mode-ui-surface-setup-step-index', undefined, String(index + 1)),
+				$('span.custom-mode-ui-surface-setup-step-label', undefined, stepLabels[step])) as HTMLButtonElement;
+			this.uiSurfaceSetupSteps.set(step, button);
+			this._register(addDisposableListener(button, 'click', () => this.setSurfaceSetupStep(step)));
+			stepsContainer.appendChild(button);
+		});
 
-		const createPlanGroup = (title: string, items: readonly [string, string, string][]) => $('div.custom-mode-ui-surface-plan-group', undefined,
-			$('div.custom-mode-ui-surface-plan-group-header', undefined,
-				$('span', undefined, title),
-				$('span.custom-mode-ui-surface-plan-check', undefined, localize('customMode.surfacePlanReady', 'Ready'))
+		this.uiSurfaceSetupSavedLabel = $('div.custom-mode-ui-surface-saved', undefined, localize('customMode.surfaceSetupSaved', 'All changes saved'));
+		this.uiSurfaceSetupAgentNotesTextarea = $('textarea.custom-mode-ui-surface-agent-textarea', {
+			placeholder: localize('customMode.surfaceSetupAgentNotesPlaceholder', 'e.g. Integrate with Stripe, Mailchimp, and Zoom. Support SMS reminders.'),
+			'aria-label': localize('customMode.surfaceSetupAgentNotesAria', 'Notes for the agent')
+		}) as HTMLTextAreaElement;
+		this._register(addDisposableListener(this.uiSurfaceSetupAgentNotesTextarea, 'input', () => {
+			this.surfaceSetupDraftDirty = true;
+			this.updateSurfaceSetupSavedLabel();
+		}));
+
+		this.uiSurfaceSetupAgentPlanContent = $('div.custom-mode-ui-surface-agent-plan-groups');
+		const goalPanel = $('div.custom-mode-ui-surface-setup-step-panel', { 'data-step': 'goal' },
+			$('div.custom-mode-ui-surface-setup-header', undefined,
+				$('div.custom-mode-ui-surface-setup-title', undefined, localize('customMode.surfaceSetupBuilderTitle', 'Build Goal Workspace')),
+				$('div.custom-mode-ui-surface-setup-description', undefined, localize('customMode.surfaceSetupBuilderDescription', 'Define your business goal, capture context, and generate the right surfaces.'))
 			),
-			$('div.custom-mode-ui-surface-plan-items', undefined,
-				...items.map(([icon, name, description]) => $('div.custom-mode-ui-surface-plan-item', undefined,
-					$('span.custom-mode-ui-surface-plan-icon', undefined, icon),
-					$('div', undefined,
-						$('div.custom-mode-ui-surface-plan-name', undefined, name),
-						$('div.custom-mode-ui-surface-plan-desc', undefined, description)
-					)
-				))
+			$('div.custom-mode-ui-surface-goal-summary', undefined,
+				$('div.custom-mode-ui-surface-goal-cell', undefined,
+					$('div.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalLabel', 'Goal')),
+					this.uiSurfaceSetupGoalTitle,
+					this.uiSurfaceSetupGoalDescription
+				),
+				$('div.custom-mode-ui-surface-goal-cell', undefined,
+					$('div.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupMetricLabel', 'North-star metric')),
+					this.uiSurfaceSetupGoalMetric
+				)
 			)
 		);
+		const contextPanel = $('div.custom-mode-ui-surface-setup-step-panel', { 'data-step': 'context' },
+			$('div.custom-mode-ui-surface-setup-section', undefined,
+				$('div.custom-mode-ui-surface-setup-section-heading', undefined,
+					$('div', undefined,
+						$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupContextTitle', 'Context')),
+						$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupContextNote', 'Provide the key context areas the agent should understand.'))
+					),
+					this.uiSurfaceSetupSavedLabel
+				),
+				contextList
+			),
+			$('div.custom-mode-ui-surface-agent-notes', undefined,
+				$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupAgentNotesTitle', 'Notes for the agent')),
+				$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupAgentNotesSubtitle', 'Add any additional context, constraints, or preferences.')),
+				this.uiSurfaceSetupAgentNotesTextarea
+			)
+		);
+		const surfacesPanel = $('div.custom-mode-ui-surface-setup-step-panel', { 'data-step': 'surfaces' },
+			$('div.custom-mode-ui-surface-setup-section', undefined,
+				$('div.custom-mode-ui-surface-setup-section-heading', undefined,
+					$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupStartersTitle', 'Starter suggestions')),
+					starterButtons
+				),
+				$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupStartersNote', 'Pick a starter surface or continue to generate from your saved context.'))
+			)
+		);
+		const generatePanel = $('div.custom-mode-ui-surface-setup-step-panel', { 'data-step': 'generate' },
+			$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupGenerateNote', 'Review the agent plan on the right, then generate surfaces from your saved context.')),
+			$('div.custom-mode-ui-surface-setup-actions', undefined, secondaryAction, primaryAction)
+		);
+		for (const [step, panel] of [
+			['goal', goalPanel],
+			['context', contextPanel],
+			['surfaces', surfacesPanel],
+			['generate', generatePanel],
+		] as const) {
+			this.uiSurfaceSetupStepPanels.set(step, panel);
+		}
 
 		return $('div.custom-mode-ui-surface-setup.hidden', undefined,
 			$('div.custom-mode-ui-surface-setup-inner', undefined,
 				$('div.custom-mode-ui-surface-setup-main', undefined,
-					$('div.custom-mode-ui-surface-setup-steps', undefined,
-						createStep('1', localize('customMode.surfaceSetupStepGoal', 'Goal')),
-						createStep('2', localize('customMode.surfaceSetupStepContext', 'Context'), true),
-						createStep('3', localize('customMode.surfaceSetupStepSurfaces', 'Surfaces')),
-						createStep('4', localize('customMode.surfaceSetupStepGenerate', 'Generate'))
-					),
-					$('div.custom-mode-ui-surface-setup-header', undefined,
-						$('div.custom-mode-ui-surface-setup-title', undefined, localize('customMode.surfaceSetupBuilderTitle', 'Build Goal Workspace')),
-						$('div.custom-mode-ui-surface-setup-description', undefined, localize('customMode.surfaceSetupBuilderDescription', 'Define your business goal, capture context, and generate the right surfaces.'))
-					),
-					$('div.custom-mode-ui-surface-goal-summary', undefined,
-						$('div.custom-mode-ui-surface-goal-cell', undefined,
-							$('div.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalLabel', 'Goal')),
-							this.uiSurfaceSetupGoalTitle,
-							this.uiSurfaceSetupGoalDescription
-						),
-						$('div.custom-mode-ui-surface-goal-cell', undefined,
-							$('div.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupMetricLabel', 'North-star metric')),
-							this.uiSurfaceSetupGoalMetric
-						)
-					),
-					$('div.custom-mode-ui-surface-setup-section', undefined,
-						$('div.custom-mode-ui-surface-setup-section-heading', undefined,
-							$('div', undefined,
-								$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupContextTitle', 'Context')),
-								$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupContextNote', 'Provide the key context areas the agent should understand.'))
-							),
-							$('div.custom-mode-ui-surface-saved', undefined, localize('customMode.surfaceSetupSaved', 'All changes saved'))
-						),
-						contextList
-					),
-					$('div.custom-mode-ui-surface-setup-section', undefined,
-						$('div.custom-mode-ui-surface-setup-section-heading', undefined,
-							$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupStartersTitle', 'Starter suggestions')),
-							starterButtons
-						)
-					),
-					$('div.custom-mode-ui-surface-agent-notes', undefined,
-						$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupAgentNotesTitle', 'Notes for the agent')),
-						$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupAgentNotesSubtitle', 'Add any additional context, constraints, or preferences.')),
-						$('textarea.custom-mode-ui-surface-agent-textarea', {
-							placeholder: localize('customMode.surfaceSetupAgentNotesPlaceholder', 'e.g. Integrate with Stripe, Mailchimp, and Zoom. Support SMS reminders.'),
-							'aria-label': localize('customMode.surfaceSetupAgentNotesAria', 'Notes for the agent')
-						}) as HTMLTextAreaElement
-					),
-					$('div.custom-mode-ui-surface-setup-actions', undefined, secondaryAction, primaryAction)
+					stepsContainer,
+					goalPanel,
+					contextPanel,
+					surfacesPanel,
+					generatePanel,
 				),
 				$('aside.custom-mode-ui-surface-agent-plan', undefined,
 					$('div.custom-mode-ui-surface-agent-plan-title', undefined, localize('customMode.surfaceSetupAgentPlanTitle', 'Agent Plan')),
 					$('div.custom-mode-ui-surface-agent-plan-subtitle', undefined, localize('customMode.surfaceSetupAgentPlanSubtitle', 'Here is what the agent will generate.')),
-					createPlanGroup(localize('customMode.surfacePlanWorkspaceTitle', 'Workspace definition'), [
-						['[]', 'workspace.goal.json', localize('customMode.surfacePlanWorkspaceDesc', 'Goal, metric, and context summary')]
-					]),
-					createPlanGroup(localize('customMode.surfacePlanAppsTitle', 'Applications (apps/)'), [
-						['<>', 'apps/marketing', localize('customMode.surfacePlanMarketingDesc', 'Marketing site and campaigns')],
-						['<>', 'apps/booking', localize('customMode.surfacePlanBookingDesc', 'Booking and client portal')],
-						['<>', 'apps/trainer-admin', localize('customMode.surfacePlanAdminDesc', 'Trainer admin and operations')]
-					]),
-					createPlanGroup(localize('customMode.surfacePlanSharedTitle', 'Shared domain'), [
-						['{}', 'domain/', localize('customMode.surfacePlanDomainDesc', 'Core entities and types')],
-						['{}', 'events/', localize('customMode.surfacePlanEventsDesc', 'Domain events')],
-						['{}', 'workflows/', localize('customMode.surfacePlanWorkflowsDesc', 'Processes and automations')]
-					]),
-					createPlanGroup(localize('customMode.surfacePlanIxTitle', 'Ix metadata'), [
-						['//', '.ix/', localize('customMode.surfacePlanIxDesc', 'Code-level understanding and map')]
-					]),
+					this.uiSurfaceSetupAgentPlanContent,
 					$('div.custom-mode-ui-surface-plan-next', undefined,
 						$('div.custom-mode-ui-surface-plan-name', undefined, localize('customMode.surfacePlanNextTitle', 'What happens next')),
 						$('div', undefined, localize('customMode.surfacePlanNextDesc', 'The agent will scaffold the workspace, generate surfaces, connect shared context, and leave you ready to review and refine.'))
@@ -3690,16 +3755,247 @@ class ModeShellContribution extends Disposable {
 		);
 	}
 
-	private async draftContextPrompt(topic: string, prompt: string): Promise<void> {
+	private createStarterSurfaceButton(name: string, workflow: string): HTMLButtonElement {
+		const button = $('button.custom-mode-ui-surface-starter', {
+			type: 'button',
+			title: localize('customMode.surfaceStarterTitle', 'Draft a prompt for {0}', name)
+		}, name) as HTMLButtonElement;
+		this._register(addDisposableListener(button, 'click', () => void this.draftSurfacePrompt(name, workflow)));
+		return button;
+	}
+
+	private getSurfaceSetupContextCopy(topicId: string): { title: string; prompt: string; statusLabel: string; action: string } {
+		switch (topicId) {
+			case 'customer-pain':
+				return {
+					title: localize('customMode.surfaceContextCustomerTitle', 'Customer & Pain'),
+					prompt: localize('customMode.surfaceContextCustomerPrompt', 'Who are your customers and what core problems are you solving?'),
+					statusLabel: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
+					action: localize('customMode.surfaceContextAddDetails', 'Add details'),
+				};
+			case 'offers-pricing':
+				return {
+					title: localize('customMode.surfaceContextOffersTitle', 'Offers & Pricing'),
+					prompt: localize('customMode.surfaceContextOffersPrompt', 'What coaching offers, packages, and pricing do you provide?'),
+					statusLabel: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
+					action: localize('customMode.surfaceContextAddDetails', 'Add details'),
+				};
+			case 'booking-flow':
+				return {
+					title: localize('customMode.surfaceContextBookingTitle', 'Booking Flow'),
+					prompt: localize('customMode.surfaceContextBookingPrompt', 'How do customers discover, book, and start their coaching?'),
+					statusLabel: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
+					action: localize('customMode.surfaceContextAddDetails', 'Add details'),
+				};
+			case 'payments':
+				return {
+					title: localize('customMode.surfaceContextPaymentsTitle', 'Payments'),
+					prompt: localize('customMode.surfaceContextPaymentsPrompt', 'How are payments, subscriptions, and cancellations handled?'),
+					statusLabel: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
+					action: localize('customMode.surfaceContextAddDetails', 'Add details'),
+				};
+			case 'acquisition':
+				return {
+					title: localize('customMode.surfaceContextAcquisitionTitle', 'Acquisition'),
+					prompt: localize('customMode.surfaceContextAcquisitionPrompt', 'How do you attract and convert new clients?'),
+					statusLabel: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
+					action: localize('customMode.surfaceContextAddDetails', 'Add details'),
+				};
+			default:
+				return {
+					title: localize('customMode.surfaceContextAnalyticsTitle', 'Analytics'),
+					prompt: localize('customMode.surfaceContextAnalyticsPrompt', 'What metrics and reports are most important?'),
+					statusLabel: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
+					action: localize('customMode.surfaceContextAddDetails', 'Add details'),
+				};
+		}
+	}
+
+	private getSurfaceSetupStatusLabel(status: SurfaceSetupContextStatus): string {
+		switch (status) {
+			case 'complete':
+				return localize('customMode.surfaceContextStatusComplete', 'Complete');
+			case 'progress':
+				return localize('customMode.surfaceContextStatusProgress', 'In progress');
+			default:
+				return localize('customMode.surfaceContextStatusNotStarted', 'Not started');
+		}
+	}
+
+	private getSurfaceSetupActionLabel(status: SurfaceSetupContextStatus): string {
+		return status === 'complete'
+			? localize('customMode.surfaceContextReview', 'Review')
+			: localize('customMode.surfaceContextAddDetails', 'Add details');
+	}
+
+	private getWorkspaceFolderUri(): URI | undefined {
+		return this.workspaceContextService.getWorkspace().folders[0]?.uri;
+	}
+
+	private setSurfaceSetupBuilderOpen(open: boolean): void {
+		this.uiContainer.classList.toggle('custom-mode-ui-surface-builder-open', open);
+		if (!open) {
+			this.setSurfaceSetupBuilderHandoff(false);
+		}
+	}
+
+	private setSurfaceSetupBuilderHandoff(handoff: boolean): void {
+		this.uiContainer.classList.toggle('custom-mode-ui-surface-builder-handoff', handoff);
+		if (handoff) {
+			this.setUiChatDismissed(false);
+		}
+	}
+
+	private setSurfaceSetupStep(step: SurfaceSetupStep): void {
+		this.surfaceSetupCurrentStep = step;
+		for (const [itemStep, button] of this.uiSurfaceSetupSteps) {
+			const active = itemStep === step;
+			button.classList.toggle('active', active);
+			button.setAttribute('aria-current', active ? 'step' : 'false');
+		}
+		for (const [itemStep, panel] of this.uiSurfaceSetupStepPanels) {
+			panel.classList.toggle('active', itemStep === step);
+		}
+		const isGenerate = step === 'generate';
+		this.uiSurfaceSetupPrimaryAction.textContent = isGenerate
+			? localize('customMode.surfaceSetupPrimary', 'Generate Surfaces')
+			: localize('customMode.surfaceSetupContinue', 'Continue');
+	}
+
+	private async onSurfaceSetupPrimaryAction(): Promise<void> {
+		if (this.surfaceSetupCurrentStep === 'generate') {
+			await this.draftSurfacePrompt(
+				localize('customMode.surfaceSetupGenericSurface', 'first surface'),
+				localize('customMode.surfaceSetupGenericWorkflow', 'the first customer-facing workflow this business needs')
+			);
+			return;
+		}
+		this.setSurfaceSetupStep(nextSurfaceSetupStep(this.surfaceSetupCurrentStep));
+	}
+
+	private updateSurfaceSetupSavedLabel(savedAt?: string): void {
+		this.uiSurfaceSetupSavedLabel.classList.remove('unsaved', 'saving');
+		if (this.surfaceSetupDraftDirty) {
+			this.uiSurfaceSetupSavedLabel.textContent = localize('customMode.surfaceSetupUnsaved', 'Unsaved changes');
+			this.uiSurfaceSetupSavedLabel.classList.add('unsaved');
+			return;
+		}
+		if (savedAt) {
+			this.uiSurfaceSetupSavedLabel.textContent = localize('customMode.surfaceSetupSavedAt', 'Saved {0}', new Date(savedAt).toLocaleString());
+			return;
+		}
+		this.uiSurfaceSetupSavedLabel.textContent = localize('customMode.surfaceSetupSaved', 'All changes saved');
+	}
+
+	private renderSurfaceSetupAgentPlan(contextStatuses: readonly SurfaceSetupContextStatus[]): void {
+		const groups = buildSurfaceSetupAgentPlan(this.goalWorkspaceService.getGoalWorkspace(), contextStatuses);
+		this.uiSurfaceSetupAgentPlanContent.replaceChildren();
+		for (const group of groups) {
+			const readyLabel = group.ready
+				? localize('customMode.surfacePlanReady', 'Ready')
+				: localize('customMode.surfacePlanPending', 'Pending');
+			const groupEl = $('div.custom-mode-ui-surface-plan-group', undefined,
+				$('div.custom-mode-ui-surface-plan-group-header', undefined,
+					$('span', undefined, group.title),
+					$('span.custom-mode-ui-surface-plan-check' + (group.ready ? '' : ' pending'), undefined, readyLabel)
+				),
+				$('div.custom-mode-ui-surface-plan-items', undefined,
+					...group.items.map(item => $('div.custom-mode-ui-surface-plan-item', undefined,
+						$('span.custom-mode-ui-surface-plan-icon', undefined, item.icon),
+						$('div', undefined,
+							$('div.custom-mode-ui-surface-plan-name', undefined, item.name),
+							$('div.custom-mode-ui-surface-plan-desc', undefined, item.description)
+						)
+					))
+				)
+			);
+			this.uiSurfaceSetupAgentPlanContent.appendChild(groupEl);
+		}
+	}
+
+	private async refreshSurfaceSetupDashboard(): Promise<void> {
+		if (this.uiSurfaceSetupDashboard.classList.contains('hidden')) {
+			return;
+		}
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		const draft = await loadSurfaceSetupDraft(this.fileService, workspaceFolder);
+		const contextContents = await loadContextTopicContents(this.fileService, workspaceFolder);
+		const contextStatuses: SurfaceSetupContextStatus[] = [];
+		for (const topic of SURFACE_SETUP_CONTEXT_TOPICS) {
+			const status = resolveContextTopicStatus(contextContents.get(topic.id));
+			contextStatuses.push(status);
+			const row = this.uiSurfaceSetupContextRows.get(topic.id);
+			if (row) {
+				row.statusEl.textContent = this.getSurfaceSetupStatusLabel(status);
+				row.statusEl.className = 'custom-mode-ui-surface-context-status' + (status === 'not-started' ? '' : ` ${status}`);
+				row.actionBtn.textContent = this.getSurfaceSetupActionLabel(status);
+			}
+		}
+		const goal = this.goalWorkspaceService.getGoal();
+		const surfaces = this.goalWorkspaceService.getSurfaces();
+		const inferredStep = inferSurfaceSetupStep(Boolean(goal?.name), contextStatuses, surfaces.length);
+		const step = draft?.currentStep ?? inferredStep;
+		if (draft?.agentNotes !== undefined) {
+			this.uiSurfaceSetupAgentNotesTextarea.value = draft.agentNotes;
+		}
+		this.surfaceSetupDraftDirty = false;
+		this.setSurfaceSetupStep(step);
+		this.renderSurfaceSetupAgentPlan(contextStatuses);
+		this.updateSurfaceSetupSavedLabel(draft?.savedAt);
+	}
+
+	private async saveSurfaceSetupDraft(): Promise<void> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			this.notificationService.warn(localize('customMode.surfaceSetupDraftNoWorkspace', 'Open a workspace folder before saving a draft.'));
+			return;
+		}
+		this.uiSurfaceSetupSavedLabel.textContent = localize('customMode.surfaceSetupSaving', 'Saving…');
+		this.uiSurfaceSetupSavedLabel.classList.add('saving');
+		try {
+			const saved = await saveSurfaceSetupDraft(this.fileService, workspaceFolder, {
+				currentStep: this.surfaceSetupCurrentStep,
+				agentNotes: this.uiSurfaceSetupAgentNotesTextarea.value,
+			});
+			this.surfaceSetupDraftDirty = false;
+			this.updateSurfaceSetupSavedLabel(saved?.savedAt);
+			this.notificationService.info(localize('customMode.surfaceSetupDraftSaved', 'Goal workspace draft saved.'));
+		} catch (e: unknown) {
+			this.notificationService.error(localize('customMode.surfaceSetupDraftSaveFailed', 'Failed to save draft: {0}', String((e as Error)?.message ?? e)));
+			this.updateSurfaceSetupSavedLabel();
+		}
+	}
+
+	private async pickAdditionalStarterSurface(): Promise<void> {
+		const remaining = STARTER_SURFACES.slice(PRIMARY_STARTER_SURFACE_COUNT);
+		if (!remaining.length) {
+			return;
+		}
+		const pick = await this.quickInputService.pick(
+			remaining.map(starter => ({ label: starter.name, description: starter.workflow, starter })),
+			{ placeHolder: localize('customMode.surfaceStarterPickPlaceholder', 'Choose a starter surface') }
+		);
+		if (!pick) {
+			return;
+		}
+		await this.draftSurfacePrompt(pick.starter.name, pick.starter.workflow);
+	}
+
+	private async draftContextPrompt(topic: string, prompt: string, topicId?: string): Promise<void> {
+		const topicDef = topicId ? SURFACE_SETUP_CONTEXT_TOPICS.find(item => item.id === topicId) : undefined;
+		const topicHint = topicDef
+			? localize('customMode.surfaceContextPromptFileHint', 'Save the result to `.agent/context/{0}`.', topicDef.fileName)
+			: '';
 		const contextPrompt = localize(
 			'customMode.surfaceContextPromptDraft',
-			'Help me fill in the "{0}" context for this goal workspace. Ask only for the missing details needed to generate coherent surfaces. Starting question: {1}',
+			'Help me fill in the "{0}" context for this goal workspace. Ask only for the missing details needed to generate coherent surfaces. Starting question: {1}{2}',
 			topic,
-			prompt
+			prompt,
+			topicHint ? `\n\n${topicHint}` : '',
 		);
 		try {
-			this.modeService.setMode('UI');
-			this.setUiChatDismissed(false);
+			this.setSurfaceSetupBuilderHandoff(true);
+			this.ensureWorkspaceView();
 			await this.ensureEmbeddedChatModel('UI');
 			this.uiChatWidget.setInput(contextPrompt);
 			this.uiChatWidget.focusInput();
@@ -3709,6 +4005,7 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private async draftSurfacePrompt(surfaceName: string, workflow: string): Promise<void> {
+		const notes = this.uiSurfaceSetupAgentNotesTextarea.value.trim();
 		const prompt = [
 			localize(
 				'customMode.surfaceSetupPrompt',
@@ -3716,11 +4013,12 @@ class ModeShellContribution extends Disposable {
 				surfaceName,
 				workflow
 			),
+			notes ? localize('customMode.surfaceSetupPromptNotes', 'Builder notes from the user:\n{0}', notes) : '',
 			CUSTOM_AI_SURFACE_SETUP_PROMPT_SUFFIX,
-		].join('\n\n');
+		].filter(Boolean).join('\n\n');
 		try {
-			this.modeService.setMode('UI');
-			this.setUiChatDismissed(false);
+			this.setSurfaceSetupBuilderHandoff(true);
+			this.ensureWorkspaceView();
 			await this.ensureEmbeddedChatModel('UI');
 			this.uiChatWidget.setInput(prompt);
 			this.uiChatWidget.focusInput();
@@ -3733,8 +4031,48 @@ class ModeShellContribution extends Disposable {
 		const folder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		const name = folder ? basename(folder) : '';
 		this.uiProjectName.textContent = name;
-		this.uiProjectName.title = folder?.fsPath ?? '';
+		this.uiProjectName.title = folder
+			? localize('customMode.workspaceNameToggleWithPath', 'Toggle goal workspace context ({0})', folder.fsPath)
+			: localize('customMode.workspaceNameToggle', 'Toggle goal workspace context');
 		this.uiProjectName.classList.toggle('hidden', !name);
+		this.syncContextGatheringUi();
+	}
+
+	private ensureWorkspaceView(): void {
+		if (this.modeService.getMode() === 'Code') {
+			this.modeService.setMode('UI');
+		}
+	}
+
+	private toggleWorkspaceContextGathering(): void {
+		this.contextGatheringOpen = !this.contextGatheringOpen;
+		this.persistContextGatheringOpen();
+		this.syncContextGatheringUi();
+		this.ensureWorkspaceView();
+		this.routeSelectedSurfacePreview();
+	}
+
+	private persistContextGatheringOpen(): void {
+		this.storageService.store(STORAGE_CONTEXT_GATHERING_OPEN, this.contextGatheringOpen ? '1' : '0', StorageScope.PROFILE, StorageTarget.USER);
+	}
+
+	private syncContextGatheringUi(): void {
+		this.container.classList.toggle('custom-mode-context-gathering-open', this.contextGatheringOpen);
+		this.uiProjectName.classList.toggle('active', this.contextGatheringOpen);
+		this.uiProjectName.setAttribute('aria-pressed', String(this.contextGatheringOpen));
+	}
+
+	private applySurfaceSelection(surfaceId: string, options?: { contextGathering?: boolean }): void {
+		if (options?.contextGathering !== undefined) {
+			this.contextGatheringOpen = options.contextGathering;
+			this.persistContextGatheringOpen();
+			this.syncContextGatheringUi();
+		}
+		this.ensureWorkspaceView();
+		this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
+		this.syncTopBarAddSurfaceButton();
+		this.routeSelectedSurfacePreview();
+		this.refreshStartCommandHints();
 	}
 
 	private syncGoalSurfaceSwitcher(): void {
@@ -3883,20 +4221,14 @@ class ModeShellContribution extends Disposable {
 		if (surfaceId === ADD_SURFACE_ID) {
 			this.selectedSurfaceId = ADD_SURFACE_ID;
 			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
-			this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
-			this.syncTopBarAddSurfaceButton();
-			this.routeSelectedSurfacePreview();
-			this.refreshStartCommandHints();
+			this.applySurfaceSelection(surfaceId, { contextGathering: true });
 			return;
 		}
 
 		if (surfaceId === GOAL_OVERVIEW_SURFACE_ID) {
 			this.selectedSurfaceId = GOAL_OVERVIEW_SURFACE_ID;
 			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, GOAL_OVERVIEW_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
-			this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
-			this.syncTopBarAddSurfaceButton();
-			this.routeSelectedSurfacePreview();
-			this.refreshStartCommandHints();
+			this.applySurfaceSelection(surfaceId, { contextGathering: true });
 			return;
 		}
 
@@ -3907,10 +4239,7 @@ class ModeShellContribution extends Disposable {
 
 		this.selectedSurfaceId = surface.id;
 		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
-		this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
-		this.syncTopBarAddSurfaceButton();
-		this.routeSelectedSurfacePreview();
-		this.refreshStartCommandHints();
+		this.applySurfaceSelection(surfaceId, { contextGathering: false });
 	}
 
 	private getSelectedSurface(): GoalSurface | undefined {
@@ -3929,7 +4258,34 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private routeSelectedSurfacePreview(): void {
+		if (this.modeService.getMode() === 'Code') {
+			return;
+		}
+
+		if (this.contextGatheringOpen) {
+			this.container.classList.add('custom-mode-ui-surface-selected');
+			if (this.selectedSurfaceId === ADD_SURFACE_ID) {
+				this.setAddSurfaceState();
+				this.clearEmbeddedUiUrl();
+				this.pushUiRuntimeLog('[surface] selected add surface');
+				return;
+			}
+			if (this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID) {
+				this.setGoalOverviewState();
+				this.clearEmbeddedUiUrl();
+				this.pushUiRuntimeLog('[surface] selected goal overview');
+				return;
+			}
+			this.setGoalOverviewState();
+			this.clearEmbeddedUiUrl();
+			this.pushUiRuntimeLog('[surface] context gathering open');
+			return;
+		}
+
 		if (this.selectedSurfaceId === ADD_SURFACE_ID) {
+			this.contextGatheringOpen = true;
+			this.persistContextGatheringOpen();
+			this.syncContextGatheringUi();
 			this.container.classList.add('custom-mode-ui-surface-selected');
 			this.setAddSurfaceState();
 			this.clearEmbeddedUiUrl();
@@ -3938,6 +4294,9 @@ class ModeShellContribution extends Disposable {
 		}
 
 		if (this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID) {
+			this.contextGatheringOpen = true;
+			this.persistContextGatheringOpen();
+			this.syncContextGatheringUi();
 			this.container.classList.add('custom-mode-ui-surface-selected');
 			this.setGoalOverviewState();
 			this.clearEmbeddedUiUrl();
@@ -3978,6 +4337,7 @@ class ModeShellContribution extends Disposable {
 		this.uiBrowserShell.classList.add('custom-mode-ui-surface-missing-url');
 		this.uiSurfaceEmptyState.classList.add('hidden');
 		this.uiSurfaceSetupDashboard.classList.remove('hidden');
+		this.setSurfaceSetupBuilderOpen(true);
 		this.uiSurfaceSetupGoalTitle.textContent = goal?.name
 			? localize('customMode.surfaceSetupGoalTitle', '{0}', goal.name)
 			: localize('customMode.surfaceSetupGoalTitleFallback', 'Create your first surface');
@@ -3988,6 +4348,7 @@ class ModeShellContribution extends Disposable {
 			? localize('customMode.surfaceSetupGoalMetric', '{0}', goal.northStarMetric)
 			: '';
 		this.uiSurfaceSetupGoalMetric.classList.toggle('hidden', !goal?.northStarMetric);
+		void this.refreshSurfaceSetupDashboard();
 	}
 
 	private setSurfaceMissingUrlState(surface: GoalSurface | undefined): void {
@@ -4068,6 +4429,7 @@ class ModeShellContribution extends Disposable {
 	private setSurfaceEmptyState(message: { readonly title: string; readonly subtitle: string } | undefined): void {
 		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-missing-url', Boolean(message));
 		this.uiSurfaceSetupDashboard.classList.add('hidden');
+		this.setSurfaceSetupBuilderOpen(false);
 		this.uiSurfaceEmptyState.classList.toggle('hidden', !message);
 		this.uiSurfaceEmptyTitle.textContent = message?.title ?? '';
 		this.uiSurfaceEmptySubtitle.textContent = message?.subtitle ?? '';

@@ -48,7 +48,7 @@ export const CustomAiEditFileToolData: IToolData = {
 		'  explanation (string, optional) One-sentence rationale shown to the human reviewer.',
 		'',
 		'If the file does not exist it will be created (including any missing parent directories).',
-		'By default, edits are proposed through the chat review flow when available; direct writes are only used when configured or when no editing session is active.',
+		'By default, edits are written directly so goal-workspace scaffolding creates usable files; configure review mode when human accept/reject is required.',
 	].join('\n'),
 	source: ToolDataSource.Internal,
 	canBeReferencedInPrompt: true,
