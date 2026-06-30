@@ -41,6 +41,7 @@ suite('CustomAiChatAgent', () => {
 		assert.match(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT, /Next\.js App Router/);
 		assert.match(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT, /swcPlugins/);
 		assert.match(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT, /data-vscode-src/);
+		assert.match(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT, /do not pause for clarifying questions/);
 	});
 
 	test('renders loaded goal workspace context for Custom AI messages', () => {
