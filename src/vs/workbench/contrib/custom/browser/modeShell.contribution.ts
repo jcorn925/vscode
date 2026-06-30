@@ -3203,6 +3203,78 @@ class ModeShellContribution extends Disposable {
 		this.refreshStartCommandHints();
 	}
 
+	private createSurfaceSetupDashboard(): HTMLElement {
+		const primaryAction = $('button.custom-mode-ui-surface-setup-primary', { type: 'button' }, localize('customMode.surfaceSetupPrimary', 'Create first surface')) as HTMLButtonElement;
+		this._register(addDisposableListener(primaryAction, 'click', () => this.draftSurfacePrompt(localize('customMode.surfaceSetupGenericSurface', 'first surface'), localize('customMode.surfaceSetupGenericWorkflow', 'the first customer-facing workflow this business needs'))));
+
+		const starterButtons = $('div.custom-mode-ui-surface-starters');
+		for (const starter of STARTER_SURFACES) {
+			const button = $('button.custom-mode-ui-surface-starter', {
+				type: 'button',
+				title: localize('customMode.surfaceStarterTitle', 'Draft a prompt for {0}', starter.name)
+			}, starter.name) as HTMLButtonElement;
+			this._register(addDisposableListener(button, 'click', () => this.draftSurfacePrompt(starter.name, starter.workflow)));
+			starterButtons.appendChild(button);
+		}
+
+		const contextList = $('ul.custom-mode-ui-surface-context-list');
+		for (const item of [
+			localize('customMode.surfaceContextAudience', 'Target customer and core pain'),
+			localize('customMode.surfaceContextOffers', 'Offers, packages, and pricing'),
+			localize('customMode.surfaceContextBooking', 'Booking and intake flow'),
+			localize('customMode.surfaceContextPayments', 'Payments, subscriptions, and cancellations'),
+			localize('customMode.surfaceContextAcquisition', 'Acquisition channels and campaigns'),
+			localize('customMode.surfaceContextOperations', 'Analytics and admin workflows'),
+		]) {
+			contextList.appendChild($('li.custom-mode-ui-surface-context-item', undefined, item));
+		}
+
+		return $('div.custom-mode-ui-surface-setup.hidden', undefined,
+			$('div.custom-mode-ui-surface-setup-inner', undefined,
+				$('div.custom-mode-ui-surface-setup-header', undefined,
+					$('div.custom-mode-ui-surface-setup-eyebrow', undefined, localize('customMode.surfaceSetupEyebrow', 'Goal workspace setup')),
+					this.uiSurfaceSetupGoalTitle,
+					this.uiSurfaceSetupGoalDescription,
+					this.uiSurfaceSetupGoalMetric
+				),
+				$('div.custom-mode-ui-surface-setup-section', undefined,
+					$('div.custom-mode-ui-surface-setup-actions', undefined, primaryAction),
+					$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupPrimaryNote', 'Start from the business job, then let the agent register and scaffold the surface.'))
+				),
+				$('div.custom-mode-ui-surface-setup-section', undefined,
+					$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupStartersTitle', 'Starter surfaces')),
+					starterButtons
+				),
+				$('div.custom-mode-ui-surface-setup-section', undefined,
+					$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupContextTitle', 'Context to gather')),
+					contextList
+				),
+				$('div.custom-mode-ui-surface-agent-note', undefined,
+					$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupAgentTitle', 'Agent handoff')),
+					$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupAgentNote', 'The agent should update workspace.goal.json, scaffold apps/<surface>, connect shared domain/events/workflows, preserve durable memory, and attach Ix metadata for code-level understanding.'))
+				)
+			)
+		);
+	}
+
+	private async draftSurfacePrompt(surfaceName: string, workflow: string): Promise<void> {
+		const prompt = localize(
+			'customMode.surfaceSetupPrompt',
+			'Create a {0} surface for this goal workspace. Register it in workspace.goal.json, scaffold the app, and connect it to the shared {1} workflow. Update shared domain/events, durable memory, and Ix metadata as needed.',
+			surfaceName,
+			workflow
+		);
+		try {
+			this.modeService.setMode('UI');
+			this.setUiChatDismissed(false);
+			await this.ensureEmbeddedChatModel('UI');
+			this.uiChatWidget.setInput(prompt);
+			this.uiChatWidget.focusInput();
+		} catch (e: unknown) {
+			this.pushUiRuntimeLog(`[surface-setup:chat] failed to draft prompt: ${String((e as Error)?.message ?? e)}`);
+		}
+	}
+
 	private updateUiProjectName(): void {
 		const folder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		const name = folder ? basename(folder) : '';
@@ -3443,18 +3515,25 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private setAddSurfaceState(): void {
-		this.setSurfaceEmptyState({
-			title: localize('customMode.addSurfaceTitle', 'Set Up Your First Surface'),
-			subtitle: localize(
-				'customMode.addSurfaceSubtitle',
-				[
-					'Use the chat to describe the business context and the first app this goal needs.',
-					'Gather: target customer, offer/packages, booking flow, payments/subscriptions, acquisition channels, analytics north-star, and admin workflows.',
-					'Common starter surfaces: Marketing Site, Booking, Client Portal, Trainer Admin, Analytics Dashboard, Content Scheduler, Ads Manager, Subscriptions, and Automations.',
-					'The agent should register each surface in workspace.goal.json, scaffold apps/<surface>, and update shared domain, events, workflows, durable memory, and Ix metadata as it goes.'
-				].join('\n\n')
-			)
-		});
+		this.setSurfaceSetupDashboardState();
+	}
+
+	private setSurfaceSetupDashboardState(): void {
+		const goal = this.goalWorkspaceService.getGoal();
+		this.uiSetup.classList.add('custom-mode-setup-hidden');
+		this.uiBrowserShell.classList.add('custom-mode-ui-surface-missing-url');
+		this.uiSurfaceEmptyState.classList.add('hidden');
+		this.uiSurfaceSetupDashboard.classList.remove('hidden');
+		this.uiSurfaceSetupGoalTitle.textContent = goal?.name
+			? localize('customMode.surfaceSetupGoalTitle', '{0}', goal.name)
+			: localize('customMode.surfaceSetupGoalTitleFallback', 'Create your first surface');
+		this.uiSurfaceSetupGoalDescription.textContent = goal?.description
+			? goal.description
+			: localize('customMode.surfaceSetupGoalDescriptionFallback', 'Define the first app this goal workspace needs, then let the agent scaffold and register it.');
+		this.uiSurfaceSetupGoalMetric.textContent = goal?.northStarMetric
+			? localize('customMode.surfaceSetupGoalMetric', 'North-star metric: {0}', goal.northStarMetric)
+			: '';
+		this.uiSurfaceSetupGoalMetric.classList.toggle('hidden', !goal?.northStarMetric);
 	}
 
 	private setSurfaceMissingUrlState(surface: GoalSurface | undefined): void {
@@ -3534,6 +3613,7 @@ class ModeShellContribution extends Disposable {
 
 	private setSurfaceEmptyState(message: { readonly title: string; readonly subtitle: string } | undefined): void {
 		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-missing-url', Boolean(message));
+		this.uiSurfaceSetupDashboard.classList.add('hidden');
 		this.uiSurfaceEmptyState.classList.toggle('hidden', !message);
 		this.uiSurfaceEmptyTitle.textContent = message?.title ?? '';
 		this.uiSurfaceEmptySubtitle.textContent = message?.subtitle ?? '';
@@ -3617,17 +3697,22 @@ class ModeShellContribution extends Disposable {
 		const goalWorkspaceState = this.goalWorkspaceService.getState();
 
 		if (!hasProject) {
+			this.uiSetup.classList.remove('custom-mode-setup-hidden');
 			this.uiStartSubtitle.textContent = '';
 			this.updateStartAppControl();
 			return;
 		}
 
-		if (goalWorkspaceState.status === 'loaded' && (goalWorkspaceState.workspace?.surfaces.length ?? 0) === 0) {
-			this.uiStartSubtitle.textContent = localize('customMode.startAppNoSurfaces', 'No app surface is registered yet. Add a surface to workspace.goal.json when there is an app to launch.');
+		if (goalWorkspaceState.status === 'loaded' && !surface) {
+			this.uiSetup.classList.add('custom-mode-setup-hidden');
+			this.uiStartSubtitle.textContent = '';
+			this.uiStartStatus.textContent = '';
+			this.uiRuntimeText.textContent = '';
 			this.updateStartAppControl();
 			return;
 		}
 
+		this.uiSetup.classList.remove('custom-mode-setup-hidden');
 		if (surface) {
 			if (!surfaceCommand) {
 				this.uiStartSubtitle.textContent = localize(
@@ -3674,7 +3759,9 @@ class ModeShellContribution extends Disposable {
 		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
 		const hints = this.lastUiStartHints;
 		const surfaceCommand = this.getSelectedSurface()?.devCommand?.trim();
-		const canStart = hasProject && Boolean(surfaceCommand || hints?.primaryRunCommand);
+		const goalWorkspaceState = this.goalWorkspaceService.getState();
+		const canUseFallbackScript = goalWorkspaceState.status !== 'loaded';
+		const canStart = hasProject && Boolean(surfaceCommand || (canUseFallbackScript && hints?.primaryRunCommand));
 		const busy = state.phase === 'installing' || state.phase === 'starting';
 		this.uiStartAppButton.disabled = !canStart || busy;
 	}
