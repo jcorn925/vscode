@@ -11,6 +11,7 @@ import { URI } from '../../../vs/base/common/uri.js';
 import { IConfigurationService } from '../../../vs/platform/configuration/common/configuration.js';
 import { IFileService } from '../../../vs/platform/files/common/files.js';
 import { ILogService } from '../../../vs/platform/log/common/log.js';
+import { IOpenerService } from '../../../vs/platform/opener/common/opener.js';
 import { IQuickInputService } from '../../../vs/platform/quickinput/common/quickInput.js';
 import { IRequestService } from '../../../vs/platform/request/common/request.js';
 import { ISecretStorageService } from '../../../vs/platform/secrets/common/secrets.js';
@@ -41,6 +42,7 @@ import {
 import { ChatErrorLevel, IChatFollowup, IChatMarkdownContent, IChatProgress } from '../../../vs/workbench/contrib/chat/common/chatService/chatService.js';
 import { IChatProgressHistoryResponseContent } from '../../../vs/workbench/contrib/chat/common/model/chatModel.js';
 import { localize } from '../../../vs/nls.js';
+import { promptForCustomAiApiKey } from './customAiApiKeyPrompt.js';
 import {
 	CUSTOM_AI_COMMAND_OPEN_OLLAMA_DOWNLOAD,
 	CUSTOM_AI_COMMAND_OPEN_OLLAMA_SETTINGS,
@@ -291,6 +293,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 		@ILogService private readonly _logService: ILogService,
 		@ISecretStorageService private readonly _secretStorage: ISecretStorageService,
 		@IQuickInputService private readonly _quickInput: IQuickInputService,
+		@IOpenerService private readonly _openerService: IOpenerService,
 		@IRequestService private readonly _requestService: IRequestService,
 		@IFileService private readonly _fileService: IFileService,
 		@IModelService private readonly _modelService: IModelService,
@@ -692,18 +695,11 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 				return true;
 			}
 		}
-		const key = await this._quickInput.input({
-			title: localize('customAi.quickInput.title', 'Custom AI — API key'),
-			prompt: options?.rejected
-				? localize('customAi.quickInput.promptRejected', 'The stored API key was rejected by the server (401). Enter a valid OpenAI-compatible API key. It is stored only on this device.')
-				: localize('customAi.quickInput.prompt', 'Enter an OpenAI-compatible API key. It is stored only on this device (same as the Command Palette command).'),
-			placeHolder: localize('customAi.quickInput.placeholder', 'API key'),
-			password: true,
-			ignoreFocusLost: true,
-		}, token);
-		if (token.isCancellationRequested) {
-			return false;
-		}
+		const openAiBase = (this._configurationService.getValue<string>('custom.ai.openaiCompatible.baseUrl') ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+		const key = await promptForCustomAiApiKey(this._quickInput, this._openerService, token, {
+			rejected: options?.rejected,
+			baseUrl: openAiBase,
+		});
 		if (key === undefined || !key.trim()) {
 			return false;
 		}

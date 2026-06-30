@@ -885,7 +885,7 @@ class ModeShellContribution extends Disposable {
 				display: none;
 				flex: 1 1 auto;
 				min-height: 0;
-				padding: 28px 32px;
+				padding: 24px 28px;
 				background: var(--vscode-editorBackground);
 				color: var(--vscode-foreground);
 				overflow: auto;
@@ -896,10 +896,21 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-inner {
+				display: grid;
+				grid-template-columns: minmax(520px, 1fr) minmax(300px, 380px);
+				gap: 24px;
+				width: min(1240px, 100%);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-main,
+			.monaco-workbench .custom-mode-ui-surface-agent-plan {
+				min-width: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-main {
 				display: flex;
 				flex-direction: column;
-				gap: 18px;
-				width: min(880px, 100%);
+				gap: 16px;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-header {
@@ -908,17 +919,55 @@ class ModeShellContribution extends Disposable {
 				gap: 6px;
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-setup-eyebrow {
+			.monaco-workbench .custom-mode-ui-surface-setup-steps {
+				display: grid;
+				grid-template-columns: repeat(4, minmax(0, 1fr));
+				gap: 1px;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 6px;
+				background: var(--vscode-panel-border);
+				overflow: hidden;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-step {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				min-width: 0;
+				padding: 9px 10px;
+				background: var(--vscode-sideBar-background);
 				color: var(--vscode-descriptionForeground);
+				font-size: 12px;
+				line-height: 1.3;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-step.active {
+				background: var(--vscode-list-activeSelectionBackground);
+				color: var(--vscode-list-activeSelectionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-step-index {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				flex: 0 0 auto;
+				width: 18px;
+				height: 18px;
+				border-radius: 50%;
+				border: 1px solid currentColor;
 				font-size: 11px;
 				font-weight: 700;
-				letter-spacing: 0;
-				text-transform: uppercase;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-step-label {
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-title {
 				color: var(--vscode-foreground);
-				font-size: 20px;
+				font-size: 22px;
 				font-weight: 650;
 				line-height: 1.25;
 			}
@@ -929,6 +978,37 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-descriptionForeground);
 				font-size: 12px;
 				line-height: 1.45;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-goal-summary {
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+				gap: 1px;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 6px;
+				background: var(--vscode-panel-border);
+				overflow: hidden;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-goal-cell {
+				min-width: 0;
+				padding: 12px 14px;
+				background: var(--vscode-sideBar-background);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-goal-label {
+				margin-bottom: 4px;
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-goal-value {
+				overflow: hidden;
+				color: var(--vscode-foreground);
+				font-size: 15px;
+				font-weight: 650;
+				text-overflow: ellipsis;
+				white-space: nowrap;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-metric {
@@ -951,14 +1031,27 @@ class ModeShellContribution extends Disposable {
 				font-weight: 650;
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-setup-actions,
+			.monaco-workbench .custom-mode-ui-surface-setup-section-heading {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-saved {
+				color: var(--vscode-testing-iconPassed);
+				font-size: 12px;
+			}
+
 			.monaco-workbench .custom-mode-ui-surface-starters {
 				display: flex;
+				align-items: center;
 				flex-wrap: wrap;
-				gap: 8px;
+				gap: 6px;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-primary,
+			.monaco-workbench .custom-mode-ui-surface-setup-secondary,
 			.monaco-workbench .custom-mode-ui-surface-starter {
 				height: 30px;
 				padding: 0 12px;
@@ -978,40 +1071,190 @@ class ModeShellContribution extends Disposable {
 				background: var(--vscode-button-hoverBackground);
 			}
 
+			.monaco-workbench .custom-mode-ui-surface-setup-secondary,
 			.monaco-workbench .custom-mode-ui-surface-starter {
 				background: var(--vscode-button-secondaryBackground);
 				color: var(--vscode-button-secondaryForeground);
 			}
 
+			.monaco-workbench .custom-mode-ui-surface-setup-secondary:hover,
 			.monaco-workbench .custom-mode-ui-surface-starter:hover {
 				background: var(--vscode-button-secondaryHoverBackground);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-context-list {
-				display: grid;
-				grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-				gap: 8px;
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
 				margin: 0;
 				padding: 0;
 				list-style: none;
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-context-item,
-			.monaco-workbench .custom-mode-ui-surface-agent-note {
+			.monaco-workbench .custom-mode-ui-surface-context-item {
+				display: grid;
+				grid-template-columns: 28px minmax(0, 1fr) auto auto;
+				align-items: center;
+				gap: 12px;
 				border: 1px solid var(--vscode-panel-border);
 				border-radius: 6px;
 				background: var(--vscode-sideBar-background);
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-context-item {
-				padding: 9px 10px;
+				padding: 10px 12px;
 				color: var(--vscode-foreground);
 				font-size: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-icon {
+				color: var(--vscode-symbolIcon-classForeground);
+				font-size: 16px;
+				text-align: center;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-title {
+				font-weight: 650;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-prompt {
+				margin-top: 2px;
+				color: var(--vscode-descriptionForeground);
 				line-height: 1.35;
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-agent-note {
-				padding: 12px;
+			.monaco-workbench .custom-mode-ui-surface-context-status {
+				color: var(--vscode-descriptionForeground);
+				white-space: nowrap;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-status.complete {
+				color: var(--vscode-testing-iconPassed);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-status.progress {
+				color: var(--vscode-charts-blue);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-action {
+				border: 0;
+				background: transparent;
+				color: var(--vscode-textLink-foreground);
+				cursor: pointer;
+				font-size: 12px;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-agent-notes {
+				display: flex;
+				flex-direction: column;
+				gap: 8px;
+				padding-top: 6px;
+				border-top: 1px solid var(--vscode-panel-border);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-agent-textarea {
+				min-height: 74px;
+				resize: vertical;
+				padding: 10px 12px;
+				border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+				border-radius: 6px;
+				background: var(--vscode-input-background);
+				color: var(--vscode-input-foreground);
+				font-family: var(--monaco-monospace-font);
+				font-size: 12px;
+				line-height: 1.4;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-actions {
+				display: flex;
+				justify-content: flex-end;
+				gap: 10px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-agent-plan {
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-agent-plan-title {
+				font-size: 16px;
+				font-weight: 650;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-agent-plan-subtitle {
+				color: var(--vscode-descriptionForeground);
+				font-size: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-plan-group,
+			.monaco-workbench .custom-mode-ui-surface-plan-next {
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 6px;
+				background: var(--vscode-sideBar-background);
+				overflow: hidden;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-plan-group-header {
+				display: flex;
+				justify-content: space-between;
+				gap: 10px;
+				padding: 9px 11px;
+				border-bottom: 1px solid var(--vscode-panel-border);
+				font-size: 12px;
+				font-weight: 650;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-plan-check {
+				color: var(--vscode-testing-iconPassed);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-plan-items {
+				display: flex;
+				flex-direction: column;
+				gap: 8px;
+				padding: 10px 11px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-plan-item {
+				display: flex;
+				gap: 9px;
+				min-width: 0;
+				font-size: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-plan-icon {
+				flex: 0 0 auto;
+				color: var(--vscode-symbolIcon-folderForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-plan-name {
+				font-weight: 650;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-plan-desc,
+			.monaco-workbench .custom-mode-ui-surface-plan-next {
+				color: var(--vscode-descriptionForeground);
+				line-height: 1.4;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-plan-next {
+				padding: 11px;
+				font-size: 12px;
+			}
+
+			@media (max-width: 960px) {
+				.monaco-workbench .custom-mode-ui-surface-setup-inner {
+					grid-template-columns: 1fr;
+				}
+
+				.monaco-workbench .custom-mode-ui-surface-context-item {
+					grid-template-columns: 28px minmax(0, 1fr);
+				}
+
+				.monaco-workbench .custom-mode-ui-surface-context-status,
+				.monaco-workbench .custom-mode-ui-surface-context-action {
+					grid-column: 2;
+					justify-self: start;
+				}
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-empty {
@@ -2367,9 +2610,9 @@ class ModeShellContribution extends Disposable {
 			role: 'tablist',
 			'aria-label': localize('customMode.surfaceSwitcherLabel', 'Goal surfaces')
 		});
-		this.uiSurfaceSetupGoalTitle = $('div.custom-mode-ui-surface-setup-title');
+		this.uiSurfaceSetupGoalTitle = $('div.custom-mode-ui-surface-goal-value');
 		this.uiSurfaceSetupGoalDescription = $('div.custom-mode-ui-surface-setup-description');
-		this.uiSurfaceSetupGoalMetric = $('div.custom-mode-ui-surface-setup-metric.hidden');
+		this.uiSurfaceSetupGoalMetric = $('div.custom-mode-ui-surface-goal-value.custom-mode-ui-surface-setup-metric.hidden');
 		this.uiSurfaceSetupDashboard = this.createSurfaceSetupDashboard();
 		this.uiSurfaceEmptyTitle = $('div.custom-mode-ui-surface-empty-title');
 		this.uiSurfaceEmptySubtitle = $('div.custom-mode-ui-surface-empty-subtitle');
@@ -3268,8 +3511,11 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private createSurfaceSetupDashboard(): HTMLElement {
-		const primaryAction = $('button.custom-mode-ui-surface-setup-primary', { type: 'button' }, localize('customMode.surfaceSetupPrimary', 'Create first surface')) as HTMLButtonElement;
+		const primaryAction = $('button.custom-mode-ui-surface-setup-primary', { type: 'button' }, localize('customMode.surfaceSetupPrimary', 'Generate Surfaces')) as HTMLButtonElement;
 		this._register(addDisposableListener(primaryAction, 'click', () => this.draftSurfacePrompt(localize('customMode.surfaceSetupGenericSurface', 'first surface'), localize('customMode.surfaceSetupGenericWorkflow', 'the first customer-facing workflow this business needs'))));
+
+		const secondaryAction = $('button.custom-mode-ui-surface-setup-secondary', { type: 'button' }, localize('customMode.surfaceSetupSecondary', 'Save Draft')) as HTMLButtonElement;
+		this._register(addDisposableListener(secondaryAction, 'click', () => this.notificationService.info(localize('customMode.surfaceSetupDraftSaved', 'Goal workspace draft saved.'))));
 
 		const starterButtons = $('div.custom-mode-ui-surface-starters');
 		for (const starter of STARTER_SURFACES) {
@@ -3283,42 +3529,182 @@ class ModeShellContribution extends Disposable {
 
 		const contextList = $('ul.custom-mode-ui-surface-context-list');
 		for (const item of [
-			localize('customMode.surfaceContextAudience', 'Target customer and core pain'),
-			localize('customMode.surfaceContextOffers', 'Offers, packages, and pricing'),
-			localize('customMode.surfaceContextBooking', 'Booking and intake flow'),
-			localize('customMode.surfaceContextPayments', 'Payments, subscriptions, and cancellations'),
-			localize('customMode.surfaceContextAcquisition', 'Acquisition channels and campaigns'),
-			localize('customMode.surfaceContextOperations', 'Analytics and admin workflows'),
+			{
+				icon: 'C',
+				title: localize('customMode.surfaceContextCustomerTitle', 'Customer & Pain'),
+				prompt: localize('customMode.surfaceContextCustomerPrompt', 'Who are your customers and what core problems are you solving?'),
+				status: localize('customMode.surfaceContextStatusComplete', 'Complete'),
+				statusClass: 'complete',
+				action: localize('customMode.surfaceContextReview', 'Review')
+			},
+			{
+				icon: '$',
+				title: localize('customMode.surfaceContextOffersTitle', 'Offers & Pricing'),
+				prompt: localize('customMode.surfaceContextOffersPrompt', 'What coaching offers, packages, and pricing do you provide?'),
+				status: localize('customMode.surfaceContextStatusComplete', 'Complete'),
+				statusClass: 'complete',
+				action: localize('customMode.surfaceContextReview', 'Review')
+			},
+			{
+				icon: 'B',
+				title: localize('customMode.surfaceContextBookingTitle', 'Booking Flow'),
+				prompt: localize('customMode.surfaceContextBookingPrompt', 'How do customers discover, book, and start their coaching?'),
+				status: localize('customMode.surfaceContextStatusProgress', 'In progress'),
+				statusClass: 'progress',
+				action: localize('customMode.surfaceContextAddDetails', 'Add details')
+			},
+			{
+				icon: 'P',
+				title: localize('customMode.surfaceContextPaymentsTitle', 'Payments'),
+				prompt: localize('customMode.surfaceContextPaymentsPrompt', 'How are payments, subscriptions, and cancellations handled?'),
+				status: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
+				statusClass: '',
+				action: localize('customMode.surfaceContextAddDetails', 'Add details')
+			},
+			{
+				icon: 'A',
+				title: localize('customMode.surfaceContextAcquisitionTitle', 'Acquisition'),
+				prompt: localize('customMode.surfaceContextAcquisitionPrompt', 'How do you attract and convert new clients?'),
+				status: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
+				statusClass: '',
+				action: localize('customMode.surfaceContextAddDetails', 'Add details')
+			},
+			{
+				icon: '#',
+				title: localize('customMode.surfaceContextAnalyticsTitle', 'Analytics'),
+				prompt: localize('customMode.surfaceContextAnalyticsPrompt', 'What metrics and reports are most important?'),
+				status: localize('customMode.surfaceContextStatusNotStarted', 'Not started'),
+				statusClass: '',
+				action: localize('customMode.surfaceContextAddDetails', 'Add details')
+			},
 		]) {
-			contextList.appendChild($('li.custom-mode-ui-surface-context-item', undefined, item));
+			const action = $('button.custom-mode-ui-surface-context-action', { type: 'button' }, item.action) as HTMLButtonElement;
+			this._register(addDisposableListener(action, 'click', () => this.draftContextPrompt(item.title, item.prompt)));
+			contextList.appendChild($('li.custom-mode-ui-surface-context-item', undefined,
+				$('div.custom-mode-ui-surface-context-icon', undefined, item.icon),
+				$('div', undefined,
+					$('div.custom-mode-ui-surface-context-title', undefined, item.title),
+					$('div.custom-mode-ui-surface-context-prompt', undefined, item.prompt)
+				),
+				$('div.custom-mode-ui-surface-context-status' + (item.statusClass ? ` ${item.statusClass}` : ''), undefined, item.status),
+				action
+			));
 		}
+
+		const createStep = (index: string, label: string, active = false) => $('div.custom-mode-ui-surface-setup-step' + (active ? ' active' : ''), undefined,
+			$('span.custom-mode-ui-surface-setup-step-index', undefined, index),
+			$('span.custom-mode-ui-surface-setup-step-label', undefined, label)
+		);
+
+		const createPlanGroup = (title: string, items: readonly [string, string, string][]) => $('div.custom-mode-ui-surface-plan-group', undefined,
+			$('div.custom-mode-ui-surface-plan-group-header', undefined,
+				$('span', undefined, title),
+				$('span.custom-mode-ui-surface-plan-check', undefined, localize('customMode.surfacePlanReady', 'Ready'))
+			),
+			$('div.custom-mode-ui-surface-plan-items', undefined,
+				...items.map(([icon, name, description]) => $('div.custom-mode-ui-surface-plan-item', undefined,
+					$('span.custom-mode-ui-surface-plan-icon', undefined, icon),
+					$('div', undefined,
+						$('div.custom-mode-ui-surface-plan-name', undefined, name),
+						$('div.custom-mode-ui-surface-plan-desc', undefined, description)
+					)
+				))
+			)
+		);
 
 		return $('div.custom-mode-ui-surface-setup.hidden', undefined,
 			$('div.custom-mode-ui-surface-setup-inner', undefined,
-				$('div.custom-mode-ui-surface-setup-header', undefined,
-					$('div.custom-mode-ui-surface-setup-eyebrow', undefined, localize('customMode.surfaceSetupEyebrow', 'Goal workspace setup')),
-					this.uiSurfaceSetupGoalTitle,
-					this.uiSurfaceSetupGoalDescription,
-					this.uiSurfaceSetupGoalMetric
+				$('div.custom-mode-ui-surface-setup-main', undefined,
+					$('div.custom-mode-ui-surface-setup-steps', undefined,
+						createStep('1', localize('customMode.surfaceSetupStepGoal', 'Goal')),
+						createStep('2', localize('customMode.surfaceSetupStepContext', 'Context'), true),
+						createStep('3', localize('customMode.surfaceSetupStepSurfaces', 'Surfaces')),
+						createStep('4', localize('customMode.surfaceSetupStepGenerate', 'Generate'))
+					),
+					$('div.custom-mode-ui-surface-setup-header', undefined,
+						$('div.custom-mode-ui-surface-setup-title', undefined, localize('customMode.surfaceSetupBuilderTitle', 'Build Goal Workspace')),
+						$('div.custom-mode-ui-surface-setup-description', undefined, localize('customMode.surfaceSetupBuilderDescription', 'Define your business goal, capture context, and generate the right surfaces.'))
+					),
+					$('div.custom-mode-ui-surface-goal-summary', undefined,
+						$('div.custom-mode-ui-surface-goal-cell', undefined,
+							$('div.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalLabel', 'Goal')),
+							this.uiSurfaceSetupGoalTitle
+						),
+						$('div.custom-mode-ui-surface-goal-cell', undefined,
+							$('div.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupMetricLabel', 'North-star metric')),
+							this.uiSurfaceSetupGoalMetric
+						)
+					),
+					$('div.custom-mode-ui-surface-setup-section', undefined,
+						$('div.custom-mode-ui-surface-setup-section-heading', undefined,
+							$('div', undefined,
+								$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupContextTitle', 'Context')),
+								$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupContextNote', 'Provide the key context areas the agent should understand.'))
+							),
+							$('div.custom-mode-ui-surface-saved', undefined, localize('customMode.surfaceSetupSaved', 'All changes saved'))
+						),
+						contextList
+					),
+					$('div.custom-mode-ui-surface-setup-section', undefined,
+						$('div.custom-mode-ui-surface-setup-section-heading', undefined,
+							$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupStartersTitle', 'Starter suggestions')),
+							starterButtons
+						)
+					),
+					$('div.custom-mode-ui-surface-agent-notes', undefined,
+						$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupAgentNotesTitle', 'Notes for the agent')),
+						$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupAgentNotesSubtitle', 'Add any additional context, constraints, or preferences.')),
+						$('textarea.custom-mode-ui-surface-agent-textarea', {
+							placeholder: localize('customMode.surfaceSetupAgentNotesPlaceholder', 'e.g. Integrate with Stripe, Mailchimp, and Zoom. Support SMS reminders.'),
+							'aria-label': localize('customMode.surfaceSetupAgentNotesAria', 'Notes for the agent')
+						}) as HTMLTextAreaElement
+					),
+					$('div.custom-mode-ui-surface-setup-actions', undefined, secondaryAction, primaryAction)
 				),
-				$('div.custom-mode-ui-surface-setup-section', undefined,
-					$('div.custom-mode-ui-surface-setup-actions', undefined, primaryAction),
-					$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupPrimaryNote', 'Start from the business job, then let the agent register and scaffold the surface.'))
-				),
-				$('div.custom-mode-ui-surface-setup-section', undefined,
-					$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupStartersTitle', 'Starter surfaces')),
-					starterButtons
-				),
-				$('div.custom-mode-ui-surface-setup-section', undefined,
-					$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupContextTitle', 'Context to gather')),
-					contextList
-				),
-				$('div.custom-mode-ui-surface-agent-note', undefined,
-					$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupAgentTitle', 'Agent handoff')),
-					$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupAgentNote', 'The agent should update workspace.goal.json, scaffold apps/<surface> as Next.js with SWC data-vscode-src mapping, connect shared domain/events/workflows, preserve durable memory, and attach Ix metadata for code-level understanding.'))
+				$('aside.custom-mode-ui-surface-agent-plan', undefined,
+					$('div.custom-mode-ui-surface-agent-plan-title', undefined, localize('customMode.surfaceSetupAgentPlanTitle', 'Agent Plan')),
+					$('div.custom-mode-ui-surface-agent-plan-subtitle', undefined, localize('customMode.surfaceSetupAgentPlanSubtitle', 'Here is what the agent will generate.')),
+					createPlanGroup(localize('customMode.surfacePlanWorkspaceTitle', 'Workspace definition'), [
+						['[]', 'workspace.goal.json', localize('customMode.surfacePlanWorkspaceDesc', 'Goal, metric, and context summary')]
+					]),
+					createPlanGroup(localize('customMode.surfacePlanAppsTitle', 'Applications (apps/)'), [
+						['<>', 'apps/marketing', localize('customMode.surfacePlanMarketingDesc', 'Marketing site and campaigns')],
+						['<>', 'apps/booking', localize('customMode.surfacePlanBookingDesc', 'Booking and client portal')],
+						['<>', 'apps/trainer-admin', localize('customMode.surfacePlanAdminDesc', 'Trainer admin and operations')]
+					]),
+					createPlanGroup(localize('customMode.surfacePlanSharedTitle', 'Shared domain'), [
+						['{}', 'domain/', localize('customMode.surfacePlanDomainDesc', 'Core entities and types')],
+						['{}', 'events/', localize('customMode.surfacePlanEventsDesc', 'Domain events')],
+						['{}', 'workflows/', localize('customMode.surfacePlanWorkflowsDesc', 'Processes and automations')]
+					]),
+					createPlanGroup(localize('customMode.surfacePlanIxTitle', 'Ix metadata'), [
+						['//', '.ix/', localize('customMode.surfacePlanIxDesc', 'Code-level understanding and map')]
+					]),
+					$('div.custom-mode-ui-surface-plan-next', undefined,
+						$('div.custom-mode-ui-surface-plan-name', undefined, localize('customMode.surfacePlanNextTitle', 'What happens next')),
+						$('div', undefined, localize('customMode.surfacePlanNextDesc', 'The agent will scaffold the workspace, generate surfaces, connect shared context, and leave you ready to review and refine.'))
+					)
 				)
 			)
 		);
+	}
+
+	private async draftContextPrompt(topic: string, prompt: string): Promise<void> {
+		const contextPrompt = localize(
+			'customMode.surfaceContextPromptDraft',
+			'Help me fill in the "{0}" context for this goal workspace. Ask only for the missing details needed to generate coherent surfaces. Starting question: {1}',
+			topic,
+			prompt
+		);
+		try {
+			this.modeService.setMode('UI');
+			this.setUiChatDismissed(false);
+			await this.ensureEmbeddedChatModel('UI');
+			this.uiChatWidget.setInput(contextPrompt);
+			this.uiChatWidget.focusInput();
+		} catch (e: unknown) {
+			this.pushUiRuntimeLog(`[surface-context:chat] failed to draft prompt: ${String((e as Error)?.message ?? e)}`);
+		}
 	}
 
 	private async draftSurfacePrompt(surfaceName: string, workflow: string): Promise<void> {
@@ -3598,7 +3984,7 @@ class ModeShellContribution extends Disposable {
 			? goal.description
 			: localize('customMode.surfaceSetupGoalDescriptionFallback', 'Define the first app this goal workspace needs, then let the agent scaffold and register it.');
 		this.uiSurfaceSetupGoalMetric.textContent = goal?.northStarMetric
-			? localize('customMode.surfaceSetupGoalMetric', 'North-star metric: {0}', goal.northStarMetric)
+			? localize('customMode.surfaceSetupGoalMetric', '{0}', goal.northStarMetric)
 			: '';
 		this.uiSurfaceSetupGoalMetric.classList.toggle('hidden', !goal?.northStarMetric);
 	}

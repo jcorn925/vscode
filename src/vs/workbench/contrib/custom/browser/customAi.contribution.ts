@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { URI } from '../../../../base/common/uri.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Disposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
@@ -16,6 +17,7 @@ import { Categories } from '../../../../platform/action/common/actionCommonCateg
 import { ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IPreferencesService } from '../../../services/preferences/common/preferences.js';
 import { WorkbenchPhase, registerWorkbenchContribution2 } from '../../../common/contributions.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
@@ -29,12 +31,15 @@ import { CustomAiChatAgent } from '../../../../../custom/ai/browser/customAiChat
 import { CustomAiChatTraceService, ICustomAiChatTraceService } from '../../../../../custom/ai/browser/customAiChatTrace.js';
 import { CustomAiEditFileTool, CustomAiEditFileToolData } from '../../../../../custom/ai/browser/customAiEditFileTool.js';
 import { CustomAiPlanCrossAppWorkflowTool, CustomAiPlanCrossAppWorkflowToolData } from '../../../../../custom/ai/browser/customAiPlanCrossAppWorkflowTool.js';
+import { promptForCustomAiApiKey } from '../../../../../custom/ai/browser/customAiApiKeyPrompt.js';
 import {
+	CUSTOM_AI_COMMAND_OPEN_API_KEY_HELP,
 	CUSTOM_AI_COMMAND_OPEN_OLLAMA_DOWNLOAD,
 	CUSTOM_AI_COMMAND_OPEN_OLLAMA_SETTINGS,
 	CUSTOM_AI_OLLAMA_DOWNLOAD_URL,
 	CUSTOM_AI_SECRET_OPENAI_API_KEY,
 	CUSTOM_AI_VENDOR,
+	getCustomAiApiKeyHelpUrl,
 } from '../../../../../custom/ai/common/customAiConstants.js';
 
 const CUSTOM_AI_SET_KEY_COMMAND = 'customAi.setOpenaiApiKey';
@@ -148,7 +153,13 @@ registerAction2(class extends Action2 {
 		const quickInput = accessor.get(IQuickInputService);
 		const secrets = accessor.get(ISecretStorageService);
 		const log = accessor.get(ILogService);
-		const input = await quickInput.input({ prompt: localize('customAi.enterApiKey', 'Enter OpenAI-compatible API key (stored locally in secret storage)') });
+		const opener = accessor.get(IOpenerService);
+		const configurationService = accessor.get(IConfigurationService);
+		const openAiBase = (configurationService.getValue<string>('custom.ai.openaiCompatible.baseUrl') ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+		const input = await promptForCustomAiApiKey(quickInput, opener, CancellationToken.None, {
+			baseUrl: openAiBase,
+			allowEmpty: true,
+		});
 		if (input === undefined) {
 			return;
 		}
@@ -158,6 +169,22 @@ registerAction2(class extends Action2 {
 		} catch (e) {
 			log.error('[CustomAi] Failed to store API key', e);
 		}
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: CUSTOM_AI_COMMAND_OPEN_API_KEY_HELP,
+			title: localize2('customAi.openApiKeyHelp', 'Custom AI: Open API Key Page'),
+			category: Categories.Preferences,
+			f1: true,
+		});
+	}
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const configurationService = accessor.get(IConfigurationService);
+		const openAiBase = (configurationService.getValue<string>('custom.ai.openaiCompatible.baseUrl') ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+		await accessor.get(IOpenerService).open(URI.parse(getCustomAiApiKeyHelpUrl(openAiBase)), { openExternal: true });
 	}
 });
 

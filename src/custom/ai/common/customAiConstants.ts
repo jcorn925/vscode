@@ -48,8 +48,30 @@ export const CUSTOM_AI_SECRET_OPENAI_API_KEY = 'custom-ai.openai-api-key';
 /** Official Ollama install page (used by setup helpers). */
 export const CUSTOM_AI_OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download';
 
+/** Default OpenAI API keys page (matches default `custom.ai.openaiCompatible.baseUrl`). */
+export const CUSTOM_AI_OPENAI_API_KEYS_URL = 'https://platform.openai.com/api-keys';
+
 export const CUSTOM_AI_COMMAND_OPEN_OLLAMA_DOWNLOAD = 'customAi.openOllamaDownload';
 export const CUSTOM_AI_COMMAND_OPEN_OLLAMA_SETTINGS = 'customAi.openOllamaSettings';
+export const CUSTOM_AI_COMMAND_OPEN_API_KEY_HELP = 'customAi.openApiKeyHelp';
+
+/** Resolves a "create API key" page for the configured OpenAI-compatible base URL. */
+export function getCustomAiApiKeyHelpUrl(baseUrl: string): string {
+	const normalized = baseUrl.toLowerCase();
+	if (normalized.includes('openrouter.ai')) {
+		return 'https://openrouter.ai/keys';
+	}
+	if (normalized.includes('together.xyz') || normalized.includes('together.ai')) {
+		return 'https://api.together.xyz/settings/api-keys';
+	}
+	if (normalized.includes('groq.com')) {
+		return 'https://console.groq.com/keys';
+	}
+	if (normalized.includes('mistral.ai')) {
+		return 'https://console.mistral.ai/api-keys/';
+	}
+	return CUSTOM_AI_OPENAI_API_KEYS_URL;
+}
 
 /** Tool id for the Custom AI file editor tool. */
 export const CUSTOM_AI_EDIT_FILE_TOOL_ID = 'customAi_editFile';
