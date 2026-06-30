@@ -55,3 +55,8 @@ export const CUSTOM_AI_COMMAND_OPEN_OLLAMA_SETTINGS = 'customAi.openOllamaSettin
 export const CUSTOM_AI_EDIT_FILE_TOOL_ID = 'customAi_editFile';
 /** Reference name used by the model (function `name` in OpenAI tool-calling). */
 export const CUSTOM_AI_EDIT_FILE_TOOL_NAME = 'editFile';
+
+/** Tool id for the Custom AI cross-app workflow planner. */
+export const CUSTOM_AI_PLAN_WORKFLOW_TOOL_ID = 'customAi_planCrossAppWorkflow';
+/** Reference name used by the model (function `name` in OpenAI tool-calling). */
+export const CUSTOM_AI_PLAN_WORKFLOW_TOOL_NAME = 'planCrossAppWorkflow';

@@ -51,13 +51,15 @@ import {
 	pickCustomAiOpenAiCompatibleModelId,
 } from '../common/customAiConstants.js';
 import { CustomAiInvalidApiKeyError, readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
-import { IGoalWorkspaceService, type GoalWorkspaceContextFile, type GoalWorkspaceState, type GoalSurface } from '../../goalWorkspace/GoalWorkspaceService.js';
+import { IGoalWorkspaceService, listGoalWorkspaceCrossAppWorkflows, type GoalWorkspaceContextFile, type GoalWorkspaceIxOverlay, type GoalWorkspaceState, type GoalSurface } from '../../goalWorkspace/GoalWorkspaceService.js';
+import { CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_LINES } from '../common/customAiSurfaceScaffold.js';
 
 const MAX_TOOL_ROUNDS = 15;
 const ATTACHMENT_MAX_BYTES_PER_FILE = 64 * 1024;
 const ATTACHMENT_MAX_BYTES_TOTAL = 256 * 1024;
 const MAX_GOAL_CONTEXT_FILES = 8;
 const MAX_GOAL_SURFACES = 12;
+const MAX_IX_SUBSYSTEMS = 8;
 
 export const CUSTOM_AI_PRODUCT_SYSTEM_PROMPT = [
 	'You are Custom AI inside a goal-workspace IDE.',
@@ -65,10 +67,11 @@ export const CUSTOM_AI_PRODUCT_SYSTEM_PROMPT = [
 	'Use the goal workspace as the product model: goal, surfaces, shared domain, events, workflows, analytics, durable memory, and Ix/code metadata.',
 	'For business/product changes, first identify the affected surfaces and shared context, then make cohesive edits across the manifest, app files, shared packages, and agent memory as needed.',
 	'When creating a new surface, register it in workspace.goal.json, scaffold its app files, connect it to relevant shared workflows/entities/events, and note memory/Ix updates.',
+	CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE,
 	'Ask one focused question only when a missing business decision would materially change the implementation.'
 ].join('\n');
 
-const CUSTOM_AI_EDIT_TOOL_SYSTEM_PROMPT = [
+export const CUSTOM_AI_EDIT_TOOL_SYSTEM_PROMPT = [
 	'You have a function-calling tool named `editFile` that modifies or creates files in the user\'s workspace.',
 	'When the user asks you to change, write, refactor, fix, or create code and the needed context is clear, call `editFile` with the new file contents.',
 	'For goal-workspace changes, plan affected surfaces and shared context before editing, then include all needed manifest, app, shared workflow/domain/event, memory, and Ix metadata updates.',
@@ -177,12 +180,11 @@ export function buildCustomAiGoalWorkspaceContextBlock(state: GoalWorkspaceState
 	}
 
 	if (state.ix.overlay) {
-		const subsystemCount = state.ix.overlay.discoveredSubsystems.length;
-		const surfaceMapCount = state.ix.overlay.surfaces.length;
-		lines.push(`- Ix overlay: ${subsystemCount} subsystem(s), ${surfaceMapCount} surface mapping(s).`);
+		lines.push(...formatGoalWorkspaceIxContextLines(state.ix.overlay));
 	}
 
 	lines.push('- For new or changed surfaces, keep workspace.goal.json, app files, shared workflows/domain/events, durable memory, and Ix metadata coherent.');
+	lines.push(`- Surface scaffold default: ${CUSTOM_AI_SURFACE_SCAFFOLD_LINES[0]}`);
 	return lines.join('\n');
 }
 
@@ -211,6 +213,72 @@ function formatSurfaceSummary(surface: GoalSurface): string {
 
 function formatContextFile(file: GoalWorkspaceContextFile): string {
 	return `${file.relativePath} (${file.kind}): ${file.summary}`;
+}
+
+export function formatGoalWorkspaceIxContextLines(overlay: GoalWorkspaceIxOverlay): string[] {
+	const lines: string[] = ['- Ix overlay:'];
+	if (overlay.generatedAt) {
+		lines.push(`  - generatedAt: ${overlay.generatedAt}`);
+	}
+	if (overlay.command) {
+		lines.push(`  - command: ${overlay.command}`);
+	}
+	if (overlay.discoveredSubsystems.length) {
+		lines.push('  - Discovered subsystems:');
+		for (const subsystem of overlay.discoveredSubsystems.slice(0, MAX_IX_SUBSYSTEMS)) {
+			const pathSuffix = subsystem.path ? ` path=${subsystem.path}` : '';
+			lines.push(`    - ${subsystem.label} (${subsystem.id})${pathSuffix}`);
+		}
+	}
+	if (overlay.surfaces.length) {
+		lines.push('  - Surface mappings:');
+		for (const mapping of overlay.surfaces.slice(0, MAX_GOAL_SURFACES)) {
+			const labels = mapping.subsystemLabels.join(', ');
+			const reason = mapping.matchReason ? ` — ${mapping.matchReason}` : '';
+			lines.push(`    - ${mapping.surfaceId} -> ${labels}${reason}`);
+		}
+	}
+	return lines;
+}
+
+export function buildCustomAiWorkflowToolHint(state: GoalWorkspaceState): string | undefined {
+	if (state.status !== 'loaded') {
+		return undefined;
+	}
+	const workflows = listGoalWorkspaceCrossAppWorkflows();
+	if (!workflows.length) {
+		return undefined;
+	}
+	const catalog = workflows.map(workflow => `${workflow.id} (${workflow.label})`).join(', ');
+	return [
+		'Before multi-surface business changes, call `planCrossAppWorkflow` with a known workflow id when one applies.',
+		`Known workflows: ${catalog}.`
+	].join(' ');
+}
+
+export interface CustomAiSystemMessageOptions {
+	readonly customSystemPrompt?: string;
+	readonly toolsEnabled: boolean;
+	readonly goalWorkspaceState: GoalWorkspaceState;
+}
+
+export function buildCustomAiSystemMessageParts(options: CustomAiSystemMessageOptions): string[] {
+	const parts: string[] = [CUSTOM_AI_PRODUCT_SYSTEM_PROMPT];
+	const goalWorkspaceContext = buildCustomAiGoalWorkspaceContextBlock(options.goalWorkspaceState);
+	if (goalWorkspaceContext) {
+		parts.push(goalWorkspaceContext);
+	}
+	const workflowHint = buildCustomAiWorkflowToolHint(options.goalWorkspaceState);
+	if (workflowHint) {
+		parts.push(workflowHint);
+	}
+	if (options.customSystemPrompt?.trim()) {
+		parts.push(options.customSystemPrompt.trim());
+	}
+	if (options.toolsEnabled) {
+		parts.push(CUSTOM_AI_EDIT_TOOL_SYSTEM_PROMPT);
+	}
+	return parts;
 }
 
 export class CustomAiChatAgent extends Disposable implements IChatAgentImplementation {
@@ -452,7 +520,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 						: localize('customAi.followup.createSurfaceTitle', 'Create first surface'),
 					message: firstSurface
 						? localize('customAi.followup.explainSurfaceMessage', 'Explain what the {0} surface does, which files own it, and how it connects to the rest of the goal workspace.', firstSurface.name)
-						: localize('customAi.followup.createSurfaceMessage', 'Create the first surface for this goal workspace. Register it in workspace.goal.json, scaffold the app, and update shared memory and Ix metadata.')
+						: localize('customAi.followup.createSurfaceMessage', 'Create the first surface for this goal workspace. Register it in workspace.goal.json, scaffold a Next.js app with SWC data-vscode-src mapping, and update shared memory and Ix metadata.')
 				}
 			];
 		}
@@ -581,18 +649,11 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 	private async _buildMessages(request: IChatAgentRequest, history: IChatAgentHistoryEntry[], token: CancellationToken): Promise<IChatMessage[]> {
 		const messages: IChatMessage[] = [];
 		const system = this._configurationService.getValue<string>('custom.ai.systemPrompt');
-		const systemParts: string[] = [];
-		systemParts.push(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT);
-		const goalWorkspaceContext = buildCustomAiGoalWorkspaceContextBlock(this._goalWorkspaceService.getState());
-		if (goalWorkspaceContext) {
-			systemParts.push(goalWorkspaceContext);
-		}
-		if (system?.trim()) {
-			systemParts.push(system);
-		}
-		if (this._configurationService.getValue<boolean>('custom.ai.tools.enabled') !== false) {
-			systemParts.push(CUSTOM_AI_EDIT_TOOL_SYSTEM_PROMPT);
-		}
+		const systemParts = buildCustomAiSystemMessageParts({
+			customSystemPrompt: system,
+			toolsEnabled: this._configurationService.getValue<boolean>('custom.ai.tools.enabled') !== false,
+			goalWorkspaceState: this._goalWorkspaceService.getState(),
+		});
 		if (systemParts.length) {
 			messages.push({ role: ChatMessageRole.System, content: [{ type: 'text', value: systemParts.join('\n\n') }] });
 		}

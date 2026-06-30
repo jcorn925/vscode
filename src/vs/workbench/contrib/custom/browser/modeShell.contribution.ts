@@ -78,6 +78,7 @@ import { IStartupGuideService } from '../../../../../custom/startup/StartupGuide
 import { IAppLaunchGuideService } from '../../../../../custom/appLaunch/AppLaunchGuideService.js';
 import { SetupGuidePanel } from './setupGuidePanel.js';
 import { IGoalWorkspaceService, type GoalSurface } from '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
+import { CUSTOM_AI_SURFACE_SETUP_PROMPT_SUFFIX } from '../../../../../custom/ai/common/customAiSurfaceScaffold.js';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
@@ -3256,19 +3257,22 @@ class ModeShellContribution extends Disposable {
 				),
 				$('div.custom-mode-ui-surface-agent-note', undefined,
 					$('div.custom-mode-ui-surface-setup-section-title', undefined, localize('customMode.surfaceSetupAgentTitle', 'Agent handoff')),
-					$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupAgentNote', 'The agent should update workspace.goal.json, scaffold apps/<surface>, connect shared domain/events/workflows, preserve durable memory, and attach Ix metadata for code-level understanding.'))
+					$('div.custom-mode-ui-surface-setup-note', undefined, localize('customMode.surfaceSetupAgentNote', 'The agent should update workspace.goal.json, scaffold apps/<surface> as Next.js with SWC data-vscode-src mapping, connect shared domain/events/workflows, preserve durable memory, and attach Ix metadata for code-level understanding.'))
 				)
 			)
 		);
 	}
 
 	private async draftSurfacePrompt(surfaceName: string, workflow: string): Promise<void> {
-		const prompt = localize(
-			'customMode.surfaceSetupPrompt',
-			'Create a {0} surface for this goal workspace. Register it in workspace.goal.json, scaffold the app, and connect it to the shared {1} workflow. Update shared domain/events, durable memory, and Ix metadata as needed.',
-			surfaceName,
-			workflow
-		);
+		const prompt = [
+			localize(
+				'customMode.surfaceSetupPrompt',
+				'Create a {0} surface for this goal workspace. Register it in workspace.goal.json, scaffold the app, and connect it to the shared {1} workflow. Update shared domain/events, durable memory, and Ix metadata as needed.',
+				surfaceName,
+				workflow
+			),
+			CUSTOM_AI_SURFACE_SETUP_PROMPT_SUFFIX,
+		].join('\n\n');
 		try {
 			this.modeService.setMode('UI');
 			this.setUiChatDismissed(false);

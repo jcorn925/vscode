@@ -102,6 +102,27 @@
 			]
 		},
 		{
+			"id": "custom-ai",
+			"title": "Custom AI goal-workspace agent",
+			"description": "Custom AI chat agent uses product system prompt, goal-workspace context, editFile and planCrossAppWorkflow tools.",
+			"paths": [
+				"src/custom/ai/browser/customAiChatAgent.ts",
+				"src/custom/ai/browser/customAiEditFileTool.ts",
+				"src/custom/ai/browser/customAiPlanCrossAppWorkflowTool.ts",
+				"src/vs/workbench/contrib/custom/browser/customAi.contribution.ts"
+			],
+			"checks": [
+				{ "type": "fileExists", "path": "src/custom/ai/browser/customAiChatAgent.ts" },
+				{ "type": "fileExists", "path": "src/custom/ai/browser/customAiPlanCrossAppWorkflowTool.ts" },
+				{ "type": "testGrep", "pattern": "CustomAiChatAgent", "script": "scripts/test.sh" },
+				{
+					"type": "rgAbsent",
+					"pattern": "You are a helpful coding assistant inside VS Code",
+					"paths": ["src/vs/workbench/contrib/custom/browser/customAi.contribution.ts"]
+				}
+			]
+		},
+		{
 			"id": "compile-health",
 			"title": "TypeScript compile health",
 			"description": "Custom fork sources type-check cleanly.",

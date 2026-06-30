@@ -255,6 +255,10 @@ const CROSS_APP_WORKFLOWS: readonly GoalWorkspaceCrossAppWorkflow[] = [
 	ADD_TRAINING_PACKAGE_WORKFLOW
 ];
 
+export function listGoalWorkspaceCrossAppWorkflows(): readonly GoalWorkspaceCrossAppWorkflow[] {
+	return CROSS_APP_WORKFLOWS;
+}
+
 export function getGoalWorkspaceCrossAppWorkflow(id: string): GoalWorkspaceCrossAppWorkflow | undefined {
 	return CROSS_APP_WORKFLOWS.find(workflow => workflow.id === id);
 }

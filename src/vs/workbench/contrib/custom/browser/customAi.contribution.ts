@@ -26,6 +26,7 @@ import { ILanguageModelToolsService } from '../../chat/common/tools/languageMode
 import { CustomAiModelProvider } from '../../../../../custom/ai/browser/customAiModelProvider.js';
 import { CustomAiChatAgent } from '../../../../../custom/ai/browser/customAiChatAgent.js';
 import { CustomAiEditFileTool, CustomAiEditFileToolData } from '../../../../../custom/ai/browser/customAiEditFileTool.js';
+import { CustomAiPlanCrossAppWorkflowTool, CustomAiPlanCrossAppWorkflowToolData } from '../../../../../custom/ai/browser/customAiPlanCrossAppWorkflowTool.js';
 import {
 	CUSTOM_AI_COMMAND_OPEN_OLLAMA_DOWNLOAD,
 	CUSTOM_AI_COMMAND_OPEN_OLLAMA_SETTINGS,
@@ -194,12 +195,15 @@ export class CustomAiContribution extends Disposable implements IWorkbenchContri
 		const editFileTool = instantiationService.createInstance(CustomAiEditFileTool);
 		this._register(toolsService.registerTool(CustomAiEditFileToolData, editFileTool));
 
+		const planWorkflowTool = instantiationService.createInstance(CustomAiPlanCrossAppWorkflowTool);
+		this._register(toolsService.registerTool(CustomAiPlanCrossAppWorkflowToolData, planWorkflowTool));
+
 		const agentImpl = this._register(instantiationService.createInstance(CustomAiChatAgent));
 		this._register(this._chatAgents.registerAgent('custom.ai', {
 			id: 'custom.ai',
 			name: 'custom',
 			fullName: localize('customAi.agentFullName', 'Custom AI'),
-			description: localize('customAi.agentDescription', 'Local and BYO-key chat using Ollama or an OpenAI-compatible API.'),
+			description: localize('customAi.agentDescription', 'Goal-workspace assistant for planning and editing related app surfaces, manifests, shared workflows, and durable memory.'),
 			when: 'config.custom.ai.enabled',
 			extensionId: nullExtensionDescription.identifier,
 			extensionVersion: nullExtensionDescription.version,
