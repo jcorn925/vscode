@@ -1166,7 +1166,7 @@ class ModeShellContribution extends Disposable {
 				padding: 0 !important;
 			}
 
-				/* When the dev server is up (or network probe succeeded), hide Start App / runtime panel over the preview. */
+				/* Hide Start App / runtime panel unless the dev server is actively starting. */
 				.monaco-workbench.custom-mode-app-reachable.custom-mode-shell-hasProject .custom-mode-ui-main > .custom-mode-setup {
 					display: none !important;
 				}
@@ -2085,7 +2085,7 @@ class ModeShellContribution extends Disposable {
 				overflow: hidden;
 			}
 
-			.monaco-workbench.custom-mode-shell-hasProject:not(.custom-mode-app-reachable) .custom-mode-setup {
+			.monaco-workbench .custom-mode-setup.custom-mode-setup-active:not(.custom-mode-setup-hidden) {
 				display: block;
 			}
 
@@ -3555,7 +3555,7 @@ class ModeShellContribution extends Disposable {
 		this.setSurfaceEmptyState({
 			title: localize('customMode.surfaceServerDownTitle', '{0} preview is not reachable', surface.name),
 			subtitle: surface.devCommand?.trim()
-				? localize('customMode.surfaceServerDownWithCommand', 'Click Start App to run `{0}`, then the preview will load {1}.', surface.devCommand.trim(), url)
+				? localize('customMode.surfaceServerDownWithCommand', 'Starting `{0}` for {1}. The preview will load when the server is ready.', surface.devCommand.trim(), url)
 				: localize('customMode.surfaceServerDownNoCommand', 'Start the surface dev server for {0}, or add devCommand to this surface in workspace.goal.json.', url)
 		});
 	}
@@ -3697,22 +3697,21 @@ class ModeShellContribution extends Disposable {
 		const goalWorkspaceState = this.goalWorkspaceService.getState();
 
 		if (!hasProject) {
-			this.uiSetup.classList.remove('custom-mode-setup-hidden');
 			this.uiStartSubtitle.textContent = '';
 			this.updateStartAppControl();
+			this.syncUiStartPanelVisibility();
 			return;
 		}
 
 		if (goalWorkspaceState.status === 'loaded' && !surface) {
-			this.uiSetup.classList.add('custom-mode-setup-hidden');
 			this.uiStartSubtitle.textContent = '';
 			this.uiStartStatus.textContent = '';
 			this.uiRuntimeText.textContent = '';
 			this.updateStartAppControl();
+			this.syncUiStartPanelVisibility();
 			return;
 		}
 
-		this.uiSetup.classList.remove('custom-mode-setup-hidden');
 		if (surface) {
 			if (!surfaceCommand) {
 				this.uiStartSubtitle.textContent = localize(
@@ -3728,18 +3727,21 @@ class ModeShellContribution extends Disposable {
 			}
 			this.updateStartAppControl();
 			this.maybeAutoStartApp();
+			this.syncUiStartPanelVisibility();
 			return;
 		}
 
 		if (!hints) {
 			this.uiStartSubtitle.textContent = localize('customMode.startAppNoPackageJson', 'Open a folder whose root contains package.json to start the app.');
 			this.updateStartAppControl();
+			this.syncUiStartPanelVisibility();
 			return;
 		}
 
 		if (!hints.primaryRunCommand) {
 			this.uiStartSubtitle.textContent = localize('customMode.startAppNoDevScript', 'Add a "dev", "start", or "web" script to package.json, then click Start App.');
 			this.updateStartAppControl();
+			this.syncUiStartPanelVisibility();
 			return;
 		}
 
@@ -3752,6 +3754,19 @@ class ModeShellContribution extends Disposable {
 			: localize('customMode.startAppSubtitleInstallRun', 'Installs dependencies if needed, then runs: {0}.{1}', cmd, urlPart);
 		this.updateStartAppControl();
 		this.maybeAutoStartApp();
+		this.syncUiStartPanelVisibility();
+	}
+
+	private syncUiStartPanelVisibility(): void {
+		const state = this.devServerService.getState();
+		const starting = state.phase === 'installing' || state.phase === 'starting';
+		this.uiSetup.classList.toggle('custom-mode-setup-active', starting);
+		this.uiSetup.classList.toggle('custom-mode-setup-hidden', !starting);
+
+		if (!starting) {
+			this.uiRuntimeText.textContent = '';
+			this.uiRuntimeLogs.length = 0;
+		}
 	}
 
 	private updateStartAppControl(): void {
@@ -4678,6 +4693,7 @@ class ModeShellContribution extends Disposable {
 
 		this.uiStartStatus.textContent = lines.join('\n');
 		this.updateStartAppControl();
+		this.syncUiStartPanelVisibility();
 		this.updateReachabilityFromState(state);
 	}
 
@@ -5111,6 +5127,9 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private pushUiRuntimeLog(line: string): void {
+		if (this.uiSetup.classList.contains('custom-mode-setup-hidden')) {
+			return;
+		}
 		this.uiRuntimeLogs.push(line);
 		if (this.uiRuntimeLogs.length > 50) {
 			this.uiRuntimeLogs.splice(0, this.uiRuntimeLogs.length - 50);

@@ -29,7 +29,29 @@ import {
 	ILanguageModelChatResponse,
 } from '../../../vs/workbench/contrib/chat/common/languageModels.js';
 import { IToolData } from '../../../vs/workbench/contrib/chat/common/tools/languageModelToolsService.js';
-import { CUSTOM_AI_MODEL_OLLAMA, CUSTOM_AI_MODEL_OPENAI, CUSTOM_AI_SECRET_OPENAI_API_KEY, CUSTOM_AI_VENDOR } from '../common/customAiConstants.js';
+import { ChatAgentLocation } from '../../../vs/workbench/contrib/chat/common/constants.js';
+import {
+	CUSTOM_AI_MODEL_OLLAMA,
+	CUSTOM_AI_MODEL_OPENAI,
+	CUSTOM_AI_SECRET_OPENAI_API_KEY,
+	CUSTOM_AI_VENDOR,
+	customAiOpenAiCompatibleIdentifier,
+	isCustomAiOpenAiCompatibleModelId,
+	parseCustomAiOpenAiApiModelId,
+} from '../common/customAiConstants.js';
+
+type OpenAiModelListEntry = {
+	id: string;
+	name?: string;
+	supported_parameters?: string[];
+	supported_endpoints?: string[];
+	architecture?: { input_modalities?: string[] };
+	top_provider?: { context_length?: number };
+};
+
+type OpenAiApiEndpoint = 'chat-completions' | 'responses';
+
+const OPENAI_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 type OpenAiCompatibleTool = {
 	type: 'function';
@@ -58,6 +80,32 @@ function isInvalidApiKeyResponse(statusCode: number, body: string): boolean {
 	return lower.includes('invalid_api_key')
 		|| lower.includes('incorrect api key')
 		|| lower.includes('invalid api key');
+}
+
+function isResponsesApiRequiredError(statusCode: number, body: string): boolean {
+	return statusCode === 404 && body.includes('v1/responses');
+}
+
+function inferOpenAiApiEndpointFromModelId(modelId: string): OpenAiApiEndpoint {
+	const id = modelId.toLowerCase();
+	if (/^(gpt-5(\.|$|-)|o[0-9](-|\.)|chatgpt-)/.test(id) || id.includes('codex')) {
+		return 'responses';
+	}
+	return 'chat-completions';
+}
+
+function resolveOpenAiApiEndpoint(modelId: string, supportedEndpoints?: readonly string[]): OpenAiApiEndpoint {
+	if (supportedEndpoints?.length) {
+		const supportsChat = supportedEndpoints.some(endpoint => endpoint.includes('chat/completions'));
+		const supportsResponses = supportedEndpoints.some(endpoint => endpoint.includes('/responses'));
+		if (supportsResponses && !supportsChat) {
+			return 'responses';
+		}
+		if (supportsChat) {
+			return 'chat-completions';
+		}
+	}
+	return inferOpenAiApiEndpointFromModelId(modelId);
 }
 
 /** Normalize OpenAI-style `delta.content` (string, array of parts, or null) to plain text. */
@@ -90,6 +138,8 @@ function openAiDeltaContentToText(delta: { content?: unknown } | undefined): str
 export class CustomAiModelProvider extends Disposable implements ILanguageModelChatProvider {
 	private readonly _onDidChange = this._register(new Emitter<void>());
 	readonly onDidChange = this._onDidChange.event;
+	private _openAiModelsCache: { cacheKey: string; fetchedAt: number; models: ILanguageModelChatMetadataAndIdentifier[] } | undefined;
+	private readonly _openAiEndpointByModelId = new Map<string, OpenAiApiEndpoint>();
 
 	constructor(
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
@@ -100,73 +150,266 @@ export class CustomAiModelProvider extends Disposable implements ILanguageModelC
 		super();
 		this._register(this._configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('custom.ai')) {
+				this._clearOpenAiModelDiscoveryCache();
+				this._onDidChange.fire();
+			}
+		}));
+		this._register(this._secretStorageService.onDidChangeSecret(key => {
+			if (key === CUSTOM_AI_SECRET_OPENAI_API_KEY) {
+				this._clearOpenAiModelDiscoveryCache();
 				this._onDidChange.fire();
 			}
 		}));
 	}
 
-	async provideLanguageModelChatInfo(_options: ILanguageModelChatInfoOptions, _token: CancellationToken): Promise<ILanguageModelChatMetadataAndIdentifier[]> {
+	async provideLanguageModelChatInfo(options: ILanguageModelChatInfoOptions, token: CancellationToken): Promise<ILanguageModelChatMetadataAndIdentifier[]> {
 		const out: ILanguageModelChatMetadataAndIdentifier[] = [];
 		const providerMode = this._configurationService.getValue<string>('custom.ai.provider') ?? 'both';
 
-		const pushOllama = () => {
-			const ollamaModel = this._configurationService.getValue<string>('custom.ai.ollama.model') ?? 'llama3.1';
+		if (providerMode === 'ollama' || providerMode === 'both') {
+			out.push(this._ollamaModelEntry());
+		}
+		if (providerMode === 'openaiCompatible' || providerMode === 'both') {
+			out.push(...await this._discoverOpenAiCompatibleModels(options, token));
+		}
+
+		return out;
+	}
+
+	private _ollamaModelEntry(): ILanguageModelChatMetadataAndIdentifier {
+		const ollamaModel = this._configurationService.getValue<string>('custom.ai.ollama.model') ?? 'llama3.1';
+		return {
+			identifier: CUSTOM_AI_MODEL_OLLAMA,
+			metadata: {
+				extension: nullExtensionDescription.identifier,
+				name: `Ollama (${ollamaModel})`,
+				id: ollamaModel,
+				vendor: CUSTOM_AI_VENDOR,
+				version: '1.0',
+				family: 'ollama',
+				maxInputTokens: 128000,
+				maxOutputTokens: 8192,
+				isDefaultForLocation: {},
+				isUserSelectable: true,
+				capabilities: { vision: false, toolCalling: true, agentMode: true },
+			},
+		};
+	}
+
+	private _clearOpenAiModelDiscoveryCache(): void {
+		this._openAiModelsCache = undefined;
+		this._openAiEndpointByModelId.clear();
+	}
+
+	private _rememberOpenAiEndpoint(apiModelId: string, endpoint: OpenAiApiEndpoint): void {
+		this._openAiEndpointByModelId.set(apiModelId, endpoint);
+	}
+
+	private _resolveOpenAiEndpoint(apiModelId: string): OpenAiApiEndpoint {
+		return this._openAiEndpointByModelId.get(apiModelId) ?? inferOpenAiApiEndpointFromModelId(apiModelId);
+	}
+
+	private _openAiFallbackEntry(apiModel: string): ILanguageModelChatMetadataAndIdentifier {
+		this._rememberOpenAiEndpoint(apiModel, resolveOpenAiApiEndpoint(apiModel));
+		return {
+			identifier: CUSTOM_AI_MODEL_OPENAI,
+			metadata: {
+				extension: nullExtensionDescription.identifier,
+				name: `OpenAI-compatible (${apiModel})`,
+				id: apiModel,
+				vendor: CUSTOM_AI_VENDOR,
+				version: '1.0',
+				family: 'openai-compatible',
+				maxInputTokens: 128000,
+				maxOutputTokens: 8192,
+				isDefaultForLocation: { [ChatAgentLocation.Chat]: true },
+				isUserSelectable: true,
+				capabilities: { vision: false, toolCalling: true, agentMode: true },
+			},
+		};
+	}
+
+	private async _discoverOpenAiCompatibleModels(options: ILanguageModelChatInfoOptions, token: CancellationToken): Promise<ILanguageModelChatMetadataAndIdentifier[]> {
+		const configuredModel = this._configurationService.getValue<string>('custom.ai.openaiCompatible.model') ?? 'gpt-4o-mini';
+		const baseUrl = this._openAiBase();
+		const apiKey = await this._secretStorageService.get(CUSTOM_AI_SECRET_OPENAI_API_KEY) ?? '';
+		const cacheKey = `${baseUrl}|${apiKey ? 'key' : 'no-key'}`;
+
+		if (this._openAiModelsCache && this._openAiModelsCache.cacheKey === cacheKey && Date.now() - this._openAiModelsCache.fetchedAt < OPENAI_MODELS_CACHE_TTL_MS) {
+			return this._openAiModelsCache.models;
+		}
+
+		if (!apiKey) {
+			if (options.silent) {
+				return [];
+			}
+			const fallback = [this._openAiFallbackEntry(configuredModel)];
+			this._openAiModelsCache = { cacheKey, fetchedAt: Date.now(), models: fallback };
+			return fallback;
+		}
+
+		try {
+			const entries = await this._fetchOpenAiModelList(baseUrl, apiKey, token);
+			const models = this._mapOpenAiModelEntries(entries, configuredModel, baseUrl);
+			if (!models.length) {
+				const fallback = [this._openAiFallbackEntry(configuredModel)];
+				this._openAiModelsCache = { cacheKey, fetchedAt: Date.now(), models: fallback };
+				return fallback;
+			}
+			this._openAiModelsCache = { cacheKey, fetchedAt: Date.now(), models };
+			return models;
+		} catch (err) {
+			this._logService.warn('[CustomAi] Failed to discover OpenAI-compatible models; using configured fallback', err);
+			const fallback = [this._openAiFallbackEntry(configuredModel)];
+			this._openAiModelsCache = { cacheKey, fetchedAt: Date.now(), models: fallback };
+			return fallback;
+		}
+	}
+
+	private _modelsDiscoveryUrl(baseUrl: string): string {
+		if (baseUrl.includes('openrouter.ai')) {
+			return `${baseUrl}/models?supported_parameters=tools`;
+		}
+		return `${baseUrl}/models`;
+	}
+
+	private async _fetchOpenAiModelList(baseUrl: string, apiKey: string, token: CancellationToken): Promise<OpenAiModelListEntry[]> {
+		const ctx = await this._requestService.request({
+			type: 'GET',
+			url: this._modelsDiscoveryUrl(baseUrl),
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${apiKey}`,
+			},
+			callSite: 'customAi.openai.models',
+		}, token);
+		if (ctx.res.statusCode && (ctx.res.statusCode < 200 || ctx.res.statusCode >= 300)) {
+			const errText = await readAllStreamText(ctx.stream, token);
+			throw new Error(`Models list failed (${ctx.res.statusCode}): ${errText.slice(0, 500)}`);
+		}
+		const text = await readAllStreamText(ctx.stream, token);
+		const json = JSON.parse(text) as { data?: OpenAiModelListEntry[]; models?: OpenAiModelListEntry[] };
+		const models = json.data ?? json.models;
+		if (!Array.isArray(models)) {
+			throw new Error('Invalid models list response format');
+		}
+		return models;
+	}
+
+	private _mapOpenAiModelEntries(entries: OpenAiModelListEntry[], configuredModel: string, baseUrl: string): ILanguageModelChatMetadataAndIdentifier[] {
+		const isOpenRouter = baseUrl.includes('openrouter.ai');
+		const filtered = entries.filter(entry => {
+			if (!entry?.id) {
+				return false;
+			}
+			if (isOpenRouter) {
+				return (entry.supported_parameters ?? []).includes('tools');
+			}
+			return this._isLikelyChatModelId(entry.id);
+		});
+
+		const seen = new Set<string>();
+		const out: ILanguageModelChatMetadataAndIdentifier[] = [];
+		for (const entry of filtered) {
+			if (seen.has(entry.id)) {
+				continue;
+			}
+			seen.add(entry.id);
+			this._rememberOpenAiEndpoint(entry.id, resolveOpenAiApiEndpoint(entry.id, entry.supported_endpoints));
+			const capabilities = this._resolveOpenAiModelCapabilities(entry, isOpenRouter);
+			if (!capabilities.toolCalling) {
+				continue;
+			}
+			const displayName = entry.name?.trim() || entry.id;
 			out.push({
-				identifier: CUSTOM_AI_MODEL_OLLAMA,
+				identifier: customAiOpenAiCompatibleIdentifier(entry.id),
 				metadata: {
 					extension: nullExtensionDescription.identifier,
-					name: `Ollama (${ollamaModel})`,
-					id: ollamaModel,
+					name: displayName,
+					id: entry.id,
 					vendor: CUSTOM_AI_VENDOR,
 					version: '1.0',
-					family: 'ollama',
-					maxInputTokens: 128000,
-					maxOutputTokens: 8192,
-					isDefaultForLocation: {},
+					family: 'openai-compatible',
+					maxInputTokens: capabilities.maxInputTokens,
+					maxOutputTokens: capabilities.maxOutputTokens,
+					isDefaultForLocation: entry.id === configuredModel ? { [ChatAgentLocation.Chat]: true } : {},
 					isUserSelectable: true,
-					capabilities: { vision: false, toolCalling: true, agentMode: true },
+					capabilities: {
+						vision: capabilities.vision,
+						toolCalling: true,
+						agentMode: true,
+					},
 				},
 			});
-		};
+		}
 
-		const pushOpenAi = () => {
-			const apiModel = this._configurationService.getValue<string>('custom.ai.openaiCompatible.model') ?? 'gpt-4o-mini';
-			out.push({
-				identifier: CUSTOM_AI_MODEL_OPENAI,
+		if (!seen.has(configuredModel)) {
+			this._rememberOpenAiEndpoint(configuredModel, resolveOpenAiApiEndpoint(configuredModel));
+			out.unshift({
+				identifier: customAiOpenAiCompatibleIdentifier(configuredModel),
 				metadata: {
 					extension: nullExtensionDescription.identifier,
-					name: `OpenAI-compatible (${apiModel})`,
-					id: apiModel,
+					name: configuredModel,
+					id: configuredModel,
 					vendor: CUSTOM_AI_VENDOR,
 					version: '1.0',
 					family: 'openai-compatible',
 					maxInputTokens: 128000,
 					maxOutputTokens: 8192,
-					isDefaultForLocation: {},
+					isDefaultForLocation: { [ChatAgentLocation.Chat]: true },
 					isUserSelectable: true,
 					capabilities: { vision: false, toolCalling: true, agentMode: true },
 				},
 			});
-		};
-
-		if (providerMode === 'ollama') {
-			pushOllama();
-		} else if (providerMode === 'openaiCompatible') {
-			pushOpenAi();
-		} else {
-			pushOllama();
-			pushOpenAi();
 		}
 
+		out.sort((a, b) => {
+			const aDefault = a.metadata.isDefaultForLocation[ChatAgentLocation.Chat] ? 0 : 1;
+			const bDefault = b.metadata.isDefaultForLocation[ChatAgentLocation.Chat] ? 0 : 1;
+			if (aDefault !== bDefault) {
+				return aDefault - bDefault;
+			}
+			return a.metadata.name.localeCompare(b.metadata.name);
+		});
+
 		return out;
+	}
+
+	private _isLikelyChatModelId(modelId: string): boolean {
+		const id = modelId.toLowerCase();
+		if (id.includes('embed') || id.includes('whisper') || id.includes('tts') || id.includes('transcribe') || id.includes('realtime') || id.includes('audio') || id.includes('dall-e') || id.includes('moderation') || id.includes('search')) {
+			return false;
+		}
+		return /^(gpt-|o[0-9]|chatgpt-)/.test(id);
+	}
+
+	private _resolveOpenAiModelCapabilities(entry: OpenAiModelListEntry, isOpenRouter: boolean): { vision: boolean; toolCalling: boolean; maxInputTokens: number; maxOutputTokens: number } {
+		if (isOpenRouter) {
+			const contextLength = entry.top_provider?.context_length ?? 128000;
+			return {
+				vision: entry.architecture?.input_modalities?.includes('image') ?? false,
+				toolCalling: (entry.supported_parameters ?? []).includes('tools'),
+				maxInputTokens: Math.max(8192, contextLength - 16000),
+				maxOutputTokens: 16000,
+			};
+		}
+		return {
+			vision: /vision|gpt-4o|gpt-4\.1|gpt-5/i.test(entry.id),
+			toolCalling: true,
+			maxInputTokens: 128000,
+			maxOutputTokens: 8192,
+		};
 	}
 
 	async sendChatRequest(modelId: string, messages: IChatMessage[], _from: ExtensionIdentifier | undefined, options: ILanguageModelChatRequestOptions, token: CancellationToken): Promise<ILanguageModelChatResponse> {
 		if (modelId === CUSTOM_AI_MODEL_OLLAMA) {
 			return this._ollamaChat(messages, options, token);
 		}
-		if (modelId === CUSTOM_AI_MODEL_OPENAI) {
-			return this._openAiCompatibleChat(messages, options, token);
+		if (isCustomAiOpenAiCompatibleModelId(modelId)) {
+			const apiModel = parseCustomAiOpenAiApiModelId(modelId)
+				?? this._configurationService.getValue<string>('custom.ai.openaiCompatible.model')
+				?? 'gpt-4o-mini';
+			return this._openAiCompatibleChat(messages, options, token, apiModel);
 		}
 		throw new Error(`Unknown Custom AI model: ${modelId}`);
 	}
@@ -186,12 +429,33 @@ export class CustomAiModelProvider extends Disposable implements ILanguageModelC
 		return raw.replace(/\/$/, '');
 	}
 
-	private async _openAiCompatibleChat(messages: IChatMessage[], options: ILanguageModelChatRequestOptions, token: CancellationToken): Promise<ILanguageModelChatResponse> {
+	private async _openAiCompatibleChat(messages: IChatMessage[], options: ILanguageModelChatRequestOptions, token: CancellationToken, model: string): Promise<ILanguageModelChatResponse> {
 		const apiKey = await this._secretStorageService.get(CUSTOM_AI_SECRET_OPENAI_API_KEY) ?? '';
 		if (!apiKey) {
 			throw new Error('OpenAI-compatible API key is not set. Use the Command Palette: "Custom AI: Set OpenAI API Key".');
 		}
-		const model = this._configurationService.getValue<string>('custom.ai.openaiCompatible.model') ?? 'gpt-4o-mini';
+
+		const endpoint = this._resolveOpenAiEndpoint(model);
+		if (endpoint === 'responses') {
+			return this._sendOpenAiResponsesRequest(apiKey, messages, options, token, model);
+		}
+
+		try {
+			return await this._sendOpenAiChatCompletionsRequest(apiKey, messages, options, token, model);
+		} catch (err) {
+			const errText = err instanceof Error ? err.message : String(err);
+			const statusMatch = /request failed \((\d+)\):/.exec(errText);
+			const statusCode = statusMatch ? Number(statusMatch[1]) : 0;
+			if (isResponsesApiRequiredError(statusCode, errText)) {
+				this._logService.info(`[CustomAi] Model ${model} requires /responses; retrying`);
+				this._rememberOpenAiEndpoint(model, 'responses');
+				return this._sendOpenAiResponsesRequest(apiKey, messages, options, token, model);
+			}
+			throw err;
+		}
+	}
+
+	private async _sendOpenAiChatCompletionsRequest(apiKey: string, messages: IChatMessage[], options: ILanguageModelChatRequestOptions, token: CancellationToken, model: string): Promise<ILanguageModelChatResponse> {
 		const url = `${this._openAiBase()}/chat/completions`;
 		const openAiMessages = toOpenAiMessages(messages);
 		const tools = options.tools as OpenAiCompatibleTool[] | undefined;
@@ -219,6 +483,30 @@ export class CustomAiModelProvider extends Disposable implements ILanguageModelC
 			throw new Error(`OpenAI-compatible request failed (${ctx.res.statusCode}): ${errText.slice(0, 500)}`);
 		}
 		return this._streamOpenAiSse(ctx.stream, token);
+	}
+
+	private async _sendOpenAiResponsesRequest(apiKey: string, messages: IChatMessage[], options: ILanguageModelChatRequestOptions, token: CancellationToken, model: string): Promise<ILanguageModelChatResponse> {
+		const url = `${this._openAiBase()}/responses`;
+		const tools = options.tools as OpenAiCompatibleTool[] | undefined;
+		const body = JSON.stringify(toResponsesRequestBody(model, messages, tools));
+		const ctx = await this._requestService.request({
+			type: 'POST',
+			url,
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${apiKey}`,
+			},
+			data: body,
+			callSite: 'customAi.openai.responses',
+		}, token);
+		if (ctx.res.statusCode && (ctx.res.statusCode < 200 || ctx.res.statusCode >= 300)) {
+			const errText = await readAllStreamText(ctx.stream, token);
+			if (isInvalidApiKeyResponse(ctx.res.statusCode, errText)) {
+				throw new CustomAiInvalidApiKeyError(ctx.res.statusCode, errText);
+			}
+			throw new Error(`OpenAI-compatible request failed (${ctx.res.statusCode}): ${errText.slice(0, 500)}`);
+		}
+		return this._streamOpenAiResponsesSse(ctx.stream, token);
 	}
 
 	private async _ollamaChat(messages: IChatMessage[], options: ILanguageModelChatRequestOptions, token: CancellationToken): Promise<ILanguageModelChatResponse> {
@@ -356,6 +644,101 @@ export class CustomAiModelProvider extends Disposable implements ILanguageModelC
 		return { stream: source.asyncIterable, result };
 	}
 
+	private _streamOpenAiResponsesSse(stream: import('../../../vs/base/common/buffer.js').VSBufferReadableStream, token: CancellationToken): ILanguageModelChatResponse {
+		const source = new AsyncIterableSource<IChatResponsePart | IChatResponsePart[]>();
+		const result = (async () => {
+			let buffer = '';
+			const toolCallAccum = new Map<number, { id?: string; name?: string; arguments: string }>();
+			const emitFunctionCall = (callId: string, name: string, args: string) => {
+				let params: Record<string, unknown> = {};
+				try {
+					params = args ? JSON.parse(args) : {};
+				} catch {
+					params = { raw: args };
+				}
+				source.emitOne({ type: 'tool_use', name, toolCallId: callId, parameters: params } satisfies IChatResponseToolUsePart);
+			};
+			const handleResponsesChunk = (json: Record<string, unknown>) => {
+				const type = json.type;
+				if (type === 'response.output_text.delta' && typeof json.delta === 'string' && json.delta) {
+					source.emitOne({ type: 'text', value: json.delta } satisfies IChatResponseTextPart);
+					return;
+				}
+				if (type === 'response.output_item.added') {
+					const item = json.item as { type?: string; name?: string; call_id?: string } | undefined;
+					if (item?.type === 'function_call' && item.call_id && item.name) {
+						const outputIndex = typeof json.output_index === 'number' ? json.output_index : 0;
+						toolCallAccum.set(outputIndex, { id: item.call_id, name: item.name, arguments: '' });
+					}
+					return;
+				}
+				if (type === 'response.function_call_arguments.delta') {
+					const outputIndex = typeof json.output_index === 'number' ? json.output_index : 0;
+					const acc = toolCallAccum.get(outputIndex);
+					if (acc && typeof json.delta === 'string') {
+						acc.arguments += json.delta;
+					}
+					return;
+				}
+				if (type === 'response.output_item.done') {
+					const item = json.item as { type?: string; name?: string; call_id?: string; arguments?: string } | undefined;
+					if (item?.type === 'function_call' && item.call_id && item.name) {
+						emitFunctionCall(item.call_id, item.name, item.arguments ?? '');
+						const outputIndex = typeof json.output_index === 'number' ? json.output_index : 0;
+						toolCallAccum.delete(outputIndex);
+					}
+				}
+			};
+			await new Promise<void>((resolve, reject) => {
+				listenStream(stream, {
+					onData: chunk => {
+						buffer += chunk.toString();
+						let idx: number;
+						while ((idx = buffer.indexOf('\n')) >= 0) {
+							const line = buffer.slice(0, idx).trimEnd();
+							buffer = buffer.slice(idx + 1);
+							if (!line.startsWith('data:')) {
+								continue;
+							}
+							const payload = line.slice(5).trim();
+							if (!payload || payload === '[DONE]') {
+								continue;
+							}
+							try {
+								handleResponsesChunk(JSON.parse(payload) as Record<string, unknown>);
+							} catch (e) {
+								this._logService.warn('[CustomAi] Failed to parse Responses SSE chunk', e);
+							}
+						}
+					},
+					onEnd: () => {
+						const tail = buffer.trim();
+						if (tail.startsWith('data:')) {
+							const payload = tail.slice(5).trim();
+							if (payload && payload !== '[DONE]') {
+								try {
+									handleResponsesChunk(JSON.parse(payload) as Record<string, unknown>);
+								} catch { /* ignore */ }
+							}
+						}
+						for (const [, acc] of toolCallAccum) {
+							if (acc.name && acc.id) {
+								emitFunctionCall(acc.id, acc.name, acc.arguments);
+							}
+						}
+						resolve();
+					},
+					onError: err => reject(err),
+				}, token);
+			});
+			source.resolve();
+		})().catch(err => {
+			this._logService.error('[CustomAi] OpenAI Responses stream failed', err);
+			source.reject(err);
+		});
+		return { stream: source.asyncIterable, result };
+	}
+
 	private _streamOllamaNdjson(stream: import('../../../vs/base/common/buffer.js').VSBufferReadableStream, token: CancellationToken): ILanguageModelChatResponse {
 		const source = new AsyncIterableSource<IChatResponsePart | IChatResponsePart[]>();
 		const result = (async () => {
@@ -473,6 +856,66 @@ export function toolsToOpenAiFunctions(tools: Iterable<IToolData>): OpenAiCompat
 		});
 	}
 	return out;
+}
+
+function toResponsesRequestBody(model: string, messages: IChatMessage[], tools?: OpenAiCompatibleTool[]): Record<string, unknown> {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const input: any[] = [];
+	let instructions: string | undefined;
+
+	for (const m of messages) {
+		if (m.role === ChatMessageRole.System) {
+			const sys = flattenText(m.content);
+			instructions = instructions ? `${instructions}\n\n${sys}` : sys;
+			continue;
+		}
+		if (m.role === ChatMessageRole.User) {
+			const { text, toolResults } = splitUserContent(m.content);
+			for (const tr of toolResults) {
+				input.push({ type: 'function_call_output', call_id: tr.toolCallId, output: flattenToolResult(tr.value) });
+			}
+			if (text) {
+				input.push({ role: 'user', content: [{ type: 'input_text', text }] });
+			}
+			continue;
+		}
+		if (m.role === ChatMessageRole.Assistant) {
+			const text = flattenText(m.content.filter(isTextMessagePart));
+			const toolCalls = m.content.filter((p): p is IChatResponseToolUsePart => p.type === 'tool_use');
+			if (text) {
+				input.push({
+					type: 'message',
+					role: 'assistant',
+					content: [{ type: 'output_text', text }],
+				});
+			}
+			for (const tc of toolCalls) {
+				input.push({
+					type: 'function_call',
+					name: tc.name,
+					arguments: JSON.stringify(tc.parameters ?? {}),
+					call_id: tc.toolCallId,
+				});
+			}
+		}
+	}
+
+	return {
+		model,
+		stream: true,
+		store: false,
+		input,
+		...(instructions ? { instructions } : {}),
+		...(tools?.length ? {
+			tools: tools.map(tool => ({
+				type: 'function',
+				name: tool.function.name,
+				description: tool.function.description,
+				parameters: tool.function.parameters ?? { type: 'object', properties: {} },
+				strict: false,
+			})),
+		} : {}),
+	};
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

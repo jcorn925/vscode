@@ -45,9 +45,10 @@ import {
 	CUSTOM_AI_COMMAND_OPEN_OLLAMA_DOWNLOAD,
 	CUSTOM_AI_COMMAND_OPEN_OLLAMA_SETTINGS,
 	CUSTOM_AI_MODEL_OLLAMA,
-	CUSTOM_AI_MODEL_OPENAI,
 	CUSTOM_AI_OLLAMA_DOWNLOAD_URL,
 	CUSTOM_AI_SECRET_OPENAI_API_KEY,
+	isCustomAiOpenAiCompatibleModelId,
+	pickCustomAiOpenAiCompatibleModelId,
 } from '../common/customAiConstants.js';
 import { CustomAiInvalidApiKeyError, readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
 
@@ -93,7 +94,7 @@ function formatCustomAiChatError(
 			ollamaModel,
 		);
 	}
-	if (modelId === CUSTOM_AI_MODEL_OPENAI) {
+	if (isCustomAiOpenAiCompatibleModelId(modelId)) {
 		return localize(
 			'customAi.error.openAiCompatibleUnreachable',
 			'Could not reach the OpenAI-compatible API at {0} (connection failed).\n\n- Check **custom.ai.openaiCompatible.baseUrl**, VPN, and corporate proxy\n- Run **Custom AI: Set OpenAI API Key** if you have not stored a key',
@@ -139,7 +140,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 				return {};
 			}
 
-			if (modelId === CUSTOM_AI_MODEL_OPENAI) {
+			if (isCustomAiOpenAiCompatibleModelId(modelId)) {
 				const keyOk = await this._ensureOpenAiApiKey(token);
 				if (!keyOk) {
 					return {
@@ -281,7 +282,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 
 			return {};
 		} catch (err) {
-			if (modelId === CUSTOM_AI_MODEL_OPENAI && err instanceof CustomAiInvalidApiKeyError && !retryAfterKeyUpdate) {
+			if (isCustomAiOpenAiCompatibleModelId(modelId) && err instanceof CustomAiInvalidApiKeyError && !retryAfterKeyUpdate) {
 				this._logService.warn('[CustomAi] OpenAI-compatible API key rejected by server', err);
 				try {
 					await this._secretStorage.delete(CUSTOM_AI_SECRET_OPENAI_API_KEY);
@@ -405,7 +406,8 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 		}
 		const mode = this._configurationService.getValue<string>('custom.ai.provider') ?? 'both';
 		if (mode === 'openaiCompatible') {
-			return CUSTOM_AI_MODEL_OPENAI;
+			const configured = this._configurationService.getValue<string>('custom.ai.openaiCompatible.model') ?? 'gpt-4o-mini';
+			return pickCustomAiOpenAiCompatibleModelId(this._languageModels.getLanguageModelIds(), configured);
 		}
 		return CUSTOM_AI_MODEL_OLLAMA;
 	}

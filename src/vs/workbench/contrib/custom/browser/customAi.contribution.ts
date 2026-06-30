@@ -65,7 +65,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		'custom.ai.defaultModelIdentifier': {
 			type: 'string',
 			default: '',
-			description: localize('custom.ai.defaultModelIdentifier', 'Optional override for the language model id (e.g. customAi:ollama or customAi:openaiCompatible). When empty, the picker selection or provider default is used.'),
+			description: localize('custom.ai.defaultModelIdentifier', 'Optional override for the language model id (e.g. customAi:ollama or customAi:openaiCompatible:gpt-4o-mini). When empty, the picker selection or provider default is used.'),
 			scope: ConfigurationScope.APPLICATION,
 		},
 		'custom.ai.ollama.baseUrl': {
@@ -89,7 +89,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		'custom.ai.openaiCompatible.model': {
 			type: 'string',
 			default: 'gpt-4o-mini',
-			description: localize('custom.ai.openaiCompatible.model', 'Model name sent to the OpenAI-compatible /chat/completions endpoint.'),
+			description: localize('custom.ai.openaiCompatible.model', 'Default OpenAI-compatible model when none is selected in the picker. Also used as a fallback if model discovery fails.'),
 			scope: ConfigurationScope.APPLICATION,
 		},
 		'custom.ai.tools.enabled': {

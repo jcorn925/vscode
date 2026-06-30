@@ -6,7 +6,7 @@
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { localize } from '../../../../nls.js';
 import { ChatMessageRole, type IChatMessage, type ILanguageModelsService } from '../../chat/common/languageModels.js';
-import { CUSTOM_AI_MODEL_OLLAMA, CUSTOM_AI_MODEL_OPENAI } from '../../../../../custom/ai/common/customAiConstants.js';
+import { CUSTOM_AI_MODEL_OLLAMA, isCustomAiOpenAiCompatibleModelId } from '../../../../../custom/ai/common/customAiConstants.js';
 import type { ProcessNoteGraph } from './processNotesTypes.js';
 import type { CustomPromptEvidencePack } from './processNotesCustomEvidence.js';
 
@@ -74,9 +74,9 @@ function tryParseSynthesisJson(text: string, fallbackGraph: ProcessNoteGraph): P
 
 function pickModelId(languageModels: ILanguageModelsService): string | undefined {
 	const ids = languageModels.getLanguageModelIds();
-	// Prefer the custom provider models when available.
-	if (ids.includes(CUSTOM_AI_MODEL_OPENAI)) {
-		return CUSTOM_AI_MODEL_OPENAI;
+	const openAi = ids.find(id => isCustomAiOpenAiCompatibleModelId(id));
+	if (openAi) {
+		return openAi;
 	}
 	if (ids.includes(CUSTOM_AI_MODEL_OLLAMA)) {
 		return CUSTOM_AI_MODEL_OLLAMA;
