@@ -9,7 +9,7 @@
  */
 export const CUSTOM_AI_SURFACE_SCAFFOLD_LINES = [
 	'Default each new web surface to a Next.js App Router app (TypeScript) unless the user explicitly asks for another stack.',
-	'When the user explicitly asks to create or scaffold a surface, proceed with sensible product defaults and call editFile; do not pause for clarifying questions about audience, first step, or workflow order unless the user requests a choice first.',
+	'When the user explicitly asks to create or scaffold a surface, proceed with sensible product defaults and use the available editing tool; do not pause for clarifying questions about audience, first step, or workflow order unless the user requests a choice first.',
 	'Scaffold under apps/<surface-id>, register path/localUrl/devCommand in workspace.goal.json, and use a unique localhost port per surface.',
 	'Enable UI source mapping in next.config.* with experimental.swcPlugins: [[path/to/swc_plugin_vscode_ui_src.wasm, { workspaceRoot: __dirname, attributeName: "data-vscode-src" }]].',
 	'When scaffolding, copy swc_plugin_vscode_ui_src.wasm into the app (for example apps/<surface-id>/swc_plugin_vscode_ui_src.wasm) or a shared tools/ folder; the user can also run **Enable component mapping for Next.js (SWC plugin)** to patch an existing next.config.',
