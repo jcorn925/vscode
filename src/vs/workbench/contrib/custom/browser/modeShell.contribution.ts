@@ -157,6 +157,7 @@ class ModeShellContribution extends Disposable {
 	private readonly uiStartStatus: HTMLElement;
 	private readonly uiRuntimeText: HTMLElement;
 	private readonly uiSurfaceSwitcher: HTMLElement;
+	private readonly topBarAddSurfaceButton: HTMLButtonElement;
 	private readonly uiSurfaceEmptyState: HTMLElement;
 	private readonly uiSurfaceEmptyTitle: HTMLElement;
 	private readonly uiSurfaceEmptySubtitle: HTMLElement;
@@ -403,15 +404,16 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-project-name {
+				flex: 0 0 auto;
 				max-width: min(240px, 28vw);
 				overflow: hidden;
 				text-overflow: ellipsis;
 				white-space: nowrap;
-				color: var(--vscode-descriptionForeground);
+				color: var(--vscode-foreground);
 				font-size: 12px;
 				font-weight: 600;
 				line-height: 1;
-				margin-right: 8px;
+				padding-right: 4px;
 			}
 
 			.monaco-workbench .custom-mode-ui-project-name.hidden {
@@ -845,6 +847,14 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-ui-surface-button.custom-mode-ui-add-surface {
 				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-top-modes .custom-mode-top-add-surface {
+				flex: 0 0 auto;
+			}
+
+			.monaco-workbench .custom-mode-top-modes .custom-mode-top-add-surface.hidden {
+				display: none;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-empty {
@@ -2116,6 +2126,7 @@ class ModeShellContribution extends Disposable {
 
 		this.modeTopBar = $('div.custom-mode-top-modes', { role: 'tablist' });
 		this.uiProjectName = $('span.custom-mode-ui-project-name.hidden');
+		this.modeTopBar.appendChild(this.uiProjectName);
 		for (const mode of ModeShellContribution.MODES) {
 			const button = $('button.custom-mode-top-tab', {
 				type: 'button',
@@ -2125,11 +2136,11 @@ class ModeShellContribution extends Disposable {
 			}, mode) as HTMLButtonElement;
 			this.topModeButtons.set(mode, button);
 			this.modeTopBar.appendChild(button);
-			if (mode === 'UI') {
-				this.modeTopBar.appendChild(this.uiProjectName);
-			}
 			this._register(addDisposableListener(button, 'click', () => this.modeService.setMode(mode)));
 		}
+		this.topBarAddSurfaceButton = this.createAddSurfaceButton();
+		this.topBarAddSurfaceButton.classList.add('hidden');
+		this.modeTopBar.appendChild(this.topBarAddSurfaceButton);
 		this.container.insertBefore(this.modeTopBar, this.container.firstChild);
 
 		this._register(toDisposable(() => this.modeTopBar.remove()));
@@ -3047,10 +3058,13 @@ class ModeShellContribution extends Disposable {
 	private syncGoalSurfaceSwitcher(): void {
 		const state = this.goalWorkspaceService.getState();
 		const surfaces = this.goalWorkspaceService.getSurfaces();
-		const hasManifestSurfaces = state.status === 'loaded' && surfaces.length > 0;
+		const goalWorkspaceLoaded = state.status === 'loaded';
+		const hasManifestSurfaces = goalWorkspaceLoaded && surfaces.length > 0;
+		this.topBarAddSurfaceButton.classList.toggle('hidden', !goalWorkspaceLoaded);
+		this.syncTopBarAddSurfaceButton();
 		this.uiSurfaceSwitcher.classList.toggle('hidden', !hasManifestSurfaces);
 
-		if (!hasManifestSurfaces) {
+		if (!goalWorkspaceLoaded) {
 			this.selectedSurfaceId = undefined;
 			this.container.classList.remove('custom-mode-ui-surface-selected');
 			this.uiSurfaceButtons.clear();
@@ -3061,6 +3075,17 @@ class ModeShellContribution extends Disposable {
 			if (!this.uiBrowserShell.classList.contains('custom-mode-ui-surface-missing-url') && activeUrl && !this.embeddedUiShowsUrl(activeUrl)) {
 				this.setEmbeddedUiUrl(activeUrl);
 			}
+			return;
+		}
+
+		if (!hasManifestSurfaces) {
+			this.selectedSurfaceId = ADD_SURFACE_ID;
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
+			this.uiSurfaceButtons.clear();
+			this.uiSurfaceSwitcher.replaceChildren();
+			this.syncTopBarAddSurfaceButton();
+			this.routeSelectedSurfacePreview();
+			this.refreshStartCommandHints();
 			return;
 		}
 
@@ -3126,36 +3151,30 @@ class ModeShellContribution extends Disposable {
 			fragment.appendChild(button);
 		}
 
-		const addSurfaceButton = this.renderAddSurfaceButton();
-		nextButtons.set(ADD_SURFACE_ID, addSurfaceButton);
-		fragment.appendChild(addSurfaceButton);
-
 		this.uiSurfaceButtons.clear();
 		for (const [id, button] of nextButtons) {
 			this.uiSurfaceButtons.set(id, button);
 		}
 		this.uiSurfaceSwitcher.replaceChildren(fragment);
+		this.syncTopBarAddSurfaceButton();
 	}
 
-	private renderAddSurfaceButton(): HTMLButtonElement {
-		let button = this.uiSurfaceButtons.get(ADD_SURFACE_ID);
-		if (!button) {
-			button = $('button.custom-mode-ui-surface-button.custom-mode-ui-add-surface', {
-				type: 'button',
-				role: 'tab'
-			}) as HTMLButtonElement;
-			this._register(addDisposableListener(button, 'click', () => this.selectGoalSurface(ADD_SURFACE_ID)));
-		}
+	private createAddSurfaceButton(): HTMLButtonElement {
+		const button = $('button.custom-mode-ui-surface-button.custom-mode-ui-add-surface.custom-mode-top-add-surface', {
+			type: 'button',
+		}) as HTMLButtonElement;
+		this._register(addDisposableListener(button, 'click', () => this.selectGoalSurface(ADD_SURFACE_ID)));
+		return button;
+	}
 
+	private syncTopBarAddSurfaceButton(): void {
 		const isActive = this.selectedSurfaceId === ADD_SURFACE_ID;
 		const label = localize('customMode.addSurfaceTab', '+ Add Surface');
 		const description = localize('customMode.addSurfaceDescription', 'Add a new business surface to this goal workspace');
-		button.textContent = label;
-		button.title = description;
-		button.classList.toggle('active', isActive);
-		button.setAttribute('aria-selected', String(isActive));
-		button.setAttribute('aria-label', description);
-		return button;
+		this.topBarAddSurfaceButton.textContent = label;
+		this.topBarAddSurfaceButton.title = description;
+		this.topBarAddSurfaceButton.classList.toggle('active', isActive);
+		this.topBarAddSurfaceButton.setAttribute('aria-label', description);
 	}
 
 	private renderGoalOverviewButton(): HTMLButtonElement {
@@ -3183,6 +3202,7 @@ class ModeShellContribution extends Disposable {
 			this.selectedSurfaceId = ADD_SURFACE_ID;
 			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
 			this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
+			this.syncTopBarAddSurfaceButton();
 			this.routeSelectedSurfacePreview();
 			this.refreshStartCommandHints();
 			return;
@@ -3192,6 +3212,7 @@ class ModeShellContribution extends Disposable {
 			this.selectedSurfaceId = GOAL_OVERVIEW_SURFACE_ID;
 			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, GOAL_OVERVIEW_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
 			this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
+			this.syncTopBarAddSurfaceButton();
 			this.routeSelectedSurfacePreview();
 			this.refreshStartCommandHints();
 			return;
@@ -3205,6 +3226,7 @@ class ModeShellContribution extends Disposable {
 		this.selectedSurfaceId = surface.id;
 		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
 		this.renderGoalSurfaceButtons(this.goalWorkspaceService.getSurfaces());
+		this.syncTopBarAddSurfaceButton();
 		this.routeSelectedSurfacePreview();
 		this.refreshStartCommandHints();
 	}
@@ -3266,10 +3288,15 @@ class ModeShellContribution extends Disposable {
 
 	private setAddSurfaceState(): void {
 		this.setSurfaceEmptyState({
-			title: localize('customMode.addSurfaceTitle', 'Add a Surface'),
+			title: localize('customMode.addSurfaceTitle', 'Set Up Your First Surface'),
 			subtitle: localize(
 				'customMode.addSurfaceSubtitle',
-				'Describe the business job this surface should handle. The agent should register it in workspace.goal.json, scaffold its app files, and update related domain, event, analytics, and admin surfaces in one plan.'
+				[
+					'Use the chat to describe the business context and the first app this goal needs.',
+					'Gather: target customer, offer/packages, booking flow, payments/subscriptions, acquisition channels, analytics north-star, and admin workflows.',
+					'Common starter surfaces: Marketing Site, Booking, Client Portal, Trainer Admin, Analytics Dashboard, Content Scheduler, Ads Manager, Subscriptions, and Automations.',
+					'The agent should register each surface in workspace.goal.json, scaffold apps/<surface>, and update shared domain, events, workflows, durable memory, and Ix metadata as it goes.'
+				].join('\n\n')
 			)
 		});
 	}
