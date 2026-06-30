@@ -376,6 +376,11 @@ class ModeShellContribution extends Disposable {
 				-webkit-app-region: no-drag;
 			}
 
+			/* Native macOS traffic lights sit in the top-left corner and overlay our shell bar. */
+			.monaco-workbench.custom-mode-shell-enabled.border.mac:not(.fullscreen) > .custom-mode-top-modes {
+				padding-left: calc(70px + 12px);
+			}
+
 			/*
 			 * The quick input widget (Cmd+P, command palette, etc.) is positioned absolutely against
 			 * the workbench root with an inline 'top' equal to the title bar offset. That offset does
