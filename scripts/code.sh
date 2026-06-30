@@ -58,8 +58,25 @@ function code() {
 		DISABLE_GIT_EXTENSIONS=""
 	fi
 
+	# Open the repo root by default, but not when the caller passes folder/file paths.
+	OPEN_ARGS=()
+	if [[ $# -eq 0 ]]; then
+		OPEN_ARGS+=(.)
+	else
+		has_open_target=false
+		for arg in "$@"; do
+			case "$arg" in
+				-*) ;;
+				*) has_open_target=true; break ;;
+			esac
+		done
+		if [[ "$has_open_target" == false ]]; then
+			OPEN_ARGS+=(.)
+		fi
+	fi
+
 	# Launch Code
-	exec "$CODE" . $DISABLE_TEST_EXTENSION $DISABLE_GIT_EXTENSIONS "$@"
+	exec "$CODE" "${OPEN_ARGS[@]}" $DISABLE_TEST_EXTENSION $DISABLE_GIT_EXTENSIONS "$@"
 }
 
 function code-wsl()

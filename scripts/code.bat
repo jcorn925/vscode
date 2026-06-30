@@ -33,8 +33,19 @@ for %%A in (%*) do (
 	)
 )
 
+:: Open the repo root by default, but not when the caller passes folder/file paths.
+setlocal EnableDelayedExpansion
+set OPEN_FOLDER=.
+set HAS_OPEN_TARGET=0
+for %%A in (%*) do (
+	set "ARG=%%~A"
+	if not "!ARG:~0,1!"=="-" set HAS_OPEN_TARGET=1
+)
+if !HAS_OPEN_TARGET!==1 set OPEN_FOLDER=
+
 :: Launch Code
-%CODE% . %DISABLE_TEST_EXTENSION% %*
+%CODE% !OPEN_FOLDER! %DISABLE_TEST_EXTENSION% %*
+endlocal
 goto end
 
 :builtin
