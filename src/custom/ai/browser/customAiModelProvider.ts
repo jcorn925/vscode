@@ -32,7 +32,6 @@ import { IToolData } from '../../../vs/workbench/contrib/chat/common/tools/langu
 import { ChatAgentLocation } from '../../../vs/workbench/contrib/chat/common/constants.js';
 import {
 	CUSTOM_AI_MODEL_OLLAMA,
-	CUSTOM_AI_MODEL_OPENAI,
 	CUSTOM_AI_SECRET_OPENAI_API_KEY,
 	CUSTOM_AI_VENDOR,
 	customAiOpenAiCompatibleIdentifier,
@@ -52,6 +51,13 @@ type OpenAiModelListEntry = {
 type OpenAiApiEndpoint = 'chat-completions' | 'responses';
 
 const OPENAI_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
+const OPENAI_COMPATIBLE_DEFAULT_MODELS = [
+	'gpt-4o-mini',
+	'gpt-4.1',
+	'gpt-4.1-mini',
+	'gpt-4o',
+	'o3-mini',
+] as const;
 
 type OpenAiCompatibleTool = {
 	type: 'function';
@@ -209,24 +215,47 @@ export class CustomAiModelProvider extends Disposable implements ILanguageModelC
 		return this._openAiEndpointByModelId.get(apiModelId) ?? inferOpenAiApiEndpointFromModelId(apiModelId);
 	}
 
-	private _openAiFallbackEntry(apiModel: string): ILanguageModelChatMetadataAndIdentifier {
+	private _openAiFallbackEntry(apiModel: string, options?: { readonly isDefault?: boolean }): ILanguageModelChatMetadataAndIdentifier {
 		this._rememberOpenAiEndpoint(apiModel, resolveOpenAiApiEndpoint(apiModel));
 		return {
-			identifier: CUSTOM_AI_MODEL_OPENAI,
+			identifier: customAiOpenAiCompatibleIdentifier(apiModel),
 			metadata: {
 				extension: nullExtensionDescription.identifier,
-				name: `OpenAI-compatible (${apiModel})`,
+				name: apiModel,
 				id: apiModel,
 				vendor: CUSTOM_AI_VENDOR,
 				version: '1.0',
 				family: 'openai-compatible',
 				maxInputTokens: 128000,
 				maxOutputTokens: 8192,
-				isDefaultForLocation: { [ChatAgentLocation.Chat]: true },
+				isDefaultForLocation: options?.isDefault ? { [ChatAgentLocation.Chat]: true } : {},
 				isUserSelectable: true,
 				capabilities: { vision: false, toolCalling: true, agentMode: true },
 			},
 		};
+	}
+
+	private _openAiConfiguredCatalog(configuredModel: string): ILanguageModelChatMetadataAndIdentifier[] {
+		const ids = [configuredModel, ...OPENAI_COMPATIBLE_DEFAULT_MODELS].filter((id, index, all) => id && all.indexOf(id) === index);
+		return ids.map(id => this._openAiFallbackEntry(id, { isDefault: id === configuredModel }));
+	}
+
+	private _mergeOpenAiModelCatalog(configuredModel: string, discovered: ILanguageModelChatMetadataAndIdentifier[]): ILanguageModelChatMetadataAndIdentifier[] {
+		const byId = new Map<string, ILanguageModelChatMetadataAndIdentifier>();
+		for (const entry of this._openAiConfiguredCatalog(configuredModel)) {
+			byId.set(entry.metadata.id, entry);
+		}
+		for (const entry of discovered) {
+			byId.set(entry.metadata.id, entry);
+		}
+		return Array.from(byId.values()).sort((a, b) => {
+			const aDefault = a.metadata.isDefaultForLocation[ChatAgentLocation.Chat] ? 0 : 1;
+			const bDefault = b.metadata.isDefaultForLocation[ChatAgentLocation.Chat] ? 0 : 1;
+			if (aDefault !== bDefault) {
+				return aDefault - bDefault;
+			}
+			return a.metadata.name.localeCompare(b.metadata.name);
+		});
 	}
 
 	private async _discoverOpenAiCompatibleModels(options: ILanguageModelChatInfoOptions, token: CancellationToken): Promise<ILanguageModelChatMetadataAndIdentifier[]> {
@@ -240,19 +269,16 @@ export class CustomAiModelProvider extends Disposable implements ILanguageModelC
 		}
 
 		if (!apiKey) {
-			if (options.silent) {
-				return [];
-			}
-			const fallback = [this._openAiFallbackEntry(configuredModel)];
+			const fallback = this._openAiConfiguredCatalog(configuredModel);
 			this._openAiModelsCache = { cacheKey, fetchedAt: Date.now(), models: fallback };
 			return fallback;
 		}
 
 		try {
 			const entries = await this._fetchOpenAiModelList(baseUrl, apiKey, token);
-			const models = this._mapOpenAiModelEntries(entries, configuredModel, baseUrl);
+			const models = this._mergeOpenAiModelCatalog(configuredModel, this._mapOpenAiModelEntries(entries, configuredModel, baseUrl));
 			if (!models.length) {
-				const fallback = [this._openAiFallbackEntry(configuredModel)];
+				const fallback = this._openAiConfiguredCatalog(configuredModel);
 				this._openAiModelsCache = { cacheKey, fetchedAt: Date.now(), models: fallback };
 				return fallback;
 			}
@@ -260,7 +286,7 @@ export class CustomAiModelProvider extends Disposable implements ILanguageModelC
 			return models;
 		} catch (err) {
 			this._logService.warn('[CustomAi] Failed to discover OpenAI-compatible models; using configured fallback', err);
-			const fallback = [this._openAiFallbackEntry(configuredModel)];
+			const fallback = this._openAiConfiguredCatalog(configuredModel);
 			this._openAiModelsCache = { cacheKey, fetchedAt: Date.now(), models: fallback };
 			return fallback;
 		}

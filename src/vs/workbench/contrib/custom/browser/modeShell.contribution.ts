@@ -2301,7 +2301,7 @@ class ModeShellContribution extends Disposable {
 		this.container.insertBefore(this.modeTopBar, this.container.firstChild);
 
 		this._register(toDisposable(() => this.modeTopBar.remove()));
-		queueMicrotask(() => this.layoutService.layout());
+		this.setupGridResizeRelayout();
 
 		this.modeSurface = $('div.custom-mode-surface');
 
@@ -3014,6 +3014,64 @@ class ModeShellContribution extends Disposable {
 			this.scheduleEmbeddedUiDevServerProbe();
 		} else {
 			this.uiDevServerProbeScheduler.cancel();
+		}
+
+		// UI/Process hide `.monaco-grid-view` (display:none). Re-layout when switching back to Code
+		// so the integrated terminal picks up the real panel width instead of stale cols.
+		this.scheduleWorkbenchRelayout();
+	}
+
+	private setupGridResizeRelayout(): void {
+		const gridView = this.container.querySelector(':scope > .monaco-grid-view');
+		if (!(gridView instanceof HTMLElement)) {
+			queueMicrotask(() => this.scheduleWorkbenchRelayout());
+			return;
+		}
+
+		let lastObservedWidth = 0;
+		let lastObservedHeight = 0;
+		const observer = new ResizeObserver((entries) => {
+			const entry = entries[0];
+			const width = Math.round(entry?.contentRect?.width ?? 0);
+			const height = Math.round(entry?.contentRect?.height ?? 0);
+			if (width <= 0 || height <= 0) {
+				return;
+			}
+			if (width === lastObservedWidth && height === lastObservedHeight) {
+				return;
+			}
+			lastObservedWidth = width;
+			lastObservedHeight = height;
+			this.scheduleWorkbenchRelayout();
+		});
+		observer.observe(gridView);
+		this._register(toDisposable(() => observer.disconnect()));
+		queueMicrotask(() => this.scheduleWorkbenchRelayout());
+	}
+
+	private scheduleWorkbenchRelayout(): void {
+		queueMicrotask(() => {
+			this.layoutService.layout();
+			requestAnimationFrame(() => {
+				this.layoutService.layout();
+				if (this.modeService.getMode() === 'Code') {
+					this.relayoutTerminalInstances();
+				}
+			});
+		});
+	}
+
+	private relayoutTerminalInstances(): void {
+		for (const instance of this.terminalService.instances) {
+			const container = instance.domElement?.parentElement;
+			if (!(container instanceof HTMLElement)) {
+				continue;
+			}
+			const width = container.clientWidth;
+			const height = container.clientHeight;
+			if (width > 0 && height > 0) {
+				instance.layout({ width, height });
+			}
 		}
 	}
 

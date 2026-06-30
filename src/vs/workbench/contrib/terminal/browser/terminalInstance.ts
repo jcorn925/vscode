@@ -1995,7 +1995,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	}
 
 	layout(dimension: dom.Dimension): void {
-		this._lastLayoutDimensions = dimension;
 		if (this.disableLayout) {
 			return;
 		}
@@ -2005,6 +2004,18 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		if (dimension.width <= 0 || dimension.height <= 0) {
 			return;
 		}
+
+		// When an ancestor was `display: none` (e.g. custom mode shell hiding the workbench grid),
+		// the parent layout pass can still supply a stale width while the container has since grown.
+		if (this._container && this._isVisible) {
+			const clientWidth = this._container.clientWidth;
+			const clientHeight = this._container.clientHeight;
+			if (clientWidth > dimension.width) {
+				dimension = new dom.Dimension(clientWidth, Math.max(dimension.height, clientHeight));
+			}
+		}
+
+		this._lastLayoutDimensions = dimension;
 
 		// Evaluate columns and rows, exclude the wrapper element's margin
 		const terminalWidth = this._evaluateColsAndRows(dimension.width, dimension.height);
