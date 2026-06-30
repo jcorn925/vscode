@@ -3628,7 +3628,8 @@ class ModeShellContribution extends Disposable {
 					$('div.custom-mode-ui-surface-goal-summary', undefined,
 						$('div.custom-mode-ui-surface-goal-cell', undefined,
 							$('div.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalLabel', 'Goal')),
-							this.uiSurfaceSetupGoalTitle
+							this.uiSurfaceSetupGoalTitle,
+							this.uiSurfaceSetupGoalDescription
 						),
 						$('div.custom-mode-ui-surface-goal-cell', undefined,
 							$('div.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupMetricLabel', 'North-star metric')),
