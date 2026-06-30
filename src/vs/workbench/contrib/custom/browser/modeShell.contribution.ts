@@ -84,6 +84,16 @@ const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
 const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
 const GOAL_OVERVIEW_SURFACE_ID = '__goal_overview__';
 const ADD_SURFACE_ID = '__add_surface__';
+const STARTER_SURFACES: readonly { readonly name: string; readonly workflow: string }[] = [
+	{ name: 'Marketing Site', workflow: 'public acquisition, offers, lead capture, and conversion tracking' },
+	{ name: 'Booking', workflow: 'package selection, scheduling, payments, and customer intake' },
+	{ name: 'Client Portal', workflow: 'client communication, plans, progress, and account access' },
+	{ name: 'Trainer Admin', workflow: 'coach operations, client management, sessions, and follow-ups' },
+	{ name: 'Analytics', workflow: 'conversion funnels, retention, revenue, and north-star reporting' },
+	{ name: 'Content Scheduler', workflow: 'social posts, campaigns, publishing cadence, and performance review' },
+	{ name: 'Ads Manager', workflow: 'campaign setup, audience targeting, creative testing, and spend analysis' },
+	{ name: 'Subscriptions', workflow: 'plans, billing status, cancellations, and lifecycle events' },
+];
 
 /**
  * Stringify the shape of an ix JSON response for diagnostic logging when discovery
@@ -158,6 +168,10 @@ class ModeShellContribution extends Disposable {
 	private readonly uiRuntimeText: HTMLElement;
 	private readonly uiSurfaceSwitcher: HTMLElement;
 	private readonly topBarAddSurfaceButton: HTMLButtonElement;
+	private readonly uiSurfaceSetupDashboard: HTMLElement;
+	private readonly uiSurfaceSetupGoalTitle: HTMLElement;
+	private readonly uiSurfaceSetupGoalDescription: HTMLElement;
+	private readonly uiSurfaceSetupGoalMetric: HTMLElement;
 	private readonly uiSurfaceEmptyState: HTMLElement;
 	private readonly uiSurfaceEmptyTitle: HTMLElement;
 	private readonly uiSurfaceEmptySubtitle: HTMLElement;
@@ -855,6 +869,143 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-top-modes .custom-mode-top-add-surface.hidden {
 				display: none;
+			}
+
+			.monaco-workbench .custom-mode-setup.custom-mode-setup-hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup {
+				display: none;
+				flex: 1 1 auto;
+				min-height: 0;
+				padding: 28px 32px;
+				background: var(--vscode-editorBackground);
+				color: var(--vscode-foreground);
+				overflow: auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup:not(.hidden) {
+				display: block;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-inner {
+				display: flex;
+				flex-direction: column;
+				gap: 18px;
+				width: min(880px, 100%);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-header {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-eyebrow {
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+				font-weight: 700;
+				letter-spacing: 0;
+				text-transform: uppercase;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-title {
+				color: var(--vscode-foreground);
+				font-size: 20px;
+				font-weight: 650;
+				line-height: 1.25;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-description,
+			.monaco-workbench .custom-mode-ui-surface-setup-metric,
+			.monaco-workbench .custom-mode-ui-surface-setup-note {
+				color: var(--vscode-descriptionForeground);
+				font-size: 12px;
+				line-height: 1.45;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-metric {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-metric:not(.hidden) {
+				display: block;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-section {
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+				padding-top: 2px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-section-title {
+				font-size: 12px;
+				font-weight: 650;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-actions,
+			.monaco-workbench .custom-mode-ui-surface-starters {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-primary,
+			.monaco-workbench .custom-mode-ui-surface-starter {
+				height: 30px;
+				padding: 0 12px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-button-border, transparent);
+				cursor: pointer;
+				font-size: 12px;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-primary {
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-primary:hover {
+				background: var(--vscode-button-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter {
+				background: var(--vscode-button-secondaryBackground);
+				color: var(--vscode-button-secondaryForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter:hover {
+				background: var(--vscode-button-secondaryHoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-list {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+				gap: 8px;
+				margin: 0;
+				padding: 0;
+				list-style: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-item,
+			.monaco-workbench .custom-mode-ui-surface-agent-note {
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 6px;
+				background: var(--vscode-sideBar-background);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-item {
+				padding: 9px 10px;
+				color: var(--vscode-foreground);
+				font-size: 12px;
+				line-height: 1.35;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-agent-note {
+				padding: 12px;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-empty {
@@ -2210,6 +2361,10 @@ class ModeShellContribution extends Disposable {
 			role: 'tablist',
 			'aria-label': localize('customMode.surfaceSwitcherLabel', 'Goal surfaces')
 		});
+		this.uiSurfaceSetupGoalTitle = $('div.custom-mode-ui-surface-setup-title');
+		this.uiSurfaceSetupGoalDescription = $('div.custom-mode-ui-surface-setup-description');
+		this.uiSurfaceSetupGoalMetric = $('div.custom-mode-ui-surface-setup-metric.hidden');
+		this.uiSurfaceSetupDashboard = this.createSurfaceSetupDashboard();
 		this.uiSurfaceEmptyTitle = $('div.custom-mode-ui-surface-empty-title');
 		this.uiSurfaceEmptySubtitle = $('div.custom-mode-ui-surface-empty-subtitle');
 		this.uiSurfaceEmptyState = $('div.custom-mode-ui-surface-empty.hidden', undefined,
@@ -2218,6 +2373,7 @@ class ModeShellContribution extends Disposable {
 				this.uiSurfaceEmptySubtitle
 			)
 		);
+		this.uiBrowserShell.appendChild(this.uiSurfaceSetupDashboard);
 		this.uiBrowserShell.appendChild(this.uiSurfaceEmptyState);
 		this.uiBrowserShell.appendChild(this.uiBrowser);
 
