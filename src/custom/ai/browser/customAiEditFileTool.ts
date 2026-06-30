@@ -29,6 +29,7 @@ import {
 	ToolProgress,
 } from '../../../vs/workbench/contrib/chat/common/tools/languageModelToolsService.js';
 import { CUSTOM_AI_EDIT_FILE_TOOL_ID, CUSTOM_AI_EDIT_FILE_TOOL_NAME } from '../common/customAiConstants.js';
+import { ICustomAiChatTraceService } from './customAiChatTrace.js';
 
 export const CustomAiEditFileToolData: IToolData = {
 	id: CUSTOM_AI_EDIT_FILE_TOOL_ID,
@@ -88,6 +89,7 @@ export class CustomAiEditFileTool implements IToolImpl {
 		@ICodeMapperService private readonly _codeMapperService: ICodeMapperService,
 		@ILogService private readonly _logService: ILogService,
 		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService,
+		@ICustomAiChatTraceService private readonly _traceService: ICustomAiChatTraceService,
 	) { }
 
 	async prepareToolInvocation(_context: IToolInvocationPreparationContext, _token: CancellationToken): Promise<IPreparedToolInvocation | undefined> {
@@ -100,34 +102,74 @@ export class CustomAiEditFileTool implements IToolImpl {
 		const code = typeof params.code === 'string' ? params.code : undefined;
 		const explanation = typeof params.explanation === 'string' ? params.explanation : undefined;
 		if (!rawUri) {
+			this._traceService.traceEditEvent('edit_file.failed', { reason: 'missingUri' });
 			return errorResult('Missing required argument: uri');
 		}
 		if (code === undefined) {
+			this._traceService.traceEditEvent('edit_file.failed', { reason: 'missingCode', uri: rawUri });
 			return errorResult('Missing required argument: code');
 		}
 
 		const uri = this._resolveUri(rawUri);
 		if (!uri) {
+			this._traceService.traceEditEvent('edit_file.failed', { reason: 'unresolvedUri', uri: rawUri });
 			return errorResult(`Could not resolve "${rawUri}" to a workspace file. Pass an absolute path or workspace-relative path.`);
 		}
 
 		const mode = this._resolveMode();
+		const startedAt = Date.now();
+		this._traceService.traceEditEvent('edit_file.started', {
+			uri: uri.toString(),
+			mode,
+			codeChars: code.length,
+			hasExplanation: Boolean(explanation?.trim()),
+			chatRequestId: invocation.chatRequestId,
+			modelId: invocation.modelId,
+		});
 
 		try {
 			if (mode === 'direct') {
 				await this._applyDirect(uri, code);
+				this._traceService.traceEditEvent('edit_file.direct_write', {
+					uri: uri.toString(),
+					mode,
+					durationMs: Date.now() - startedAt,
+					fallback: false,
+				});
 				return successResult(`Wrote ${uri.fsPath}. (apply mode: direct — no review UI)`);
 			}
 			const reviewed = await this._applyReview(uri, code, explanation, invocation, token);
 			if (reviewed === 'noEditingSession') {
 				this._logService.warn('[CustomAi] editFile: no active editing session; falling back to direct write.');
+				this._traceService.traceEditEvent('edit_file.review_unavailable', {
+					uri: uri.toString(),
+					mode,
+					durationMs: Date.now() - startedAt,
+				});
 				await this._applyDirect(uri, code);
+				this._traceService.traceEditEvent('edit_file.direct_write', {
+					uri: uri.toString(),
+					mode,
+					durationMs: Date.now() - startedAt,
+					fallback: true,
+				});
 				return successResult(`Wrote ${uri.fsPath}. (no editing session — switch chat to Edit or Agent mode for the diff/accept UI)`);
 			}
+			this._traceService.traceEditEvent('edit_file.review_proposed', {
+				uri: uri.toString(),
+				mode,
+				durationMs: Date.now() - startedAt,
+			});
 			return successResult(`Proposed edit to ${uri.fsPath}. The user can review and accept/reject the change in the chat. (apply mode: review)`);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			this._logService.error('[CustomAi] editFile failed', uri.toString(), err);
+			this._traceService.traceEditEvent('edit_file.failed', {
+				uri: uri.toString(),
+				mode,
+				durationMs: Date.now() - startedAt,
+				error: msg,
+			});
 			return errorResult(`Failed to edit ${uri.fsPath}: ${msg}`);
 		}
 	}

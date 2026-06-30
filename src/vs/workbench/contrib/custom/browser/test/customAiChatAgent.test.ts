@@ -15,6 +15,11 @@ import {
 	formatGoalWorkspaceIxContextLines,
 } from '../../../../../../custom/ai/browser/customAiChatAgent.js';
 import {
+	sanitizeTraceValue,
+	summarizeTraceMessages,
+	summarizeTraceText,
+} from '../../../../../../custom/ai/browser/customAiChatTrace.js';
+import {
 	ADD_TRAINING_PACKAGE_WORKFLOW_ID,
 	createMissingGoalWorkspaceState,
 	GOAL_WORKSPACE_IX_OVERLAY_FILE,
@@ -156,5 +161,40 @@ suite('CustomAiChatAgent', () => {
 		assert.doesNotMatch(joined, /editFile/);
 		assert.ok(!parts.includes(CUSTOM_AI_EDIT_TOOL_SYSTEM_PROMPT));
 	});
-});
 
+	test('trace sanitizer redacts secrets and summarizes content by default', () => {
+		const sanitized = sanitizeTraceValue({
+			apiKey: 'sk-abcdefghijklmnopqrstuvwxyz',
+			authorization: 'Bearer abcdefghijklmnopqrstuvwxyz',
+			prompt: 'line one\nline two',
+			uri: 'file:///workspace/apps/booking/page.tsx',
+		}) as Record<string, unknown>;
+
+		assert.strictEqual(sanitized.apiKey, '[redacted]');
+		assert.strictEqual(sanitized.authorization, '[redacted]');
+		assert.strictEqual(sanitized.prompt, 17);
+		assert.strictEqual(sanitized.uri, 'file:///workspace/apps/booking/page.tsx');
+	});
+
+	test('trace sanitizer can include capped snippets when explicitly enabled', () => {
+		const summary = summarizeTraceText('hello sk-abcdefghijklmnopqrstuvwxyz world', true, 64);
+
+		assert.strictEqual(summary.chars, 41);
+		assert.strictEqual(summary.snippet, 'hello [redacted] world');
+		assert.strictEqual(summary.truncated, false);
+	});
+
+	test('trace message summary counts text and tool exchange shape', () => {
+		const summary = summarizeTraceMessages([
+			{ role: 'system', content: [{ type: 'text', value: 'system' }] },
+			{ role: 'user', content: [{ type: 'text', value: 'create booking' }] },
+			{ role: 'assistant', content: [{ type: 'tool_use', value: undefined }] },
+			{ role: 'user', content: [{ type: 'tool_result', value: [{ type: 'text', value: 'ok' }] }] },
+		]);
+
+		assert.strictEqual(summary.messageCount, 4);
+		assert.strictEqual(summary.textChars, 20);
+		assert.strictEqual(summary.toolUseCount, 1);
+		assert.strictEqual(summary.toolResultCount, 1);
+	});
+});

@@ -10,6 +10,7 @@ import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { IConfigurationRegistry, Extensions as ConfigurationExtensions, ConfigurationScope } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
+import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 import { ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
@@ -25,6 +26,7 @@ import { nullExtensionDescription } from '../../../services/extensions/common/ex
 import { ILanguageModelToolsService } from '../../chat/common/tools/languageModelToolsService.js';
 import { CustomAiModelProvider } from '../../../../../custom/ai/browser/customAiModelProvider.js';
 import { CustomAiChatAgent } from '../../../../../custom/ai/browser/customAiChatAgent.js';
+import { CustomAiChatTraceService, ICustomAiChatTraceService } from '../../../../../custom/ai/browser/customAiChatTrace.js';
 import { CustomAiEditFileTool, CustomAiEditFileToolData } from '../../../../../custom/ai/browser/customAiEditFileTool.js';
 import { CustomAiPlanCrossAppWorkflowTool, CustomAiPlanCrossAppWorkflowToolData } from '../../../../../custom/ai/browser/customAiPlanCrossAppWorkflowTool.js';
 import {
@@ -36,6 +38,8 @@ import {
 } from '../../../../../custom/ai/common/customAiConstants.js';
 
 const CUSTOM_AI_SET_KEY_COMMAND = 'customAi.setOpenaiApiKey';
+
+registerSingleton(ICustomAiChatTraceService, CustomAiChatTraceService, InstantiationType.Delayed);
 
 const vendorDescriptor = {
 	vendor: CUSTOM_AI_VENDOR,
@@ -97,6 +101,18 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			type: 'boolean',
 			default: true,
 			description: localize('custom.ai.tools.enabled', 'When enabled, Custom AI registers built-in chat tools with the model (tool-calling).'),
+			scope: ConfigurationScope.APPLICATION,
+		},
+		'custom.ai.observability.enabled': {
+			type: 'boolean',
+			default: true,
+			description: localize('custom.ai.observability.enabled', 'Write local JSONL traces for Custom AI chat requests and tool/edit behavior under .agent/observability when a workspace is open.'),
+			scope: ConfigurationScope.APPLICATION,
+		},
+		'custom.ai.observability.includeContent': {
+			type: 'boolean',
+			default: false,
+			description: localize('custom.ai.observability.includeContent', 'Include capped prompt/response snippets in Custom AI observability traces. Secrets are still redacted. Disabled by default for privacy.'),
 			scope: ConfigurationScope.APPLICATION,
 		},
 		'custom.ai.edit.applyMode': {

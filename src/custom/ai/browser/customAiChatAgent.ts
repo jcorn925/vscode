@@ -53,6 +53,7 @@ import {
 import { CustomAiInvalidApiKeyError, readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
 import { IGoalWorkspaceService, listGoalWorkspaceCrossAppWorkflows, type GoalWorkspaceContextFile, type GoalWorkspaceIxOverlay, type GoalWorkspaceState, type GoalSurface } from '../../goalWorkspace/GoalWorkspaceService.js';
 import { CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_LINES } from '../common/customAiSurfaceScaffold.js';
+import { ICustomAiChatTraceService, summarizeTraceMessages } from './customAiChatTrace.js';
 
 const MAX_TOOL_ROUNDS = 15;
 const ATTACHMENT_MAX_BYTES_PER_FILE = 64 * 1024;
@@ -294,6 +295,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 		@IFileService private readonly _fileService: IFileService,
 		@IModelService private readonly _modelService: IModelService,
 		@IGoalWorkspaceService private readonly _goalWorkspaceService: IGoalWorkspaceService,
+		@ICustomAiChatTraceService private readonly _traceService: ICustomAiChatTraceService,
 	) {
 		super();
 	}
@@ -305,6 +307,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 	private async _invokeInternal(request: IChatAgentRequest, progress: (parts: IChatProgress[]) => void, history: IChatAgentHistoryEntry[], token: CancellationToken, retryAfterKeyUpdate: boolean): Promise<IChatAgentResult> {
 		const emit = (p: IChatProgress) => progress([p]);
 		let modelId = '';
+		let trace: ReturnType<ICustomAiChatTraceService['createRun']> | undefined;
 		try {
 			if (!this._configurationService.getValue<boolean>('custom.ai.enabled')) {
 				emit({ kind: 'markdownContent', content: new MarkdownString('Enable **custom.ai.enabled** in settings to use Custom AI.', false) } satisfies IChatMarkdownContent);
@@ -312,8 +315,20 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 			}
 
 			modelId = this._resolveModelId(request);
+			trace = this._traceService.createRun({
+				requestId: request.requestId,
+				sessionResource: request.sessionResource,
+				modelId,
+			});
+			trace.event('chat.model.resolved', {
+				modelId,
+				userSelectedModelId: request.userSelectedModelId,
+				goalWorkspace: summarizeGoalWorkspaceForTrace(this._goalWorkspaceService.getState()),
+				retryAfterKeyUpdate,
+			});
 			const metadata = this._languageModels.lookupLanguageModel(modelId);
 			if (!metadata) {
+				trace.fail(new Error(`Unknown model ${modelId}`), { phase: 'model.lookup' });
 				emit({ kind: 'markdownContent', content: new MarkdownString(`Unknown model **${modelId}**. Pick a Custom AI model in the chat model picker.`, false) } satisfies IChatMarkdownContent);
 				return {};
 			}
@@ -321,6 +336,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 			if (isCustomAiOpenAiCompatibleModelId(modelId)) {
 				const keyOk = await this._ensureOpenAiApiKey(token);
 				if (!keyOk) {
+					trace.cancel({ phase: 'apiKey' });
 					return {
 						errorDetails: {
 							message: localize(
@@ -337,6 +353,12 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 				const ollamaModel = this._configurationService.getValue<string>('custom.ai.ollama.model') ?? 'llama3.1';
 				const ollamaReady = await this._checkOllamaReady(ollamaBase, ollamaModel, token);
 				if (!ollamaReady.ok) {
+					trace.fail(new Error(`Ollama preflight failed: ${ollamaReady.reason}`), {
+						phase: 'ollama.preflight',
+						ollamaBase,
+						ollamaModel,
+						reason: ollamaReady.reason,
+					});
 					const message = ollamaReady.reason === 'missingModel'
 						? localize(
 							'customAi.error.ollamaMissingModel',
@@ -372,15 +394,30 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 			}
 
 			const messages = await this._buildMessages(request, history, token);
+			trace.event('chat.context.assembled', {
+				...summarizeTraceMessages(messages),
+				historyEntries: history.length,
+				goalWorkspace: summarizeGoalWorkspaceForTrace(this._goalWorkspaceService.getState()),
+			});
 			const countTokens: CountTokensCallback = async (input, t) => this._languageModels.computeTokenLength(modelId, input, t);
+			let totalTextChunks = 0;
+			let totalResponseChars = 0;
+			let totalToolUses = 0;
 
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 				if (token.isCancellationRequested) {
+					trace.cancel({ phase: 'beforeRound', round });
 					return {};
 				}
 
 				const toolsEnabled = this._configurationService.getValue<boolean>('custom.ai.tools.enabled') !== false;
 				const tools = toolsEnabled ? this._buildTools(metadata, request) : [];
+				trace.event('chat.model.request.started', {
+					round,
+					toolsEnabled,
+					toolCount: tools.length,
+					messageSummary: summarizeTraceMessages(messages),
+				});
 
 				const lmResponse = await this._languageModels.sendChatRequest(
 					modelId,
@@ -391,8 +428,12 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 				);
 
 				const assistantParts: IChatMessagePart[] = [];
+				let roundTextChunks = 0;
+				let roundResponseChars = 0;
+				let roundToolUses = 0;
 				for await (const part of lmResponse.stream) {
 					if (token.isCancellationRequested) {
+						trace.cancel({ phase: 'stream', round });
 						return {};
 					}
 					const parts = Array.isArray(part) ? part : [part];
@@ -400,6 +441,17 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 						if (p.type === 'text') {
 							const t = p as IChatResponseTextPart;
 							if (t.value) {
+								roundTextChunks++;
+								totalTextChunks++;
+								roundResponseChars += t.value.length;
+								totalResponseChars += t.value.length;
+								trace.event('chat.response.chunk', {
+									round,
+									chunkChars: t.value.length,
+									roundTextChunks,
+									totalTextChunks,
+									totalResponseChars,
+								});
 								emit({ kind: 'markdownContent', content: new MarkdownString(t.value, false) } satisfies IChatMarkdownContent);
 								assistantParts.push({ type: 'text', value: t.value });
 								// Yield so the workbench can paint incremental markdown (tight loops otherwise batch visually).
@@ -407,13 +459,29 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 							}
 						} else if (p.type === 'tool_use') {
 							const tu = p as IChatResponseToolUsePart;
+							roundToolUses++;
+							totalToolUses++;
+							trace.event('chat.tool_call.detected', {
+								round,
+								toolName: tu.name,
+								toolCallId: tu.toolCallId,
+								parameters: summarizeToolParameters(tu.parameters),
+							});
 							assistantParts.push(tu);
 						}
 					}
 				}
 				await lmResponse.result;
+				trace.event('chat.model.request.completed', {
+					round,
+					roundTextChunks,
+					roundResponseChars,
+					roundToolUses,
+					assistantPartCount: assistantParts.length,
+				});
 
 				if (!assistantParts.length) {
+					trace.event('chat.response.empty', { round });
 					break;
 				}
 
@@ -421,6 +489,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 
 				const toolUses = assistantParts.filter((p): p is IChatResponseToolUsePart => p.type === 'tool_use');
 				if (!toolUses.length) {
+					trace.event('chat.tool_round.none', { round });
 					break;
 				}
 
@@ -435,6 +504,14 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 						force: true,
 					});
 					let toolResult: IToolResult;
+					const toolStartedAt = Date.now();
+					trace.event('chat.tool_call.started', {
+						round,
+						toolName: tu.name,
+						toolId,
+						toolCallId: tu.toolCallId,
+						parameters: summarizeToolParameters(tu.parameters),
+					});
 					try {
 						toolResult = await this._toolsService.invokeTool({
 							callId: tu.toolCallId,
@@ -444,8 +521,25 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 							chatRequestId: request.requestId,
 							chatStreamToolCallId: tu.toolCallId,
 						}, countTokens, token);
+						trace.event('chat.tool_call.completed', {
+							round,
+							toolName: tu.name,
+							toolId,
+							toolCallId: tu.toolCallId,
+							durationMs: Date.now() - toolStartedAt,
+							error: Boolean(toolResult.toolResultError),
+							resultTextChars: toolResultTextCharLength(toolResult),
+						});
 					} catch (err) {
 						this._logService.error('[CustomAi] Tool invocation failed', err);
+						trace.event('chat.tool_call.failed', {
+							round,
+							toolName: tu.name,
+							toolId,
+							toolCallId: tu.toolCallId,
+							durationMs: Date.now() - toolStartedAt,
+							error: err instanceof Error ? err.message : String(err),
+						});
 						toolResult = {
 							content: [{ kind: 'text', value: String(err) } satisfies IToolResultTextPart],
 							toolResultError: true,
@@ -458,8 +552,15 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 				}
 			}
 
+			trace.complete({
+				totalTextChunks,
+				totalResponseChars,
+				totalToolUses,
+				finalMessageSummary: summarizeTraceMessages(messages),
+			});
 			return {};
 		} catch (err) {
+			trace?.fail(err, { phase: 'catch' });
 			if (isCustomAiOpenAiCompatibleModelId(modelId) && err instanceof CustomAiInvalidApiKeyError && !retryAfterKeyUpdate) {
 				this._logService.warn('[CustomAi] OpenAI-compatible API key rejected by server', err);
 				try {
@@ -966,6 +1067,56 @@ function historyContentToText(response: ReadonlyArray<IChatProgressHistoryRespon
 		}
 	}
 	return chunks.join('');
+}
+
+function summarizeGoalWorkspaceForTrace(state: GoalWorkspaceState): Record<string, unknown> {
+	const workspace = state.workspace;
+	return {
+		status: state.status,
+		workspaceFolder: state.workspaceFolder ? basename(state.workspaceFolder) : undefined,
+		goalId: workspace?.goal.id,
+		goalName: workspace?.goal.name,
+		northStarMetric: workspace?.goal.northStarMetric,
+		surfaceCount: workspace?.surfaces.length ?? 0,
+		surfaceIds: workspace?.surfaces.slice(0, MAX_GOAL_SURFACES).map(surface => surface.id) ?? [],
+		sharedKeys: workspace ? Object.entries(workspace.shared).filter(([, value]) => typeof value === 'string' && value.trim()).map(([key]) => key) : [],
+		contextFileCount: state.context.globalFiles.length + state.context.surfaceFiles.length,
+		ixOverlay: Boolean(state.ix.overlay),
+		diagnosticCount: state.diagnostics.length,
+	};
+}
+
+function summarizeToolParameters(parameters: unknown): Record<string, unknown> | undefined {
+	if (!parameters || typeof parameters !== 'object') {
+		return undefined;
+	}
+	const record = parameters as Record<string, unknown>;
+	const summary: Record<string, unknown> = {
+		keys: Object.keys(record).sort(),
+	};
+	if (typeof record.uri === 'string') {
+		summary.uri = record.uri;
+	}
+	if (typeof record.path === 'string') {
+		summary.path = record.path;
+	}
+	if (typeof record.code === 'string') {
+		summary.codeChars = record.code.length;
+	}
+	if (typeof record.explanation === 'string') {
+		summary.explanationChars = record.explanation.length;
+	}
+	return summary;
+}
+
+function toolResultTextCharLength(result: IToolResult): number {
+	let total = 0;
+	for (const part of result.content) {
+		if (part.kind === 'text') {
+			total += part.value.length;
+		}
+	}
+	return total;
 }
 
 function toolResultToChatParts(result: IToolResult): IChatResponseTextPart[] {
