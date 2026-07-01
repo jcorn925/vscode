@@ -252,6 +252,7 @@ class ModeShellContribution extends Disposable {
 	private readonly uiBrowser: HTMLElement & { src: string };
 	private readonly uiBrowserShell: HTMLElement;
 	private readonly uiCallout: HTMLElement;
+	private readonly uiLandingBackdrop: HTMLElement;
 	private readonly processCallout: HTMLElement;
 	private readonly processStartHints: HTMLElement;
 	private readonly uiSetup: HTMLElement;
@@ -276,13 +277,13 @@ class ModeShellContribution extends Disposable {
 	private uiSurfaceSetupLogoMarkDropzone!: HTMLElement;
 	private uiSurfaceSetupLogoPreview!: HTMLImageElement;
 	private uiSurfaceSetupLogoMarkPreview!: HTMLImageElement;
-	private uiSurfaceSetupSavedLabel!: HTMLElement;
 	private readonly uiSurfaceSetupSections = new Map<SurfaceSetupStep, HTMLElement>();
 	private surfaceSetupBrandLogoPath: string | undefined;
 	private surfaceSetupBrandLogoMarkPath: string | undefined;
 	private surfaceSetupCurrentStep: SurfaceSetupStep = 'goal';
 	private surfaceSetupDraftDirty = false;
 	private surfaceSetupHydrating = false;
+	private readonly goalWorkspaceNameClickScheduler = this._register(new RunOnceScheduler(() => this.toggleWorkspaceContextGathering(), 250));
 	private readonly surfaceSetupAutosaveScheduler = this._register(new RunOnceScheduler(() => void this.autosaveSurfaceSetupBuilder(), 600));
 	private contextGatheringOpen = true;
 	private readonly uiProjectNameContextBadge: HTMLElement;
@@ -653,6 +654,24 @@ class ModeShellContribution extends Disposable {
 				min-width: 0;
 				min-height: 0;
 				overflow: auto;
+				position: relative;
+			}
+
+			.monaco-workbench .custom-mode-ui-landing-backdrop {
+				display: none;
+				position: absolute;
+				inset: 0;
+				z-index: 2100;
+				background-color: rgba(0, 0, 0, 0.45);
+			}
+
+			.monaco-workbench.custom-mode-ui-landing-open .custom-mode-ui-landing-backdrop {
+				display: block;
+			}
+
+			.monaco-workbench.custom-mode-ui-landing-open.custom-mode-shell-hasProject .custom-mode-callout {
+				display: flex;
+				z-index: 2200;
 			}
 
 			.monaco-workbench .custom-mode-ui-chat-column {
@@ -1122,11 +1141,6 @@ class ModeShellContribution extends Disposable {
 				gap: 16px;
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-setup-status-row {
-				display: flex;
-				justify-content: flex-end;
-			}
-
 			.monaco-workbench .custom-mode-ui-surface-setup-section {
 				display: flex;
 				flex-direction: column;
@@ -1323,11 +1337,6 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench .custom-mode-ui-surface-setup-section-title {
 				font-size: 12px;
 				font-weight: 650;
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-saved {
-				color: var(--vscode-testing-iconPassed);
-				font-size: 12px;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-section[data-section="surfaces"] {
@@ -1527,14 +1536,6 @@ class ModeShellContribution extends Disposable {
 				justify-content: center;
 				width: 28px;
 				height: 28px;
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-saved.unsaved {
-				color: var(--vscode-editorWarning-foreground);
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-saved.saving {
-				color: var(--vscode-descriptionForeground);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-context-title {
@@ -2889,7 +2890,12 @@ class ModeShellContribution extends Disposable {
 		this.uiProjectNameContextBadge = $('span.custom-mode-ui-project-name-badge', undefined, localize('customMode.contextBadge', 'Context'));
 		this.uiProjectName.appendChild(this.uiProjectNameContextBadge);
 		this.modeTopBar.appendChild(this.uiProjectName);
-		this._register(addDisposableListener(this.uiProjectName, 'click', () => this.toggleWorkspaceContextGathering()));
+		this._register(addDisposableListener(this.uiProjectName, 'click', () => this.goalWorkspaceNameClickScheduler.schedule()));
+		this._register(addDisposableListener(this.uiProjectName, 'dblclick', event => {
+			event.preventDefault();
+			this.goalWorkspaceNameClickScheduler.cancel();
+			this.openGoalWorkspaceLanding();
+		}));
 		for (const mode of ModeShellContribution.MODES) {
 			const button = $('button.custom-mode-top-tab', {
 				type: 'button',
@@ -2940,7 +2946,12 @@ class ModeShellContribution extends Disposable {
 			this.uiRuntimeText
 		);
 		this.uiSetup.appendChild(uiStartBar);
-		this.uiCallout = this.createGoalWorkspaceLandingCallout(() => this.defaultProjectService.openFallbackWorkspace());
+		this.uiLandingBackdrop = $('div.custom-mode-ui-landing-backdrop');
+		this._register(addDisposableListener(this.uiLandingBackdrop, 'click', () => this.closeGoalWorkspaceLanding()));
+		this.uiCallout = this.createGoalWorkspaceLandingCallout(() => {
+			this.closeGoalWorkspaceLanding();
+			void this.defaultProjectService.openFallbackWorkspace();
+		});
 		// Avoid eagerly navigating to a conventional dev-server URL. When no server is
 		// active this only produces a Chromium ERR_CONNECTION_REFUSED page and noisy
 		// startup logs. The active URL listener below navigates the preview as soon as
@@ -2981,6 +2992,7 @@ class ModeShellContribution extends Disposable {
 		this.uiBrowserShell.appendChild(this.uiSurfaceEmptyState);
 		this.uiBrowserShell.appendChild(this.uiBrowser);
 
+		this.uiMainColumn.appendChild(this.uiLandingBackdrop);
 		this.uiMainColumn.appendChild(this.uiCallout);
 		this.uiMainColumn.appendChild(this.uiSetup);
 		this.uiMainColumn.appendChild(this.uiBrowserShell);
@@ -3261,6 +3273,11 @@ class ModeShellContribution extends Disposable {
 
 		this._register(addDisposableListener(this.uiStartAppButton, 'click', () => this.onStartAppClicked()));
 		this._register(addDisposableListener(mainWindow, 'message', (e: MessageEvent) => this.onEmbeddedUiMessage(e)));
+		this._register(addDisposableListener(mainWindow, 'keydown', (e: KeyboardEvent) => {
+			if (e.key === 'Escape' && this.container.classList.contains('custom-mode-ui-landing-open')) {
+				this.closeGoalWorkspaceLanding();
+			}
+		}));
 
 		// Best-effort injection into same-origin iframe content.
 		// If cross-origin, the embedded app must include the script itself.
@@ -3915,8 +3932,6 @@ class ModeShellContribution extends Disposable {
 			starterGrid,
 		);
 
-		this.uiSurfaceSetupSavedLabel = $('div.custom-mode-ui-surface-saved', undefined, localize('customMode.surfaceSetupSaved', 'All changes saved'));
-
 		this.uiSurfaceSetupGoalNameInput = $('input.custom-mode-ui-surface-goal-input', {
 			type: 'text',
 			placeholder: localize('customMode.surfaceSetupGoalNamePlaceholder', 'e.g. Summit Coaching Co.'),
@@ -3948,7 +3963,6 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceSetupLogoMarkPreview = logoMarkDropzone.preview;
 
 		const goalSection = $('section.custom-mode-ui-surface-setup-section', { id: 'surface-setup-section-goal', 'data-section': 'goal' },
-			$('div.custom-mode-ui-surface-setup-status-row', undefined, this.uiSurfaceSetupSavedLabel),
 			$('div.custom-mode-ui-surface-goal-form', undefined,
 				$('label.custom-mode-ui-surface-goal-field', undefined,
 					$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalNameLabel', 'Business name')),
@@ -4065,7 +4079,6 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 		this.surfaceSetupDraftDirty = true;
-		this.updateSurfaceSetupSavedLabel();
 		this.surfaceSetupAutosaveScheduler.schedule();
 	}
 
@@ -4283,20 +4296,6 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceSetupSections.get(step)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 
-	private updateSurfaceSetupSavedLabel(savedAt?: string): void {
-		this.uiSurfaceSetupSavedLabel.classList.remove('unsaved', 'saving');
-		if (this.surfaceSetupDraftDirty) {
-			this.uiSurfaceSetupSavedLabel.textContent = localize('customMode.surfaceSetupUnsaved', 'Unsaved changes');
-			this.uiSurfaceSetupSavedLabel.classList.add('unsaved');
-			return;
-		}
-		if (savedAt) {
-			this.uiSurfaceSetupSavedLabel.textContent = localize('customMode.surfaceSetupSavedAt', 'Saved {0}', new Date(savedAt).toLocaleString());
-			return;
-		}
-		this.uiSurfaceSetupSavedLabel.textContent = localize('customMode.surfaceSetupSaved', 'All changes saved');
-	}
-
 	private populateSurfaceSetupBuilderFields(): void {
 		const goal = this.goalWorkspaceService.getGoal();
 		const brand = this.goalWorkspaceService.getGoalWorkspace()?.brand;
@@ -4333,7 +4332,6 @@ class ModeShellContribution extends Disposable {
 		const step = draft?.currentStep ?? inferredStep;
 		this.surfaceSetupDraftDirty = false;
 		this.focusSurfaceSetupSection(step, { scroll: false });
-		this.updateSurfaceSetupSavedLabel(draft?.savedAt);
 	}
 
 	private async persistSurfaceSetupBuilder(options?: { requireName?: boolean }): Promise<boolean> {
@@ -4353,8 +4351,6 @@ class ModeShellContribution extends Disposable {
 			}
 			return false;
 		}
-		this.uiSurfaceSetupSavedLabel.textContent = localize('customMode.surfaceSetupSaving', 'Saving…');
-		this.uiSurfaceSetupSavedLabel.classList.add('saving');
 		try {
 			await saveGoalWorkspaceBuilderFields(
 				this.fileService,
@@ -4363,17 +4359,15 @@ class ModeShellContribution extends Disposable {
 				this.goalWorkspaceService.getGoal()?.id,
 			);
 			await this.goalWorkspaceService.refresh();
-			const saved = await saveSurfaceSetupDraft(this.fileService, workspaceFolder, {
+			await saveSurfaceSetupDraft(this.fileService, workspaceFolder, {
 				currentStep: this.surfaceSetupCurrentStep,
 			});
 			this.surfaceSetupDraftDirty = false;
-			this.updateSurfaceSetupSavedLabel(saved?.savedAt);
 			return true;
 		} catch (e: unknown) {
 			if (requireName) {
 				this.notificationService.error(localize('customMode.surfaceSetupDraftSaveFailed', 'Failed to save: {0}', String((e as Error)?.message ?? e)));
 			}
-			this.updateSurfaceSetupSavedLabel();
 			return false;
 		}
 	}
@@ -4481,6 +4475,10 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private toggleWorkspaceContextGathering(): void {
+		if (this.container.classList.contains('custom-mode-ui-landing-open')) {
+			this.closeGoalWorkspaceLanding();
+			return;
+		}
 		this.contextGatheringOpen = !this.contextGatheringOpen;
 		if (!this.contextGatheringOpen) {
 			this.endSurfaceSetupHandoff();
@@ -4499,9 +4497,32 @@ class ModeShellContribution extends Disposable {
 		this.container.classList.toggle('custom-mode-context-gathering-open', this.contextGatheringOpen);
 		this.uiProjectName.classList.toggle('active', this.contextGatheringOpen);
 		this.uiProjectName.setAttribute('aria-pressed', String(this.contextGatheringOpen));
+		const landingOpen = this.container.classList.contains('custom-mode-ui-landing-open');
+		if (landingOpen) {
+			this.uiProjectName.title = localize('customMode.workspaceNameLandingOpen', 'Goal workspace overview — click to close, or press Escape');
+			return;
+		}
 		this.uiProjectName.title = this.contextGatheringOpen
-			? localize('customMode.workspaceNameToggleActive', 'Context gathering is on — click to show surface preview')
-			: localize('customMode.workspaceNameToggleInactive', 'Context gathering is off — click to open the guided builder');
+			? localize('customMode.workspaceNameToggleActive', 'Context gathering is on — click to show surface preview. Double-click for goal workspace overview.')
+			: localize('customMode.workspaceNameToggleInactive', 'Context gathering is off — click to open the guided builder. Double-click for goal workspace overview.');
+	}
+
+	private openGoalWorkspaceLanding(): void {
+		this.ensureWorkspaceView();
+		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
+		if (!hasProject) {
+			return;
+		}
+		this.container.classList.add('custom-mode-ui-landing-open');
+		this.syncContextGatheringUi();
+	}
+
+	private closeGoalWorkspaceLanding(): void {
+		if (!this.container.classList.contains('custom-mode-ui-landing-open')) {
+			return;
+		}
+		this.container.classList.remove('custom-mode-ui-landing-open');
+		this.syncContextGatheringUi();
 	}
 
 	private applySurfaceSelection(surfaceId: string, options?: { contextGathering?: boolean }): void {

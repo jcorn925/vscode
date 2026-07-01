@@ -32,7 +32,7 @@ Required structure:
 - **Single main column** only: Goal → Brand → Surfaces (no right companion Agent Plan panel in the current design).
 - Right **AI chat** column may remain visible; surface handoff attaches `workspace.goal.json` to that chat session.
 - Main scroll column content (top to bottom):
-  1. **Goal** — editable business name and description with autosave status (`Unsaved changes` / `Saved …` / `All changes saved`)
+  1. **Goal** — editable business name and description
   2. **Brand** — logo drop zones (full logo + mark), primary/secondary/accent color pickers (persisted to `workspace.goal.json` + `.agent/brand/`)
   3. **Surfaces** — **2-column grid** of all eight starter cards (summary, highlights, icon) plus a dashed **New Surface** `+` card; clicking a card autosaves then opens surface handoff (one surface at a time)
 - **No** Save Draft or bulk Generate Surfaces buttons — goal, brand, and builder state **autosave** on change (~600ms debounce).
@@ -69,7 +69,7 @@ Visual expectations:
 
 2. Inspect the actual UI when feasible.
    - **No project**: verify landing callout copy, steps, surface chips, and CTA.
-   - **With project + Add Surface**: verify builder sections, autosave label, surface grid, and handoff.
+   - **With project + Add Surface**: verify builder sections, surface grid, and handoff.
    - If a running workbench or screenshot is available, inspect it directly.
    - If no runtime is available, evaluate DOM construction, class names, layout CSS, and copy.
 
