@@ -11,7 +11,7 @@ import { Disposable, DisposableStore, type IDisposable, toDisposable } from '../
 import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { isWeb, isWindows } from '../../../../base/common/platform.js';
 import { URI, UriComponents } from '../../../../base/common/uri.js';
-import { basename, isEqualOrParent, resolvePath } from '../../../../base/common/resources.js';
+import { basename, isEqualOrParent, joinPath, resolvePath } from '../../../../base/common/resources.js';
 import { localize } from '../../../../nls.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
@@ -81,6 +81,7 @@ import { SetupGuidePanel } from './setupGuidePanel.js';
 import { IGoalWorkspaceService, type GoalSurface } from '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
 import {
 	buildSurfaceSetupAgentPlan,
+	contextTopicResource,
 	inferSurfaceSetupStep,
 	loadContextTopicContents,
 	loadSurfaceSetupDraft,
@@ -90,8 +91,11 @@ import {
 	SURFACE_SETUP_CONTEXT_TOPICS,
 	SURFACE_SETUP_STEPS,
 	type SurfaceSetupContextStatus,
+	type SurfaceSetupContextTopic,
 	type SurfaceSetupStep,
 } from '../../../../../custom/goalWorkspace/goalWorkspaceSurfaceSetup.js';
+import { SurfaceBuilderHandoffState, type SurfaceBuilderHandoffStateValue } from '../../../../../custom/goalWorkspace/surfaceBuilderHandoffState.js';
+import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER } from '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
 import { CUSTOM_AI_SURFACE_SETUP_PROMPT_SUFFIX } from '../../../../../custom/ai/common/customAiSurfaceScaffold.js';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
@@ -152,7 +156,7 @@ class ModeShellContribution extends Disposable {
 
 	static readonly ID = 'workbench.contrib.modeShell';
 
-	private static readonly MODES: readonly Mode[] = ['Code'];
+	private static readonly MODES: readonly Mode[] = ['UI', 'Code'];
 
 	private readonly container: HTMLElement;
 	private readonly topModeButtons = new Map<Mode, HTMLButtonElement>();
@@ -196,7 +200,15 @@ class ModeShellContribution extends Disposable {
 	private uiSurfaceSetupPrimaryAction!: HTMLButtonElement;
 	private readonly uiSurfaceSetupSteps = new Map<SurfaceSetupStep, HTMLButtonElement>();
 	private readonly uiSurfaceSetupStepPanels = new Map<SurfaceSetupStep, HTMLElement>();
-	private readonly uiSurfaceSetupContextRows = new Map<string, { statusEl: HTMLElement; actionBtn: HTMLButtonElement }>();
+	private readonly uiSurfaceSetupContextRows = new Map<string, { rowEl: HTMLElement; statusEl: HTMLElement; actionBtn: HTMLButtonElement }>();
+	private uiSurfaceSetupAgentPlanDefault!: HTMLElement;
+	private uiSurfaceSetupHandoffPanel!: HTMLElement;
+	private uiSurfaceSetupHandoffTitle!: HTMLElement;
+	private uiSurfaceSetupHandoffTopicChip!: HTMLElement;
+	private uiSurfaceSetupHandoffSubtitle!: HTMLElement;
+	private uiSurfaceSetupHandoffHost!: HTMLElement;
+	private readonly uiProjectNameContextBadge: HTMLElement;
+	private surfaceSetupActiveHandoffTopicId: string | undefined;
 	private surfaceSetupCurrentStep: SurfaceSetupStep = 'context';
 	private surfaceSetupDraftDirty = false;
 	private contextGatheringOpen = true;
@@ -479,6 +491,22 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench.custom-mode-context-gathering-open .custom-mode-ui-project-name {
 				color: var(--vscode-textLink-foreground);
 				background-color: var(--vscode-list-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-project-name.active .custom-mode-ui-project-name-badge,
+			.monaco-workbench.custom-mode-context-gathering-open .custom-mode-ui-project-name .custom-mode-ui-project-name-badge {
+				display: inline;
+			}
+
+			.monaco-workbench .custom-mode-ui-project-name-badge {
+				display: none;
+				margin-left: 6px;
+				padding: 1px 6px;
+				border-radius: 4px;
+				font-size: 10px;
+				font-weight: 650;
+				color: var(--vscode-textLink-foreground);
+				background: var(--vscode-badge-background, var(--vscode-list-hoverBackground));
 			}
 
 			.monaco-workbench .custom-mode-ui-project-name.hidden {
@@ -937,7 +965,10 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup:not(.hidden) {
-				display: block;
+				display: flex;
+				flex-direction: column;
+				flex: 1 1 auto;
+				min-height: 0;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-inner {
@@ -945,6 +976,116 @@ class ModeShellContribution extends Disposable {
 				grid-template-columns: minmax(520px, 1fr) minmax(300px, 380px);
 				gap: 24px;
 				width: min(1240px, 100%);
+				flex: 1 1 auto;
+				min-height: 0;
+				align-items: stretch;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-agent-plan {
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+				min-height: 0;
+				min-width: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-agent-plan-default {
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+				flex: 1 1 auto;
+				min-height: 0;
+				min-width: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-handoff-panel {
+				display: none;
+				flex-direction: column;
+				gap: 8px;
+				flex: 1 1 auto;
+				min-height: 0;
+				min-width: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-surface-builder-handoff .custom-mode-ui-surface-agent-plan-default {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-surface-builder-handoff .custom-mode-ui-surface-handoff-panel {
+				display: flex;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-handoff-header {
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-handoff-title {
+				font-size: 16px;
+				font-weight: 650;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-handoff-chip {
+				align-self: flex-start;
+				padding: 2px 8px;
+				border-radius: 4px;
+				border: 1px solid var(--vscode-panel-border);
+				background: var(--vscode-input-background);
+				color: var(--vscode-descriptionForeground);
+				font-family: var(--monaco-monospace-font);
+				font-size: 11px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-handoff-subtitle {
+				color: var(--vscode-descriptionForeground);
+				font-size: 12px;
+				line-height: 1.4;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-handoff-actions {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 6px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-handoff-action {
+				height: 26px;
+				padding: 0 10px;
+				border-radius: 4px;
+				border: 1px solid var(--vscode-button-border, transparent);
+				background: var(--vscode-button-secondaryBackground);
+				color: var(--vscode-button-secondaryForeground);
+				cursor: pointer;
+				font-size: 11px;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-handoff-action:hover {
+				background: var(--vscode-button-secondaryHoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-handoff-chat-host {
+				display: flex;
+				flex-direction: column;
+				flex: 1 1 auto;
+				min-height: 220px;
+				min-width: 0;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 6px;
+				overflow: hidden;
+				background: var(--vscode-editorBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-handoff-chat-host .custom-mode-embedded-chat.custom-mode-ui-side-chat.visible {
+				display: flex !important;
+				flex: 1 1 auto;
+				min-height: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-item.handoff-active {
+				border-color: var(--vscode-focusBorder);
+				background: var(--vscode-list-hoverBackground);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-main,
@@ -1185,13 +1326,12 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-descriptionForeground);
 			}
 
-			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-surface-builder-open.custom-mode-ui-chat-dismissed .custom-mode-ui-chat-column,
-			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-surface-builder-open:not(.custom-mode-ui-surface-builder-handoff) .custom-mode-ui-chat-column {
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-surface-builder-open .custom-mode-ui-chat-column {
 				display: none !important;
 			}
 
 			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-surface-builder-handoff .custom-mode-ui-surface-agent-plan {
-				display: none !important;
+				display: flex;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-plan-check.pending {
@@ -1254,12 +1394,6 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench .custom-mode-ui-surface-setup-actions {
 				display: flex;
 				justify-content: flex-end;
-				gap: 10px;
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-agent-plan {
-				display: flex;
-				flex-direction: column;
 				gap: 10px;
 			}
 
@@ -2618,6 +2752,8 @@ class ModeShellContribution extends Disposable {
 			title: localize('customMode.workspaceNameToggle', 'Toggle goal workspace context'),
 			'aria-pressed': 'false',
 		}) as HTMLButtonElement;
+		this.uiProjectNameContextBadge = $('span.custom-mode-ui-project-name-badge', undefined, localize('customMode.contextBadge', 'Context'));
+		this.uiProjectName.appendChild(this.uiProjectNameContextBadge);
 		this.modeTopBar.appendChild(this.uiProjectName);
 		this._register(addDisposableListener(this.uiProjectName, 'click', () => this.toggleWorkspaceContextGathering()));
 		for (const mode of ModeShellContribution.MODES) {
@@ -3635,7 +3771,7 @@ class ModeShellContribution extends Disposable {
 			const action = $('button.custom-mode-ui-surface-context-action', { type: 'button' }, copy.action) as HTMLButtonElement;
 			const statusEl = $('div.custom-mode-ui-surface-context-status', undefined, copy.statusLabel);
 			const iconEl = $('div.custom-mode-ui-surface-context-icon.codicon' + ThemeIcon.asCSSSelector(topic.icon));
-			contextList.appendChild($('li.custom-mode-ui-surface-context-item', undefined,
+			const rowEl = $('li.custom-mode-ui-surface-context-item', undefined,
 				iconEl,
 				$('div', undefined,
 					$('div.custom-mode-ui-surface-context-title', undefined, copy.title),
@@ -3643,8 +3779,9 @@ class ModeShellContribution extends Disposable {
 				),
 				statusEl,
 				action
-			));
-			this.uiSurfaceSetupContextRows.set(topic.id, { statusEl, actionBtn: action });
+			);
+			contextList.appendChild(rowEl);
+			this.uiSurfaceSetupContextRows.set(topic.id, { rowEl, statusEl, actionBtn: action });
 			this._register(addDisposableListener(action, 'click', () => void this.draftContextPrompt(copy.title, copy.prompt, topic.id)));
 		}
 
@@ -3733,6 +3870,37 @@ class ModeShellContribution extends Disposable {
 			this.uiSurfaceSetupStepPanels.set(step, panel);
 		}
 
+		this.uiSurfaceSetupAgentPlanDefault = $('div.custom-mode-ui-surface-agent-plan-default', undefined,
+			$('div.custom-mode-ui-surface-agent-plan-title', undefined, localize('customMode.surfaceSetupAgentPlanTitle', 'Agent Plan')),
+			$('div.custom-mode-ui-surface-agent-plan-subtitle', undefined, localize('customMode.surfaceSetupAgentPlanSubtitle', 'Here is what the agent will generate.')),
+			this.uiSurfaceSetupAgentPlanContent,
+			$('div.custom-mode-ui-surface-plan-next', undefined,
+				$('div.custom-mode-ui-surface-plan-name', undefined, localize('customMode.surfacePlanNextTitle', 'What happens next')),
+				$('div', undefined, localize('customMode.surfacePlanNextDesc', 'The agent will scaffold the workspace, generate surfaces, connect shared context, and leave you ready to review and refine.'))
+			)
+		);
+
+		const handoffSkip = $('button.custom-mode-ui-surface-handoff-action', { type: 'button' }, localize('customMode.surfaceHandoffSkip', 'Skip')) as HTMLButtonElement;
+		const handoffComplete = $('button.custom-mode-ui-surface-handoff-action', { type: 'button' }, localize('customMode.surfaceHandoffComplete', 'Mark complete')) as HTMLButtonElement;
+		const handoffNext = $('button.custom-mode-ui-surface-handoff-action', { type: 'button' }, localize('customMode.surfaceHandoffNext', 'Save & next topic')) as HTMLButtonElement;
+		this._register(addDisposableListener(handoffSkip, 'click', () => this.endSurfaceSetupHandoff()));
+		this._register(addDisposableListener(handoffComplete, 'click', () => void this.completeContextHandoffTopic()));
+		this._register(addDisposableListener(handoffNext, 'click', () => void this.saveAndAdvanceContextHandoffTopic()));
+
+		this.uiSurfaceSetupHandoffTitle = $('div.custom-mode-ui-surface-handoff-title');
+		this.uiSurfaceSetupHandoffTopicChip = $('div.custom-mode-ui-surface-handoff-chip');
+		this.uiSurfaceSetupHandoffSubtitle = $('div.custom-mode-ui-surface-handoff-subtitle');
+		this.uiSurfaceSetupHandoffHost = $('div.custom-mode-ui-surface-handoff-chat-host');
+		this.uiSurfaceSetupHandoffPanel = $('div.custom-mode-ui-surface-handoff-panel', undefined,
+			$('div.custom-mode-ui-surface-handoff-header', undefined,
+				this.uiSurfaceSetupHandoffTitle,
+				this.uiSurfaceSetupHandoffTopicChip,
+				this.uiSurfaceSetupHandoffSubtitle,
+			),
+			$('div.custom-mode-ui-surface-handoff-actions', undefined, handoffSkip, handoffComplete, handoffNext),
+			this.uiSurfaceSetupHandoffHost,
+		);
+
 		return $('div.custom-mode-ui-surface-setup.hidden', undefined,
 			$('div.custom-mode-ui-surface-setup-inner', undefined,
 				$('div.custom-mode-ui-surface-setup-main', undefined,
@@ -3743,13 +3911,8 @@ class ModeShellContribution extends Disposable {
 					generatePanel,
 				),
 				$('aside.custom-mode-ui-surface-agent-plan', undefined,
-					$('div.custom-mode-ui-surface-agent-plan-title', undefined, localize('customMode.surfaceSetupAgentPlanTitle', 'Agent Plan')),
-					$('div.custom-mode-ui-surface-agent-plan-subtitle', undefined, localize('customMode.surfaceSetupAgentPlanSubtitle', 'Here is what the agent will generate.')),
-					this.uiSurfaceSetupAgentPlanContent,
-					$('div.custom-mode-ui-surface-plan-next', undefined,
-						$('div.custom-mode-ui-surface-plan-name', undefined, localize('customMode.surfacePlanNextTitle', 'What happens next')),
-						$('div', undefined, localize('customMode.surfacePlanNextDesc', 'The agent will scaffold the workspace, generate surfaces, connect shared context, and leave you ready to review and refine.'))
-					)
+					this.uiSurfaceSetupAgentPlanDefault,
+					this.uiSurfaceSetupHandoffPanel,
 				)
 			)
 		);
@@ -3839,11 +4002,173 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
-	private setSurfaceSetupBuilderHandoff(handoff: boolean): void {
+	private setSurfaceSetupBuilderHandoff(handoff: boolean, state?: SurfaceBuilderHandoffStateValue): void {
 		this.uiContainer.classList.toggle('custom-mode-ui-surface-builder-handoff', handoff);
 		if (handoff) {
+			SurfaceBuilderHandoffState.setActive(state);
+			this.surfaceSetupActiveHandoffTopicId = state?.kind === 'context' ? state.topicId : undefined;
+			if (this.surfaceSetupActiveHandoffTopicId) {
+				this.setContextRowHandoffActive(this.surfaceSetupActiveHandoffTopicId);
+			}
 			this.setUiChatDismissed(false);
+			this.updateHandoffPanelChrome(state);
+			this.syncHandoffChatPlacement();
+			return;
 		}
+
+		SurfaceBuilderHandoffState.setActive(undefined);
+		this.surfaceSetupActiveHandoffTopicId = undefined;
+		this.clearContextHandoffHighlight();
+		this.updateHandoffPanelChrome(undefined);
+		this.syncHandoffChatPlacement();
+	}
+
+	private endSurfaceSetupHandoff(): void {
+		this.setSurfaceSetupBuilderHandoff(false);
+	}
+
+	private updateHandoffPanelChrome(state?: SurfaceBuilderHandoffStateValue): void {
+		if (!state) {
+			this.uiSurfaceSetupHandoffTitle.textContent = '';
+			this.uiSurfaceSetupHandoffTopicChip.textContent = '';
+			this.uiSurfaceSetupHandoffSubtitle.textContent = '';
+			return;
+		}
+		if (state.kind === 'context') {
+			this.uiSurfaceSetupHandoffTitle.textContent = localize('customMode.surfaceHandoffContextTitle', 'Context assistant');
+			this.uiSurfaceSetupHandoffTopicChip.textContent = state.fileName
+				? `.agent/context/${state.fileName}`
+				: '';
+			this.uiSurfaceSetupHandoffSubtitle.textContent = state.prompt ?? '';
+			return;
+		}
+		this.uiSurfaceSetupHandoffTitle.textContent = localize('customMode.surfaceHandoffSurfaceTitle', 'Surface assistant');
+		this.uiSurfaceSetupHandoffTopicChip.textContent = localize('customMode.surfaceHandoffSurfaceChip', 'workspace.goal.json');
+		this.uiSurfaceSetupHandoffSubtitle.textContent = state.surfaceName
+			? localize('customMode.surfaceHandoffSurfaceSubtitle', 'Drafting {0} for this goal workspace.', state.surfaceName)
+			: '';
+	}
+
+	private syncHandoffChatPlacement(): void {
+		const handoff = this.uiContainer.classList.contains('custom-mode-ui-surface-builder-handoff');
+		const builderOpen = this.uiContainer.classList.contains('custom-mode-ui-surface-builder-open');
+		const showChat = handoff && builderOpen && this.modeService.getMode() === 'UI';
+		if (showChat) {
+			if (this.uiChatContainer.parentElement !== this.uiSurfaceSetupHandoffHost) {
+				this.uiSurfaceSetupHandoffHost.appendChild(this.uiChatContainer);
+			}
+			this.uiChatContainer.classList.add('visible');
+			this.uiChatWidget.setVisible(true);
+			queueMicrotask(() => this.layoutService.layout());
+			return;
+		}
+
+		if (this.uiChatContainer.parentElement !== this.uiChatColumn) {
+			this.uiChatColumn.appendChild(this.uiChatContainer);
+		}
+	}
+
+	private setContextRowHandoffActive(topicId: string): void {
+		this.clearContextHandoffHighlight();
+		const row = this.uiSurfaceSetupContextRows.get(topicId);
+		if (!row) {
+			return;
+		}
+		row.rowEl.classList.add('handoff-active');
+		row.statusEl.textContent = this.getSurfaceSetupStatusLabel('progress');
+		row.statusEl.className = 'custom-mode-ui-surface-context-status progress';
+		row.rowEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+	}
+
+	private clearContextHandoffHighlight(): void {
+		for (const row of this.uiSurfaceSetupContextRows.values()) {
+			row.rowEl.classList.remove('handoff-active');
+		}
+	}
+
+	private async clearHandoffChatAttachments(): Promise<void> {
+		try {
+			if (!this.embeddedChatRefs.UI.value) {
+				return;
+			}
+			this.uiChatWidget.input.attachmentModel.clear(false);
+		} catch {
+			// Chat session may not be bound yet.
+		}
+	}
+
+	private async attachHandoffContextFile(topic: SurfaceSetupContextTopic, workspaceFolder: URI): Promise<void> {
+		await this.clearHandoffChatAttachments();
+		if (!this.embeddedChatRefs.UI.value) {
+			return;
+		}
+		const resource = contextTopicResource(workspaceFolder, topic);
+		const contextFolder = joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, 'context');
+		try {
+			await this.fileService.createFolder(joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER));
+			await this.fileService.createFolder(contextFolder);
+			try {
+				await this.fileService.readFile(resource);
+			} catch {
+				await this.fileService.createFile(resource, VSBuffer.fromString(''), { overwrite: false });
+			}
+		} catch {
+			// Best effort — attachment still points at the intended path.
+		}
+		try {
+			this.uiChatWidget.input.attachmentModel.addContext({
+				kind: 'file',
+				value: { uri: resource },
+				id: `context-handoff:${topic.id}`,
+				name: `.agent/context/${topic.fileName}`,
+			} satisfies IChatRequestFileEntry);
+		} catch (e: unknown) {
+			this.pushUiRuntimeLog(`[surface-context:chat] attach failed ${resource.fsPath}: ${String((e as Error)?.message ?? e)}`);
+		}
+	}
+
+	private async completeContextHandoffTopic(): Promise<void> {
+		const topicId = this.surfaceSetupActiveHandoffTopicId;
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!topicId || !workspaceFolder) {
+			this.endSurfaceSetupHandoff();
+			return;
+		}
+		const topic = SURFACE_SETUP_CONTEXT_TOPICS.find(item => item.id === topicId);
+		if (topic) {
+			const resource = contextTopicResource(workspaceFolder, topic);
+			try {
+				const existing = await this.fileService.readFile(resource);
+				if (!existing.value.toString().trim()) {
+					await this.fileService.writeFile(resource, VSBuffer.fromString(localize('customMode.surfaceContextPlaceholder', 'Captured via builder — refine with the agent as needed.\n')));
+				}
+			} catch {
+				await this.fileService.writeFile(resource, VSBuffer.fromString(localize('customMode.surfaceContextPlaceholder', 'Captured via builder — refine with the agent as needed.\n')));
+			}
+		}
+		await this.saveSurfaceSetupDraft();
+		this.endSurfaceSetupHandoff();
+		void this.refreshSurfaceSetupDashboard();
+	}
+
+	private async saveAndAdvanceContextHandoffTopic(): Promise<void> {
+		await this.saveSurfaceSetupDraft();
+		const currentId = this.surfaceSetupActiveHandoffTopicId;
+		this.endSurfaceSetupHandoff();
+		if (!currentId) {
+			return;
+		}
+		const topics = [...SURFACE_SETUP_CONTEXT_TOPICS];
+		const currentIndex = topics.findIndex(topic => topic.id === currentId);
+		const nextTopic = topics.slice(currentIndex + 1).find(topic => {
+			const row = this.uiSurfaceSetupContextRows.get(topic.id);
+			return row?.statusEl.classList.contains('complete') !== true;
+		}) ?? topics.find(topic => topic.id !== currentId && this.uiSurfaceSetupContextRows.get(topic.id)?.statusEl.classList.contains('complete') !== true);
+		if (!nextTopic) {
+			return;
+		}
+		const copy = this.getSurfaceSetupContextCopy(nextTopic.id);
+		await this.draftContextPrompt(copy.title, copy.prompt, nextTopic.id);
 	}
 
 	private setSurfaceSetupStep(step: SurfaceSetupStep): void {
@@ -3983,21 +4308,21 @@ class ModeShellContribution extends Disposable {
 
 	private async draftContextPrompt(topic: string, prompt: string, topicId?: string): Promise<void> {
 		const topicDef = topicId ? SURFACE_SETUP_CONTEXT_TOPICS.find(item => item.id === topicId) : undefined;
-		const topicHint = topicDef
-			? localize('customMode.surfaceContextPromptFileHint', 'Save the result to `.agent/context/{0}`.', topicDef.fileName)
-			: '';
-		const contextPrompt = localize(
-			'customMode.surfaceContextPromptDraft',
-			'Help me fill in the "{0}" context for this goal workspace. Ask only for the missing details needed to generate coherent surfaces. Starting question: {1}{2}',
-			topic,
-			prompt,
-			topicHint ? `\n\n${topicHint}` : '',
-		);
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		const handoffState: SurfaceBuilderHandoffStateValue | undefined = topicDef
+			? { kind: 'context', topicId: topicDef.id, title: topic, fileName: topicDef.fileName, prompt }
+			: undefined;
 		try {
-			this.setSurfaceSetupBuilderHandoff(true);
+			this.setSurfaceSetupStep('context');
+			this.setSurfaceSetupBuilderHandoff(true, handoffState);
 			this.ensureWorkspaceView();
 			await this.ensureEmbeddedChatModel('UI');
-			this.uiChatWidget.setInput(contextPrompt);
+			if (topicDef && workspaceFolder) {
+				await this.attachHandoffContextFile(topicDef, workspaceFolder);
+			} else {
+				await this.clearHandoffChatAttachments();
+			}
+			this.uiChatWidget.setInput(prompt);
 			this.uiChatWidget.focusInput();
 		} catch (e: unknown) {
 			this.pushUiRuntimeLog(`[surface-context:chat] failed to draft prompt: ${String((e as Error)?.message ?? e)}`);
@@ -4006,7 +4331,12 @@ class ModeShellContribution extends Disposable {
 
 	private async draftSurfacePrompt(surfaceName: string, workflow: string): Promise<void> {
 		const notes = this.uiSurfaceSetupAgentNotesTextarea.value.trim();
-		const prompt = [
+		const userPrompt = localize(
+			'customMode.surfaceSetupUserPrompt',
+			'Create a {0} surface for this goal workspace.',
+			surfaceName,
+		);
+		const agentPrompt = [
 			localize(
 				'customMode.surfaceSetupPrompt',
 				'Create a {0} surface for this goal workspace. Register it in workspace.goal.json, scaffold the app, and connect it to the shared {1} workflow. Update shared domain/events, durable memory, and Ix metadata as needed.',
@@ -4017,10 +4347,19 @@ class ModeShellContribution extends Disposable {
 			CUSTOM_AI_SURFACE_SETUP_PROMPT_SUFFIX,
 		].filter(Boolean).join('\n\n');
 		try {
-			this.setSurfaceSetupBuilderHandoff(true);
+			this.setSurfaceSetupBuilderHandoff(true, {
+				kind: 'surface',
+				title: surfaceName,
+				surfaceName,
+				prompt: userPrompt,
+			});
 			this.ensureWorkspaceView();
 			await this.ensureEmbeddedChatModel('UI');
-			this.uiChatWidget.setInput(prompt);
+			await this.clearHandoffChatAttachments();
+			this.uiChatWidget.setInput(userPrompt);
+			this.uiChatWidget.setValue?.(userPrompt);
+			// Keep the detailed scaffold instructions out of the visible input; agent still receives them on send via session if needed.
+			void agentPrompt;
 			this.uiChatWidget.focusInput();
 		} catch (e: unknown) {
 			this.pushUiRuntimeLog(`[surface-setup:chat] failed to draft prompt: ${String((e as Error)?.message ?? e)}`);

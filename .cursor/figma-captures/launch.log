@@ -1,0 +1,27 @@
+[launch.sh] slim copy: /Users/jasoncornell/.vscode-oss-dev -> /var/folders/22/mj2zs5n13s570mdlxw13w_5w0000gn/T//code-oss-dev/20260630-212912-50184/user-data
+[launch.sh] ensured files.simpleDialog.enable=true in /var/folders/22/mj2zs5n13s570mdlxw13w_5w0000gn/T//code-oss-dev/20260630-212912-50184/user-data/User/settings.json
+[launch.sh] launching: /Users/jasoncornell/vscode/scripts/code.sh --user-data-dir=/var/folders/22/mj2zs5n13s570mdlxw13w_5w0000gn/T//code-oss-dev/20260630-212912-50184/user-data --extensions-dir=/var/folders/22/mj2zs5n13s570mdlxw13w_5w0000gn/T//code-oss-dev/20260630-212912-50184/user-data/extensions --shared-data-dir=/var/folders/22/mj2zs5n13s570mdlxw13w_5w0000gn/T//code-oss-dev/20260630-212912-50184/shared-data --remote-debugging-port=63713 --inspect-extensions=63714 --inspect=63715 --inspect-agenthost=63716 /Users/jasoncornell/vscode/.cursor/figma-workspace
+[launch.sh] logs: /var/folders/22/mj2zs5n13s570mdlxw13w_5w0000gn/T//code-oss-dev/20260630-212912-50184/code.log
+[launch.sh] running pre-launch (ensures electron + compiled output + built-ins)...
+[launch.sh] waiting for CDP on port 63713 (timeout 90s)...
+[launch.sh] timed out waiting for CDP on port 63713. Log tail:
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> code-oss-dev@1.125.0 electron
+> node build/lib/electron.ts
+
+
+(node:50236) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[21:29:14] Synchronizing built-in extensions...
+[21:29:14] You can manage built-in extensions with the --builtin flag
+[21:29:14] [marketplace] ms-vscode.js-debug-companion@1.1.3 ✔︎
+[21:29:14] [marketplace] ms-vscode.js-debug@1.117.0 ✔︎
+[21:29:14] [marketplace] ms-vscode.vscode-js-profile-table@1.0.10 ✔︎
+Debugger listening on ws://127.0.0.1:63715/9f80c51f-deda-4ca7-9854-63d8c69628b9
+For help, see: https://nodejs.org/en/docs/inspector

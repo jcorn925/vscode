@@ -1,0 +1,61 @@
+{
+	"goal": {
+		"id": "personal-training-business",
+		"name": "Online Personal Training Business",
+		"description": "Acquire clients and run coaching operations across the workspace surfaces.",
+		"northStarMetric": "active_paid_clients"
+	},
+	"surfaces": [
+		{
+			"id": "marketing",
+			"name": "Marketing Site",
+			"type": "web-app",
+			"path": "apps/marketing",
+			"localUrl": "http://localhost:3000",
+			"devCommand": "npm run dev --workspace apps/marketing",
+			"purpose": "Convert visitors into leads by presenting offers and calls to action.",
+			"capabilities": ["display-offers", "lead-capture"],
+			"events": ["lead.created", "offer.viewed"],
+			"entities": ["Lead", "Offer"],
+			"ixSubsystems": ["Marketing UI"],
+			"ix": {
+				"subsystemIds": ["ix-marketing-ui"],
+				"subsystems": ["Marketing UI"],
+				"tags": ["frontend", "conversion"],
+				"notes": "Maps the public acquisition surface to Ix-discovered frontend modules."
+			}
+		},
+		{
+			"id": "booking",
+			"name": "Booking",
+			"type": "web-app",
+			"path": "apps/booking",
+			"localUrl": "http://localhost:3001",
+			"devCommand": "npm run dev --workspace apps/booking",
+			"purpose": "Let leads select packages and schedule intro sessions.",
+			"capabilities": ["package-selection", "schedule-session"],
+			"events": ["booking.started", "booking.completed"],
+			"entities": ["Lead", "Booking", "TrainingPackage"],
+			"ixSubsystems": ["Booking UI"]
+		},
+		{
+			"id": "analytics",
+			"name": "Analytics Dashboard",
+			"type": "dashboard",
+			"path": "apps/analytics",
+			"localUrl": "http://localhost:3002",
+			"devCommand": "npm run dev --workspace apps/analytics",
+			"purpose": "Track conversion, revenue, retention, and campaign performance.",
+			"capabilities": ["package-analytics", "conversion", "revenue"],
+			"events": ["analytics.report.viewed"],
+			"entities": ["Metric", "Campaign", "Subscription"]
+		}
+	],
+	"shared": {
+		"domain": "packages/domain",
+		"events": "packages/events",
+		"ui": "packages/ui",
+		"auth": "packages/auth",
+		"workflows": "workflows"
+	}
+}
