@@ -82,6 +82,7 @@ export class CustomAiVerifySurfaceBlueprintTool implements IToolImpl {
 			workspaceFolder,
 			surfaceId,
 			ixSubsystems,
+			persistStatus: true,
 		});
 
 		const surfaceName = this.goalConsoleService.getSurface(surfaceId)?.name ?? surfaceId;

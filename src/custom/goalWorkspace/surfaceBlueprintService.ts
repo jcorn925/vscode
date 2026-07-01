@@ -63,6 +63,19 @@ export async function writeBlueprint(fileService: IFileService, workspaceFolder:
 	return resource;
 }
 
+export async function applyBlueprintVerificationStatus(
+	fileService: IFileService,
+	workspaceFolder: URI,
+	blueprint: SurfaceBlueprint,
+	passed: boolean,
+): Promise<void> {
+	blueprint.status = passed ? 'verified' : 'failed';
+	if (passed) {
+		blueprint.verifiedAt = new Date().toISOString();
+	}
+	await writeBlueprint(fileService, workspaceFolder, blueprint);
+}
+
 export async function createBlueprintFromTemplateId(
 	fileService: IFileService,
 	workspaceFolder: URI,

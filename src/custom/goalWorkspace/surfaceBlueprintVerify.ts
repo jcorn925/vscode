@@ -8,7 +8,7 @@ import { joinPath } from '../../vs/base/common/resources.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
 import { GOAL_WORKSPACE_MANIFEST } from './GoalConsoleService.js';
 import type { GoalWorkspaceSurface } from './GoalConsoleService.js';
-import { blueprintResource, readBlueprint } from './surfaceBlueprintService.js';
+import { applyBlueprintVerificationStatus, blueprintResource, readBlueprint } from './surfaceBlueprintService.js';
 import { blueprintSubsystemMatchesIx, type IxSubsystemRegion } from './surfaceIxMatch.js';
 import type { SurfaceBlueprintGap, SurfaceBlueprintVerificationResult } from './surfaceBlueprintTypes.js';
 
@@ -17,6 +17,7 @@ export interface VerifySurfaceBlueprintOptions {
 	readonly workspaceFolder: URI;
 	readonly surfaceId: string;
 	readonly ixSubsystems?: readonly IxSubsystemRegion[];
+	readonly persistStatus?: boolean;
 }
 
 export async function verifySurfaceBlueprint(options: VerifySurfaceBlueprintOptions): Promise<SurfaceBlueprintVerificationResult> {
@@ -93,6 +94,10 @@ export async function verifySurfaceBlueprint(options: VerifySurfaceBlueprintOpti
 	}
 
 	const passed = gaps.length === 0;
+
+	if (options.persistStatus && blueprint) {
+		await applyBlueprintVerificationStatus(fileService, workspaceFolder, blueprint, passed);
+	}
 
 	return {
 		passed,

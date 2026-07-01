@@ -10,7 +10,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { IFileContent, IFileService, IFileStat } from '../../../../../platform/files/common/files.js';
 import { GOAL_WORKSPACE_MANIFEST } from '../../../../../../custom/goalWorkspace/GoalConsoleService.js';
-import { instantiateBlueprintFromTemplate, writeBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintService.js';
+import { blueprintResource, instantiateBlueprintFromTemplate, readBlueprint, writeBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintService.js';
 import { listSurfaceTemplateIds, loadSurfaceTemplate } from '../../../../../../custom/goalWorkspace/surfaceBlueprintTemplateRegistry.js';
 import { blueprintSubsystemMatchesIx, matchSurfaceToIxSubsystems } from '../../../../../../custom/goalWorkspace/surfaceIxMatch.js';
 import { verifySurfaceBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintVerify.js';
@@ -84,6 +84,38 @@ suite('surfaceBlueprintVerify', () => {
 			surfaceId: 'booking',
 		});
 		assert.strictEqual(result.passed, true, JSON.stringify(result.gaps));
+	});
+
+	test('persists verified status when persistStatus is true', async () => {
+		const fileService = new TestBlueprintFileService();
+		const template = loadSurfaceTemplate('booking')!;
+		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'booking', surfaceName: 'Booking' });
+		await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+		fileService.setFile(joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST), createManifest('booking', 'Booking', {
+			capabilities: [...blueprint.manifest.capabilities],
+			events: [...blueprint.manifest.events],
+			entities: [...blueprint.manifest.entities],
+			ixSubsystems: [...blueprint.manifest.ixSubsystems],
+		}));
+		fileService.setFile(joinPath(workspaceFolder, 'apps/booking/package.json'), '{}');
+		fileService.setFile(joinPath(workspaceFolder, 'apps/booking/next.config.ts'), 'export default {}');
+		for (const subsystem of blueprint.subsystems) {
+			for (const path of subsystem.paths) {
+				fileService.setFile(joinPath(workspaceFolder, ...path.split('/')), '// file');
+			}
+		}
+
+		const result = await verifySurfaceBlueprint({
+			fileService: fileService as unknown as IFileService,
+			workspaceFolder,
+			surfaceId: 'booking',
+			persistStatus: true,
+		});
+		assert.strictEqual(result.passed, true);
+
+		const persisted = await readBlueprint(fileService as unknown as IFileService, blueprintResource(workspaceFolder, 'booking'));
+		assert.strictEqual(persisted?.status, 'verified');
+		assert.ok(persisted?.verifiedAt);
 	});
 
 	test('matchSurfaceToIxSubsystems uses declared metadata', () => {

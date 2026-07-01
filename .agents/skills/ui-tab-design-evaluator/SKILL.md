@@ -9,9 +9,9 @@ Evaluate the implemented UI tab against the approved design direction for the go
 
 ## Target Design
 
-The approved direction is a **surface-first Guided Builder** with a clear **no-project landing** and a **single scrollable builder column** when `+ Add Surface` is open.
+The approved direction is a **surface-first Guided Builder** with a clear **no-project landing** and a **single scrollable builder column** when the **GoalWorkspace** tab opens the builder.
 
-### No-project landing (UI tab, no workspace folder)
+### No-project landing (no workspace folder)
 
 When `custom-mode-shell-hasProject` is absent, show a centered callout (`custom-mode-callout`) in the UI preview area:
 
@@ -22,11 +22,11 @@ When `custom-mode-shell-hasProject` is absent, show a centered callout (`custom-
 - Primary CTA: **Open Goal Workspace Example**
 - Callout hidden once a project folder is open (`custom-mode-shell-hasProject`)
 
-### Guided Builder (`+ Add Surface`)
+### Guided Builder (GoalWorkspace tab)
 
 Required structure:
 
-- Keep the VS Code-like top workbench navigation: product/workspace title area, active **UI** tab, **Code** tab, **+ Add Surface**, surface tabs when declared, and right utility actions when present.
+- Keep the VS Code-like top workbench navigation: **GoalWorkspace** tab (opens guided builder), **Code** tab, surface tabs when declared, and right utility actions when present.
 - Remove the old left progress rail/column entirely.
 - **Do not** use exclusive step tabs, section tab rails, sticky outline nav, or a page hero above the builder form.
 - **Single main column** only: Goal → Brand → Surfaces (no right companion Agent Plan panel in the current design).
@@ -69,7 +69,7 @@ Visual expectations:
 
 2. Inspect the actual UI when feasible.
    - **No project**: verify landing callout copy, steps, surface chips, and CTA.
-   - **With project + Add Surface**: verify builder sections, surface grid, and handoff.
+   - **With project + GoalWorkspace builder**: verify builder sections, surface grid, and handoff.
    - If a running workbench or screenshot is available, inspect it directly.
    - If no runtime is available, evaluate DOM construction, class names, layout CSS, and copy.
 

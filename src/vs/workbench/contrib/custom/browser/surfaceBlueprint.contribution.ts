@@ -60,6 +60,7 @@ registerAction2(class extends Action2 {
 			workspaceFolder,
 			surfaceId: targetSurfaceId,
 			ixSubsystems,
+			persistStatus: true,
 		});
 
 		const report = formatSurfaceBlueprintGapReport(result);
