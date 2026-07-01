@@ -8,14 +8,14 @@
 </head>
 <body>
 	<header class="site-header" aria-label="Page header">
-		<a class="brand" href="../../README.md" aria-label="Code OSS fork readme">
+		<a class="brand" href="https://github.com/jcorn925/vscode" aria-label="GoalConsole.ai repository">
 			<span class="brand-mark" aria-hidden="true"></span>
 			<span>GoalConsole.ai</span>
 		</a>
 		<nav class="nav-links" aria-label="Primary">
-			<a href="../../.agent/PROJECT_PURPOSE.md">Purpose</a>
-			<a href="../../.agent/milestones.json">Milestones</a>
-			<a href="../../.agents/skills/ui-tab-design-evaluator/SKILL.md">UI Standard</a>
+			<a href="https://github.com/jcorn925/vscode/blob/main/.agent/PROJECT_PURPOSE.md">Purpose</a>
+			<a href="https://github.com/jcorn925/vscode/blob/main/.agent/milestones.json">Milestones</a>
+			<a href="https://github.com/jcorn925/vscode/blob/main/.agents/skills/ui-tab-design-evaluator/SKILL.md">UI Standard</a>
 		</nav>
 	</header>
 
@@ -30,8 +30,8 @@
 					across the product instead of only isolated files.
 				</p>
 				<div class="hero-actions" aria-label="Primary links">
-					<a class="button primary" href="../../.agent/PROJECT_PURPOSE.md">Open the purpose doc</a>
-					<a class="button secondary" href="../../.agent/milestones.json">View milestones</a>
+					<a class="button primary" href="https://github.com/jcorn925/vscode/blob/main/.agent/PROJECT_PURPOSE.md">Open the purpose doc</a>
+					<a class="button secondary" href="https://github.com/jcorn925/vscode/blob/main/.agent/milestones.json">View milestones</a>
 				</div>
 				<dl class="hero-metrics" aria-label="Product proof points">
 					<div>
@@ -45,14 +45,14 @@
 				</dl>
 			</div>
 
-			<div class="workbench-mockup" aria-label="Mockup of the no-left-column GoalConsole.ai builder">
+			<div class="workbench-mockup" aria-label="Mockup of the GoalConsole.ai Guided Builder">
 				<div class="mock-titlebar">
 					<div class="traffic" aria-hidden="true">
 						<span></span>
 						<span></span>
 						<span></span>
 					</div>
-					<strong>GoalConsole.ai</strong>
+					<strong class="workspace-tab">GoalWorkspace</strong>
 					<nav aria-label="Mock workbench tabs">
 						<span class="tab active">UI</span>
 						<span class="tab">Code</span>
@@ -60,89 +60,77 @@
 					</nav>
 				</div>
 				<div class="mock-body">
-					<section class="builder-pane" aria-label="Build goal workspace panel">
-						<div class="stepper" aria-label="Goal workspace steps">
-							<span class="step done">Goal</span>
-							<span class="step active">Context</span>
-							<span class="step">Surfaces</span>
-							<span class="step">Generate</span>
+					<section class="builder-pane" aria-label="Guided Builder">
+						<div class="builder-section">
+							<div class="section-label">Goal</div>
+							<label class="field">
+								<span>Business name</span>
+								<input type="text" value="Online Personal Training Business" readonly aria-label="Business name">
+							</label>
+							<label class="field">
+								<span>Description</span>
+								<textarea rows="2" readonly aria-label="Description">Acquire clients and run coaching operations across workspace surfaces.</textarea>
+							</label>
 						</div>
-						<div class="builder-header">
-							<p class="panel-kicker">Build in GoalConsole.ai</p>
-							<h2>Online Personal Training Business</h2>
-							<p>North-star metric: <strong>active_paid_clients</strong></p>
-						</div>
-						<div class="goal-summary" aria-label="Goal summary">
-							<div>
-								<span>Goal</span>
-								<strong>Acquire clients and run coaching operations.</strong>
-							</div>
-							<div>
-								<span>Surface plan</span>
-								<strong>Booking, client portal, analytics, admin.</strong>
-							</div>
-						</div>
-						<div class="context-list" aria-label="Context rows">
-							<div class="context-row complete">
-								<span class="row-icon">C</span>
-								<div>
-									<strong>Customer &amp; Pain</strong>
-									<p>Who are your customers and what core problem are you solving?</p>
+
+						<div class="builder-section">
+							<div class="section-label">Brand</div>
+							<div class="brand-row">
+								<div class="brand-dropzone" aria-hidden="true">Logo</div>
+								<div class="brand-dropzone" aria-hidden="true">Logo mark</div>
+								<div class="brand-colors" aria-label="Brand colors">
+									<span class="swatch primary" title="Primary"></span>
+									<span class="swatch secondary" title="Secondary"></span>
+									<span class="swatch accent" title="Accent"></span>
 								</div>
-								<span class="status">Complete</span>
-							</div>
-							<div class="context-row complete">
-								<span class="row-icon">P</span>
-								<div>
-									<strong>Offers &amp; Pricing</strong>
-									<p>What packages, pricing, and onboarding rules matter?</p>
-								</div>
-								<span class="status">Complete</span>
-							</div>
-							<div class="context-row progress">
-								<span class="row-icon">B</span>
-								<div>
-									<strong>Booking Flow</strong>
-									<p>How do customers discover, book, and start coaching?</p>
-								</div>
-								<span class="status">In progress</span>
-							</div>
-							<div class="context-row">
-								<span class="row-icon">A</span>
-								<div>
-									<strong>Analytics</strong>
-									<p>Which metrics and reports prove the goal is working?</p>
-								</div>
-								<span class="status muted">Add details</span>
 							</div>
 						</div>
-						<div class="builder-actions">
-							<span>All changes saved</span>
-							<button type="button">Save Draft</button>
-							<button class="generate" type="button">Generate Surfaces</button>
+
+						<div class="builder-section surfaces-section">
+							<div class="surfaces-header">
+								<strong>Surfaces</strong>
+								<p>Choose where to start. Each surface becomes a deployable app in your workspace.</p>
+							</div>
+							<div class="surface-grid" aria-label="Starter surfaces">
+								<article class="surface-card">
+									<div class="surface-card-top"><span class="surface-icon">M</span><strong>Marketing Site</strong></div>
+									<p>Convert visitors into leads with offers, social proof, and clear calls to action.</p>
+								</article>
+								<article class="surface-card">
+									<div class="surface-card-top"><span class="surface-icon">B</span><strong>Booking</strong></div>
+									<p>Let prospects pick packages, schedule sessions, and pay without leaving your funnel.</p>
+								</article>
+								<article class="surface-card">
+									<div class="surface-card-top"><span class="surface-icon">C</span><strong>Client Portal</strong></div>
+									<p>Give clients a home for plans, progress, messages, and account management.</p>
+								</article>
+								<article class="surface-card">
+									<div class="surface-card-top"><span class="surface-icon">T</span><strong>Trainer Admin</strong></div>
+									<p>Run day-to-day coaching operations—clients, sessions, follow-ups, and team workflows.</p>
+								</article>
+								<article class="surface-card">
+									<div class="surface-card-top"><span class="surface-icon">A</span><strong>Analytics</strong></div>
+									<p>Track conversion, retention, revenue, and the metrics that matter for growth.</p>
+								</article>
+								<article class="surface-card">
+									<div class="surface-card-top"><span class="surface-icon">S</span><strong>Content Scheduler</strong></div>
+									<p>Plan campaigns, schedule posts, and review what is working across channels.</p>
+								</article>
+								<article class="surface-card">
+									<div class="surface-card-top"><span class="surface-icon">D</span><strong>Ads Manager</strong></div>
+									<p>Launch ad campaigns, test creatives, and monitor spend against conversions.</p>
+								</article>
+								<article class="surface-card">
+									<div class="surface-card-top"><span class="surface-icon">$</span><strong>Subscriptions</strong></div>
+									<p>Manage plans, billing status, renewals, and cancellation workflows in one place.</p>
+								</article>
+								<article class="surface-card new-surface" aria-label="New Surface">
+									<span class="plus">+</span>
+									<strong>New Surface</strong>
+								</article>
+							</div>
 						</div>
 					</section>
-
-					<aside class="agent-pane" aria-label="Agent Plan">
-						<p class="panel-kicker">Agent Plan</p>
-						<h2>What the agent will generate</h2>
-						<div class="plan-group">
-							<strong>Workspace definition</strong>
-							<p>workspace.goal.json with goal, metric, and context summary.</p>
-						</div>
-						<div class="plan-group">
-							<strong>Applications (apps/)</strong>
-							<p>Booking and client-facing surfaces with app metadata.</p>
-						</div>
-						<div class="plan-group">
-							<strong>Shared domain</strong>
-							<p>Entities, events, and workflows that span surfaces.</p>
-						</div>
-						<div class="plan-group">
-							<strong>Ix metadata</strong>
-							<p>Code-level maps so the workbench can explain impact.</p>
-						</div>
-					</aside>
 				</div>
 			</div>
 		</section>
@@ -156,12 +144,12 @@
 				<article>
 					<span>01</span>
 					<h3>Define the goal</h3>
-					<p>Capture the outcome, audience, north-star metric, and product surfaces as first-class workspace context.</p>
+					<p>Name the business, describe what it sells, and set brand assets. Changes autosave as you work.</p>
 				</article>
 				<article>
 					<span>02</span>
-					<h3>Map the surfaces</h3>
-					<p>Keep apps, workflows, domain models, events, and launch commands visible together.</p>
+					<h3>Pick surfaces</h3>
+					<p>Choose starter surfaces—or create a new one—and scaffold each app one at a time with AI.</p>
 				</article>
 				<article>
 					<span>03</span>
@@ -245,8 +233,8 @@
 	<footer class="site-footer">
 		<p>GoalConsole.ai is built as a custom Code - OSS fork for goal-oriented product work.</p>
 		<div>
-			<a href="../../.agent/PROJECT_PURPOSE.md">Purpose doc</a>
-			<a href="../../.agent/milestones.json">Milestones</a>
+			<a href="https://github.com/jcorn925/vscode/blob/main/.agent/PROJECT_PURPOSE.md">Purpose doc</a>
+			<a href="https://github.com/jcorn925/vscode/blob/main/.agent/milestones.json">Milestones</a>
 		</div>
 	</footer>
 </body>

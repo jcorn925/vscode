@@ -4,6 +4,7 @@ GoalConsole.ai is a custom Code - OSS fork for turning business intent into work
 
 - Purpose: [.agent/PROJECT_PURPOSE.md](.agent/PROJECT_PURPOSE.md)
 - Local landing page: [docs/ide-purpose/index.html](docs/ide-purpose/index.html)
+- Published landing page: [https://jcorn925.github.io/vscode/](https://jcorn925.github.io/vscode/)
 - Milestones: [.agent/milestones.json](.agent/milestones.json)
 
 ## Upstream Base
