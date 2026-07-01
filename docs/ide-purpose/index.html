@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Goal Workspace IDE Purpose</title>
+	<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+	<header class="site-header" aria-label="Page header">
+		<a class="brand" href="../../README.md" aria-label="Code OSS fork readme">
+			<span class="brand-mark" aria-hidden="true"></span>
+			<span>Goal Workspace IDE</span>
+		</a>
+		<nav class="nav-links" aria-label="Primary">
+			<a href="../../.agent/PROJECT_PURPOSE.md">Purpose</a>
+			<a href="../../.agent/milestones.json">Milestones</a>
+			<a href="../../.agents/skills/ui-tab-design-evaluator/SKILL.md">UI Standard</a>
+		</nav>
+	</header>
+
+	<main>
+		<section class="hero" aria-labelledby="hero-title">
+			<div class="hero-copy">
+				<p class="eyebrow">Custom Code - OSS fork</p>
+				<h1 id="hero-title">An IDE for turning intent into working product surfaces.</h1>
+				<p class="hero-lede">
+					This workbench keeps the strengths of VS Code, then adds goal workspaces,
+					surface-aware launch flows, Ix metadata, and a custom AI agent that can reason
+					across the product instead of only isolated files.
+				</p>
+				<div class="hero-actions" aria-label="Primary links">
+					<a class="button primary" href="../../.agent/PROJECT_PURPOSE.md">Open the purpose doc</a>
+					<a class="button secondary" href="../../.agent/milestones.json">View milestones</a>
+				</div>
+				<dl class="hero-metrics" aria-label="Product proof points">
+					<div>
+						<dt>Goal first</dt>
+						<dd>workspace.goal.json is the product model</dd>
+					</div>
+					<div>
+						<dt>Surface aware</dt>
+						<dd>apps, workflows, events, memory, and Ix stay connected</dd>
+					</div>
+				</dl>
+			</div>
+
+			<div class="workbench-mockup" aria-label="Mockup of the no-left-column goal workspace builder">
+				<div class="mock-titlebar">
+					<div class="traffic" aria-hidden="true">
+						<span></span>
+						<span></span>
+						<span></span>
+					</div>
+					<strong>GoalWorkspace</strong>
+					<nav aria-label="Mock workbench tabs">
+						<span class="tab active">UI</span>
+						<span class="tab">Code</span>
+						<span class="tab add">+ Add Surface</span>
+					</nav>
+				</div>
+				<div class="mock-body">
+					<section class="builder-pane" aria-label="Build Goal Workspace panel">
+						<div class="stepper" aria-label="Goal workspace steps">
+							<span class="step done">Goal</span>
+							<span class="step active">Context</span>
+							<span class="step">Surfaces</span>
+							<span class="step">Generate</span>
+						</div>
+						<div class="builder-header">
+							<p class="panel-kicker">Build Goal Workspace</p>
+							<h2>Online Personal Training Business</h2>
+							<p>North-star metric: <strong>active_paid_clients</strong></p>
+						</div>
+						<div class="goal-summary" aria-label="Goal summary">
+							<div>
+								<span>Goal</span>
+								<strong>Acquire clients and run coaching operations.</strong>
+							</div>
+							<div>
+								<span>Surface plan</span>
+								<strong>Booking, client portal, analytics, admin.</strong>
+							</div>
+						</div>
+						<div class="context-list" aria-label="Context rows">
+							<div class="context-row complete">
+								<span class="row-icon">C</span>
+								<div>
+									<strong>Customer &amp; Pain</strong>
+									<p>Who are your customers and what core problem are you solving?</p>
+								</div>
+								<span class="status">Complete</span>
+							</div>
+							<div class="context-row complete">
+								<span class="row-icon">P</span>
+								<div>
+									<strong>Offers &amp; Pricing</strong>
+									<p>What packages, pricing, and onboarding rules matter?</p>
+								</div>
+								<span class="status">Complete</span>
+							</div>
+							<div class="context-row progress">
+								<span class="row-icon">B</span>
+								<div>
+									<strong>Booking Flow</strong>
+									<p>How do customers discover, book, and start coaching?</p>
+								</div>
+								<span class="status">In progress</span>
+							</div>
+							<div class="context-row">
+								<span class="row-icon">A</span>
+								<div>
+									<strong>Analytics</strong>
+									<p>Which metrics and reports prove the goal is working?</p>
+								</div>
+								<span class="status muted">Add details</span>
+							</div>
+						</div>
+						<div class="builder-actions">
+							<span>All changes saved</span>
+							<button type="button">Save Draft</button>
+							<button class="generate" type="button">Generate Surfaces</button>
+						</div>
+					</section>
+
+					<aside class="agent-pane" aria-label="Agent Plan">
+						<p class="panel-kicker">Agent Plan</p>
+						<h2>What the agent will generate</h2>
+						<div class="plan-group">
+							<strong>Workspace definition</strong>
+							<p>workspace.goal.json with goal, metric, and context summary.</p>
+						</div>
+						<div class="plan-group">
+							<strong>Applications (apps/)</strong>
+							<p>Booking and client-facing surfaces with app metadata.</p>
+						</div>
+						<div class="plan-group">
+							<strong>Shared domain</strong>
+							<p>Entities, events, and workflows that span surfaces.</p>
+						</div>
+						<div class="plan-group">
+							<strong>Ix metadata</strong>
+							<p>Code-level maps so the workbench can explain impact.</p>
+						</div>
+					</aside>
+				</div>
+			</div>
+		</section>
+
+		<section class="section loop-section" aria-labelledby="loop-title">
+			<div class="section-heading">
+				<p class="eyebrow">Product loop</p>
+				<h2 id="loop-title">From goal to verified surface without losing the thread.</h2>
+			</div>
+			<div class="loop-grid">
+				<article>
+					<span>01</span>
+					<h3>Define the goal</h3>
+					<p>Capture the outcome, audience, north-star metric, and product surfaces as first-class workspace context.</p>
+				</article>
+				<article>
+					<span>02</span>
+					<h3>Map the surfaces</h3>
+					<p>Keep apps, workflows, domain models, events, and launch commands visible together.</p>
+				</article>
+				<article>
+					<span>03</span>
+					<h3>Launch the work</h3>
+					<p>Use setup and app-launch guidance to move from files to running local product surfaces.</p>
+				</article>
+				<article>
+					<span>04</span>
+					<h3>Reason with the agent</h3>
+					<p>Ask for cross-app plans backed by workspace metadata, durable memory, and repo-local context.</p>
+				</article>
+				<article>
+					<span>05</span>
+					<h3>Verify with milestones</h3>
+					<p>Evaluate the fork against milestone checks so product direction stays concrete and testable.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="section contrast-section" aria-labelledby="contrast-title">
+			<div>
+				<p class="eyebrow">Why this exists</p>
+				<h2 id="contrast-title">Plain editors expose files and terminals. This IDE keeps the product model in view.</h2>
+			</div>
+			<div class="contrast-grid">
+				<article class="contrast-card">
+					<h3>Traditional repo view</h3>
+					<p>Files, panels, and terminal output are available, but the product goal and cross-surface dependencies are implicit.</p>
+				</article>
+				<article class="contrast-card accent">
+					<h3>Goal workspace view</h3>
+					<p>The goal, surfaces, workflows, memory, launch state, and Ix metadata stay connected inside the workbench.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="section milestone-section" aria-labelledby="milestone-title">
+			<div class="section-heading">
+				<p class="eyebrow">Measured by milestones</p>
+				<h2 id="milestone-title">The product direction is tracked as inspectable repo evidence.</h2>
+				<p>
+					The milestone evaluator keeps core capabilities explicit: each milestone names its source paths,
+					checks, gaps, and suggested changes.
+				</p>
+			</div>
+			<div class="milestone-grid">
+				<article>
+					<span class="pill">Pass report exists</span>
+					<h3>Goal workspace manifest and planning</h3>
+					<p>Loads workspace.goal.json, exposes surfaces, and supports cross-app workflow planning.</p>
+				</article>
+				<article>
+					<span class="pill">Readiness</span>
+					<h3>Startup setup guide</h3>
+					<p>Validates required tools and workspace readiness with actionable setup guidance.</p>
+				</article>
+				<article>
+					<span class="pill">Launch</span>
+					<h3>App launch guide</h3>
+					<p>Guides localhost dev server setup for goal workspace surfaces.</p>
+				</article>
+				<article>
+					<span class="pill">Mapping</span>
+					<h3>Ix CLI integration</h3>
+					<p>Runs discovery, mapping, and watch workflows for code-level understanding.</p>
+				</article>
+				<article>
+					<span class="pill">Pass report exists</span>
+					<h3>Custom AI goal-workspace agent</h3>
+					<p>Uses product context, edit tools, and cross-app planning instead of generic assistant behavior.</p>
+				</article>
+				<article>
+					<span class="pill">Guardrail</span>
+					<h3>TypeScript compile health</h3>
+					<p>Keeps fork-specific work honest by checking custom sources type-check cleanly.</p>
+				</article>
+			</div>
+		</section>
+	</main>
+
+	<footer class="site-footer">
+		<p>Built as a custom Code - OSS fork for goal-oriented product work.</p>
+		<div>
+			<a href="../../.agent/PROJECT_PURPOSE.md">Purpose doc</a>
+			<a href="../../.agent/milestones.json">Milestones</a>
+		</div>
+	</footer>
+</body>
+</html>
