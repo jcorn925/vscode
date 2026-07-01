@@ -1,4 +1,15 @@
-# Visual Studio Code - Open Source ("Code - OSS")
+# GoalConsole.ai
+
+GoalConsole.ai is a custom Code - OSS fork for turning business intent into working product surfaces. It keeps the familiar editor and workbench foundation, then adds goal workspaces, guided surface planning, launch guidance, milestone evaluation, and agent context for building multi-surface products.
+
+- Purpose: [.agent/PROJECT_PURPOSE.md](.agent/PROJECT_PURPOSE.md)
+- Local landing page: [docs/ide-purpose/index.html](docs/ide-purpose/index.html)
+- Milestones: [.agent/milestones.json](.agent/milestones.json)
+
+## Upstream Base
+
+This fork is based on Visual Studio Code - Open Source ("Code - OSS").
+
 [![Feature Requests](https://img.shields.io/github/issues/microsoft/vscode/feature-request.svg)](https://github.com/microsoft/vscode/issues?q=is%3Aopen+is%3Aissue+label%3Afeature-request+sort%3Areactions-%2B1-desc)
 [![Bugs](https://img.shields.io/github/issues/microsoft/vscode/bug.svg)](https://github.com/microsoft/vscode/issues?utf8=✓&q=is%3Aissue+is%3Aopen+label%3Abug)
 [![Gitter](https://img.shields.io/badge/chat-on%20gitter-yellow.svg)](https://gitter.im/Microsoft/vscode)
