@@ -82,3 +82,8 @@ export const CUSTOM_AI_EDIT_FILE_TOOL_NAME = 'editFile';
 export const CUSTOM_AI_PLAN_WORKFLOW_TOOL_ID = 'customAi_planCrossAppWorkflow';
 /** Reference name used by the model (function `name` in OpenAI tool-calling). */
 export const CUSTOM_AI_PLAN_WORKFLOW_TOOL_NAME = 'planCrossAppWorkflow';
+
+/** Tool id for the Custom AI surface blueprint verifier. */
+export const CUSTOM_AI_VERIFY_SURFACE_BLUEPRINT_TOOL_ID = 'customAi_verifySurfaceBlueprint';
+/** Reference name used by the model (function `name` in OpenAI tool-calling). */
+export const CUSTOM_AI_VERIFY_SURFACE_BLUEPRINT_TOOL_NAME = 'verifySurfaceBlueprint';

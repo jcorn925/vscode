@@ -1,6 +1,6 @@
 ---
 name: ui-tab-design-evaluator
-description: Evaluate whether the VS Code custom goal-workspace UI tab implementation matches the approved no-left-column Guided Builder design. Use when reviewing, auditing, scoring, or validating code, screenshots, or running UI for `ModeShellContribution`, `custom-mode-ui-surface-setup`, the UI tab, goal workspace surface generation, context builder flows, or agent handoff/plan panels in this custom VS Code fork.
+description: Evaluate whether the VS Code custom goal-workspace UI tab implementation matches the approved Guided Builder design. Use when reviewing, auditing, scoring, or validating code, screenshots, or running UI for `ModeShellContribution`, `custom-mode-ui-surface-setup`, the UI tab landing callout, goal workspace surface generation, brand setup, or surface handoff in this custom VS Code fork.
 ---
 
 # UI Tab Design Evaluator
@@ -9,48 +9,79 @@ Evaluate the implemented UI tab against the approved design direction for the go
 
 ## Target Design
 
-The approved direction is **Guided Builder without the left column**.
+The approved direction is a **surface-first Guided Builder** with a clear **no-project landing** and a **single scrollable builder column** when `+ Add Surface` is open.
+
+### No-project landing (UI tab, no workspace folder)
+
+When `custom-mode-shell-hasProject` is absent, show a centered callout (`custom-mode-callout`) in the UI preview area:
+
+- Title: **Build your goal workspace**
+- Subtitle explaining goal workspace ties business, brand, and apps together with autosave
+- Numbered steps: name business → brand assets → pick/generate surfaces one at a time
+- **Starter surfaces** chip row listing all eight starter names (Marketing Site, Booking, Client Portal, Trainer Admin, Analytics, Content Scheduler, Ads Manager, Subscriptions)
+- Primary CTA: **Open Goal Workspace Example**
+- Callout hidden once a project folder is open (`custom-mode-shell-hasProject`)
+
+### Guided Builder (`+ Add Surface`)
 
 Required structure:
 
-- Keep the VS Code-like top workbench navigation: product/workspace title area, active `UI` tab, `Code` tab, `+ Add Surface`, and right utility actions when present.
-- Remove the old left progress rail/column entirely. There should be no persistent left column with `Goal`, `Context`, `Surfaces`, `Generate`, and no starter-surface side card.
-- Use a compact horizontal stepper or progress strip near the top of the main content with `Goal`, `Context`, `Surfaces`, `Generate`; the active state should make the current step clear.
-- Expand the main builder content into the space freed by the removed left rail.
-- Preserve a two-zone layout: main builder content on the left/middle and a right `Agent Plan` panel.
-- Main builder content should include `Build Goal Workspace`, goal summary, `Online Personal Training Business`, north-star metric `active_paid_clients`, context rows, notes for agent, `Save Draft`, and `Generate Surfaces`.
-- Context rows should include `Customer & Pain`, `Offers & Pricing`, `Booking Flow`, `Payments`, `Acquisition`, and `Analytics`, each with an icon or affordance, concise prompt text, status, and action.
-- Right `Agent Plan` should group what will be generated: `Workspace definition`, `Applications (apps/)`, `Shared domain`, `Ix metadata`, and `What happens next`.
-- Starter surfaces should be a compact inline action near the surfaces/progress area or below the context list, not a dominant row of equal-weight buttons and not a left-side card.
+- Keep the VS Code-like top workbench navigation: product/workspace title area, active **UI** tab, **Code** tab, **+ Add Surface**, surface tabs when declared, and right utility actions when present.
+- Remove the old left progress rail/column entirely.
+- **Do not** use exclusive step tabs, section tab rails, sticky outline nav, or a page hero above the builder form.
+- **Single main column** only: Goal → Brand → Surfaces (no right companion Agent Plan panel in the current design).
+- Right **AI chat** column may remain visible; surface handoff attaches `workspace.goal.json` to that chat session.
+- Main scroll column content (top to bottom):
+  1. **Goal** — editable business name and description with autosave status (`Unsaved changes` / `Saved …` / `All changes saved`)
+  2. **Brand** — logo drop zones (full logo + mark), primary/secondary/accent color pickers (persisted to `workspace.goal.json` + `.agent/brand/`)
+  3. **Surfaces** — **2-column grid** of all eight starter cards (summary, highlights, icon) plus a dashed **New Surface** `+` card; clicking a card autosaves then opens surface handoff (one surface at a time)
+- **No** Save Draft or bulk Generate Surfaces buttons — goal, brand, and builder state **autosave** on change (~600ms debounce).
+- **No** six-topic context questionnaire section and **no** freeform “Notes for the agent” textarea in the builder.
+- Surface starter clicks should require a business name, autosave goal/brand, then open surface handoff with `workspace.goal.json` attached.
 
 Visual expectations:
 
-- Native VS Code dark workbench feel: compact, mature, productivity-oriented, no marketing page composition.
-- Use VS Code theme colors where possible (`var(--vscode-...)`), with subtle borders, restrained blue accents, and semantic status indicators.
-- Prefer rows, separators, grouped panels, and compact status pills over heavy nested cards.
-- Avoid decorative gradients, oversized hero treatment, giant empty canvas, browser/device chrome, and one-off ornamental UI.
+- Native VS Code dark workbench feel: compact, mature, productivity-oriented, no marketing page composition inside the builder.
+- Use VS Code theme colors (`var(--vscode-...)`), subtle borders, restrained blue accents.
+- Prefer rows, section separators, grouped panels, and compact status pills over heavy nested cards.
+- Brand drop zones use dashed borders and inline image previews when logos are present.
+- Starter surface cards use icon, name, summary, and bullet highlights in a responsive 2-column grid.
 - Text must fit at desktop and narrower workbench widths without clipping or incoherent overlap.
+- macOS: Goal workspace title area must clear traffic lights (adequate top-bar padding / `mac-native` handling).
+
+## Anti-patterns (flag as P1)
+
+- Left progress rail or starter-surface side card
+- **Exclusive step tabs**, sticky outline nav (`Goal | Brand | Surfaces | Generate`), or page hero header copy above the builder
+- Six-topic **Context** rows or **Notes for the agent** textarea in the builder
+- Save Draft / Generate Surfaces bulk action buttons
+- Read-only goal summary when the design calls for editable business name/description
+- Missing brand section (logo upload + color pickers)
+- Landing callout missing steps or starter-surface chips when no project is open
+- Surfaces grid showing fewer than eight starters (excluding the New Surface card)
 
 ## Evaluation Workflow
 
 1. Locate the relevant implementation.
    - Start with `src/vs/workbench/contrib/custom/browser/modeShell.contribution.ts`.
-   - Search for `custom-mode-ui-surface-setup`, `uiSurfaceSetup`, `Agent Plan`, `Build Goal Workspace`, `Create first surface`, `STARTER_SURFACES`, and `ADD_SURFACE_ID`.
-   - Include CSS embedded in TypeScript and any adjacent style files.
+   - Search for `custom-mode-callout`, `createGoalWorkspaceLandingCallout`, `custom-mode-ui-surface-setup`, `custom-mode-ui-surface-brand-dropzone`, `uiSurfaceSetup`, `surface-builder-handoff`, `STARTER_SURFACES`, and `ADD_SURFACE_ID`.
+   - Include CSS embedded in TypeScript and `src/custom/goalWorkspace/goalWorkspaceSurfaceSetup.ts`.
 
 2. Inspect the actual UI when feasible.
+   - **No project**: verify landing callout copy, steps, surface chips, and CTA.
+   - **With project + Add Surface**: verify builder sections, autosave label, surface grid, and handoff.
    - If a running workbench or screenshot is available, inspect it directly.
-   - If the user provides a screenshot, use it as visual evidence.
    - If no runtime is available, evaluate DOM construction, class names, layout CSS, and copy.
 
 3. Compare implementation to the Target Design.
-   - Check layout first: no left rail, horizontal stepper, expanded main content, right plan panel.
-   - Check content second: required sections, labels, CTAs, context rows, and agent plan groups.
-   - Check interaction affordances third: status visibility, actions, starter suggestions placement, handoff clarity.
-   - Check visual quality last: density, spacing, hierarchy, VS Code theme usage, responsive behavior.
+   - Check landing first (no-project callout).
+   - Check builder layout: no left rail, single scroll column, no sticky outline or page hero.
+   - Check content: editable goal, brand assets, full surfaces grid + New Surface card.
+   - Check interaction: autosave (no manual save buttons), per-surface handoff, business-name guard.
+   - Check visual quality: density, spacing, hierarchy, VS Code theme usage, responsive behavior.
 
 4. Score the implementation.
-   - `0`: Not implemented or still resembles the original awful static setup.
+   - `0`: Not implemented or still resembles the original static setup.
    - `1`: Some copy/content exists, but layout is materially wrong.
    - `2`: Main design direction recognizable, but key structural pieces are missing.
    - `3`: Mostly matches with several polish or responsiveness gaps.

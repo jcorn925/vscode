@@ -31,6 +31,7 @@ import { CustomAiChatAgent } from '../../../../../custom/ai/browser/customAiChat
 import { CustomAiChatTraceService, ICustomAiChatTraceService } from '../../../../../custom/ai/browser/customAiChatTrace.js';
 import { CustomAiEditFileTool, CustomAiEditFileToolData } from '../../../../../custom/ai/browser/customAiEditFileTool.js';
 import { CustomAiPlanCrossAppWorkflowTool, CustomAiPlanCrossAppWorkflowToolData } from '../../../../../custom/ai/browser/customAiPlanCrossAppWorkflowTool.js';
+import { CustomAiVerifySurfaceBlueprintTool, CustomAiVerifySurfaceBlueprintToolData } from '../../../../../custom/ai/browser/customAiVerifySurfaceBlueprintTool.js';
 import { promptForCustomAiApiKey } from '../../../../../custom/ai/browser/customAiApiKeyPrompt.js';
 import {
 	CUSTOM_AI_COMMAND_OPEN_API_KEY_HELP,
@@ -240,6 +241,9 @@ export class CustomAiContribution extends Disposable implements IWorkbenchContri
 
 		const planWorkflowTool = instantiationService.createInstance(CustomAiPlanCrossAppWorkflowTool);
 		this._register(toolsService.registerTool(CustomAiPlanCrossAppWorkflowToolData, planWorkflowTool));
+
+		const verifySurfaceBlueprintTool = instantiationService.createInstance(CustomAiVerifySurfaceBlueprintTool);
+		this._register(toolsService.registerTool(CustomAiVerifySurfaceBlueprintToolData, verifySurfaceBlueprintTool));
 
 		const agentImpl = this._register(instantiationService.createInstance(CustomAiChatAgent));
 		this._register(this._chatAgents.registerAgent('custom.ai', {

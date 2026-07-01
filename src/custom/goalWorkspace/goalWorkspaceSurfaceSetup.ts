@@ -7,94 +7,97 @@ import { VSBuffer } from '../../vs/base/common/buffer.js';
 import { URI } from '../../vs/base/common/uri.js';
 import { joinPath } from '../../vs/base/common/resources.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
-import { Codicon } from '../../vs/base/common/codicons.js';
-import { ThemeIcon } from '../../vs/base/common/themables.js';
-import type { GoalWorkspace, GoalWorkspaceShared } from './GoalWorkspaceService.js';
-import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER } from './GoalWorkspaceService.js';
+import type { GoalWorkspaceBrand, GoalWorkspaceShared } from './GoalWorkspaceService.js';
+import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_MANIFEST } from './GoalWorkspaceService.js';
 
 export const GOAL_WORKSPACE_BUILDER_DRAFT_FILE = 'builder-draft.json';
-export const GOAL_WORKSPACE_CONTEXT_SUBFOLDER = 'context';
+export const GOAL_WORKSPACE_BRAND_SUBFOLDER = 'brand';
 
-export type SurfaceSetupStep = 'goal' | 'context' | 'surfaces' | 'generate';
+export type SurfaceSetupStep = 'goal' | 'brand' | 'surfaces';
 
-export type SurfaceSetupContextStatus = 'complete' | 'progress' | 'not-started';
-
-export interface SurfaceSetupContextTopic {
-	readonly id: string;
-	readonly titleKey: string;
-	readonly promptKey: string;
-	readonly icon: ThemeIcon;
-	readonly fileName: string;
-}
-
-export const SURFACE_SETUP_CONTEXT_TOPICS: readonly SurfaceSetupContextTopic[] = [
-	{ id: 'customer-pain', titleKey: 'customer', promptKey: 'customer', icon: Codicon.person, fileName: 'customer-pain.md' },
-	{ id: 'offers-pricing', titleKey: 'offers', promptKey: 'offers', icon: Codicon.tag, fileName: 'offers-pricing.md' },
-	{ id: 'booking-flow', titleKey: 'booking', promptKey: 'booking', icon: Codicon.calendar, fileName: 'booking-flow.md' },
-	{ id: 'payments', titleKey: 'payments', promptKey: 'payments', icon: Codicon.creditCard, fileName: 'payments.md' },
-	{ id: 'acquisition', titleKey: 'acquisition', promptKey: 'acquisition', icon: Codicon.megaphone, fileName: 'acquisition.md' },
-	{ id: 'analytics', titleKey: 'analytics', promptKey: 'analytics', icon: Codicon.graphLine, fileName: 'analytics.md' },
-] as const;
-
-export const SURFACE_SETUP_STEPS: readonly SurfaceSetupStep[] = ['goal', 'context', 'surfaces', 'generate'];
+export const SURFACE_SETUP_STEPS: readonly SurfaceSetupStep[] = ['goal', 'brand', 'surfaces'];
 
 export interface SurfaceSetupDraft {
 	readonly version: 1;
 	currentStep: SurfaceSetupStep;
-	agentNotes: string;
 	savedAt?: string;
 }
 
-export function contextTopicResource(workspaceFolder: URI, topic: SurfaceSetupContextTopic): URI {
-	return joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_CONTEXT_SUBFOLDER, topic.fileName);
+export interface GoalWorkspaceBuilderInput {
+	readonly name: string;
+	readonly description: string;
+	readonly brand: GoalWorkspaceBrandInput;
+}
+
+export interface GoalWorkspaceBrandInput {
+	readonly primaryColor?: string;
+	readonly secondaryColor?: string;
+	readonly accentColor?: string;
+	readonly logoPath?: string;
+	readonly logoMarkPath?: string;
+}
+
+export function brandFolderResource(workspaceFolder: URI): URI {
+	return joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_BRAND_SUBFOLDER);
 }
 
 export function builderDraftResource(workspaceFolder: URI): URI {
 	return joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_BUILDER_DRAFT_FILE);
 }
 
-export function resolveContextTopicStatus(content: string | undefined): SurfaceSetupContextStatus {
-	const trimmed = content?.trim() ?? '';
-	if (trimmed.length >= 80) {
-		return 'complete';
+export function hasBrandConfigured(brand: GoalWorkspaceBrand | GoalWorkspaceBrandInput | undefined): boolean {
+	if (!brand) {
+		return false;
 	}
-	if (trimmed.length > 0) {
-		return 'progress';
-	}
-	return 'not-started';
+	return Boolean(
+		brand.primaryColor?.trim()
+		|| brand.secondaryColor?.trim()
+		|| brand.accentColor?.trim()
+		|| brand.logoPath?.trim()
+		|| brand.logoMarkPath?.trim()
+	);
 }
 
 export function inferSurfaceSetupStep(
 	hasGoal: boolean,
-	contextStatuses: readonly SurfaceSetupContextStatus[],
+	hasBrand: boolean,
 	surfaceCount: number,
 ): SurfaceSetupStep {
 	if (!hasGoal) {
 		return 'goal';
 	}
-	if (contextStatuses.some(status => status !== 'complete')) {
-		return 'context';
+	if (!hasBrand) {
+		return 'brand';
 	}
-	if (surfaceCount === 0) {
+	return 'surfaces';
+}
+
+function normalizeSurfaceSetupStep(step: string | undefined): SurfaceSetupStep | undefined {
+	if (step === 'goal' || step === 'brand' || step === 'surfaces') {
+		return step;
+	}
+	if (step === 'context') {
+		return 'brand';
+	}
+	if (step === 'generate') {
 		return 'surfaces';
 	}
-	return 'generate';
+	return undefined;
 }
 
 export function parseSurfaceSetupDraft(raw: string): SurfaceSetupDraft | undefined {
 	try {
-		const parsed = JSON.parse(raw) as Partial<SurfaceSetupDraft>;
+		const parsed = JSON.parse(raw) as Partial<SurfaceSetupDraft & { agentNotes?: string }>;
 		if (parsed.version !== 1) {
 			return undefined;
 		}
-		const step = parsed.currentStep;
-		if (step !== 'goal' && step !== 'context' && step !== 'surfaces' && step !== 'generate') {
+		const step = normalizeSurfaceSetupStep(parsed.currentStep);
+		if (!step) {
 			return undefined;
 		}
 		return {
 			version: 1,
 			currentStep: step,
-			agentNotes: typeof parsed.agentNotes === 'string' ? parsed.agentNotes : '',
 			savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : undefined,
 		};
 	} catch {
@@ -127,7 +130,6 @@ export async function saveSurfaceSetupDraft(
 	const payload: SurfaceSetupDraft = {
 		version: 1,
 		currentStep: draft.currentStep,
-		agentNotes: draft.agentNotes,
 		savedAt: draft.savedAt ?? new Date().toISOString(),
 	};
 	await fileService.createFolder(joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER));
@@ -135,117 +137,90 @@ export async function saveSurfaceSetupDraft(
 	return payload;
 }
 
-export async function loadContextTopicContents(
+function slugifyGoalId(name: string): string {
+	const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+	return slug || 'business';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function cleanBrandInput(brand: GoalWorkspaceBrandInput): Record<string, string> {
+	const payload: Record<string, string> = {};
+	if (brand.primaryColor?.trim()) {
+		payload.primaryColor = brand.primaryColor.trim();
+	}
+	if (brand.secondaryColor?.trim()) {
+		payload.secondaryColor = brand.secondaryColor.trim();
+	}
+	if (brand.accentColor?.trim()) {
+		payload.accentColor = brand.accentColor.trim();
+	}
+	if (brand.logoPath?.trim()) {
+		payload.logoPath = brand.logoPath.trim();
+	}
+	if (brand.logoMarkPath?.trim()) {
+		payload.logoMarkPath = brand.logoMarkPath.trim();
+	}
+	return payload;
+}
+
+const DEFAULT_SHARED_PATHS: GoalWorkspaceShared = {
+	domain: 'packages/domain',
+	events: 'packages/events',
+	ui: 'packages/ui',
+	auth: 'packages/auth',
+	workflows: 'workflows',
+};
+
+export async function saveGoalWorkspaceBuilderFields(
 	fileService: IFileService,
-	workspaceFolder: URI | undefined,
-): Promise<Map<string, string>> {
-	const contents = new Map<string, string>();
-	if (!workspaceFolder) {
-		return contents;
-	}
-	await Promise.all(SURFACE_SETUP_CONTEXT_TOPICS.map(async topic => {
-		try {
-			const file = await fileService.readFile(contextTopicResource(workspaceFolder, topic));
-			contents.set(topic.id, file.value.toString());
-		} catch {
-			contents.set(topic.id, '');
+	workspaceFolder: URI,
+	input: GoalWorkspaceBuilderInput,
+	existingGoalId?: string,
+): Promise<void> {
+	const manifestResource = joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST);
+	let raw: Record<string, unknown> = {};
+	try {
+		const content = await fileService.readFile(manifestResource);
+		raw = JSON.parse(content.value.toString()) as Record<string, unknown>;
+		if (!isRecord(raw)) {
+			raw = {};
 		}
-	}));
-	return contents;
-}
+	} catch {
+		raw = {};
+	}
 
-export interface SurfaceSetupAgentPlanGroup {
-	readonly title: string;
-	readonly ready: boolean;
-	readonly items: readonly { readonly icon: string; readonly name: string; readonly description: string }[];
-}
+	const goalRaw = isRecord(raw.goal) ? raw.goal : {};
+	const goalId = existingGoalId?.trim() || (typeof goalRaw.id === 'string' ? goalRaw.id : slugifyGoalId(input.name));
+	const goal: Record<string, unknown> = {
+		...goalRaw,
+		id: goalId,
+		name: input.name.trim(),
+	};
+	const description = input.description.trim();
+	if (description) {
+		goal.description = description;
+	} else {
+		delete goal.description;
+	}
 
-export function buildSurfaceSetupAgentPlan(
-	workspace: GoalWorkspace | undefined,
-	contextStatuses: readonly SurfaceSetupContextStatus[],
-): readonly SurfaceSetupAgentPlanGroup[] {
-	const shared = workspace?.shared ?? {};
-	const surfaces = workspace?.surfaces ?? [];
-	const contextReady = contextStatuses.every(status => status === 'complete');
-	const groups: SurfaceSetupAgentPlanGroup[] = [
-		{
-			title: 'Workspace definition',
-			ready: Boolean(workspace?.goal?.name),
-			items: [{
-				icon: '[]',
-				name: 'workspace.goal.json',
-				description: workspace?.goal?.northStarMetric
-					? `Goal, metric (${workspace.goal.northStarMetric}), and context summary`
-					: 'Goal, metric, and context summary',
-			}],
-		},
-		{
-			title: 'Applications (apps/)',
-			ready: surfaces.length > 0,
-			items: surfaces.length > 0
-				? surfaces.map(surface => ({
-					icon: '<>',
-					name: surface.path ?? `apps/${surface.id}`,
-					description: surface.purpose ?? surface.name,
-				}))
-				: [{
-					icon: '<>',
-					name: 'apps/*',
-					description: 'Surfaces you choose or generate from starter suggestions',
-				}],
-		},
-		{
-			title: 'Shared domain',
-			ready: hasSharedPaths(shared),
-			items: buildSharedPlanItems(shared),
-		},
-		{
-			title: 'Ix metadata',
-			ready: surfaces.some(surface => Boolean(surface.ixSubsystems.length || surface.ix)),
-			items: [{
-				icon: '//',
-				name: '.agent/ix-surface-map.json',
-				description: 'Code-level understanding and surface map',
-			}],
-		},
-	];
-	void contextReady;
-	return groups;
-}
+	const brand = cleanBrandInput(input.brand);
+	raw.goal = goal;
+	if (Object.keys(brand).length > 0) {
+		raw.brand = brand;
+	} else {
+		delete raw.brand;
+	}
+	if (!Array.isArray(raw.surfaces)) {
+		raw.surfaces = [];
+	}
+	if (!isRecord(raw.shared)) {
+		raw.shared = { ...DEFAULT_SHARED_PATHS };
+	}
 
-function hasSharedPaths(shared: GoalWorkspaceShared): boolean {
-	return Boolean(shared.domain || shared.events || shared.ui || shared.auth || shared.workflows);
-}
-
-function buildSharedPlanItems(shared: GoalWorkspaceShared): { icon: string; name: string; description: string }[] {
-	const items: { icon: string; name: string; description: string }[] = [];
-	if (shared.domain) {
-		items.push({ icon: '{}', name: shared.domain, description: 'Core entities and types' });
-	}
-	if (shared.events) {
-		items.push({ icon: '{}', name: shared.events, description: 'Domain events' });
-	}
-	if (shared.workflows) {
-		items.push({ icon: '{}', name: shared.workflows, description: 'Processes and automations' });
-	}
-	if (shared.ui) {
-		items.push({ icon: '{}', name: shared.ui, description: 'Shared UI primitives' });
-	}
-	if (shared.auth) {
-		items.push({ icon: '{}', name: shared.auth, description: 'Authentication and identity' });
-	}
-	if (items.length === 0) {
-		items.push(
-			{ icon: '{}', name: 'domain/', description: 'Core entities and types' },
-			{ icon: '{}', name: 'events/', description: 'Domain events' },
-			{ icon: '{}', name: 'workflows/', description: 'Processes and automations' },
-		);
-	}
-	return items;
-}
-
-export function surfacePlanReadyLabel(ready: boolean): string {
-	return ready ? 'Ready' : 'Pending';
+	await fileService.writeFile(manifestResource, VSBuffer.fromString(JSON.stringify(raw, null, '\t')));
 }
 
 export function nextSurfaceSetupStep(step: SurfaceSetupStep): SurfaceSetupStep {

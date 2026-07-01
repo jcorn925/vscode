@@ -24,3 +24,14 @@ export const CUSTOM_AI_SURFACE_SETUP_PROMPT_SUFFIX = [
 	'Scaffold the app as Next.js (App Router, TypeScript) with SWC data-vscode-src mapping configured in next.config.',
 	'Copy swc_plugin_vscode_ui_src.wasm into the surface app and wire experimental.swcPlugins, or tell the user to run **Enable component mapping for Next.js (SWC plugin)** after next.config exists.',
 ].join(' ');
+
+/** Blueprint-first workflow for surface handoff from the UI tab. */
+export const CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_LINES = [
+	'Surface creation is blueprint-first: finalize `.agent/surfaces/<surface-id>.blueprint.json` before scaffolding app files.',
+	'During blueprint phase, edit only the blueprint JSON and workspace.goal.json surface metadata — do not scaffold apps yet.',
+	'During scaffold phase, implement every subsystem in the blueprint, register the surface in workspace.goal.json, then call `verifySurfaceBlueprint`.',
+	'During repair phase, fix only the reported gaps and call `verifySurfaceBlueprint` again.',
+	'Do not claim the surface is complete unless `verifySurfaceBlueprint` returns passed.',
+] as const;
+
+export const CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_GUIDANCE = CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_LINES.join('\n');

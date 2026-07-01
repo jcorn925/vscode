@@ -3,15 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-export type SurfaceBuilderHandoffKind = 'context' | 'surface';
-
 export interface SurfaceBuilderHandoffStateValue {
-	readonly kind: SurfaceBuilderHandoffKind;
-	readonly topicId?: string;
+	readonly kind: 'surface';
+	readonly templateId: string;
+	readonly surfaceId: string;
+	readonly surfaceName: string;
 	readonly title: string;
-	readonly fileName?: string;
+	readonly phase: 'blueprint' | 'scaffold' | 'verify' | 'repair';
 	readonly prompt?: string;
-	readonly surfaceName?: string;
+	readonly blueprintResource?: string;
+	readonly repairAttempts?: number;
 }
 
 let activeHandoff: SurfaceBuilderHandoffStateValue | undefined;

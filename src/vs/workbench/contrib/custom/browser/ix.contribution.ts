@@ -12,6 +12,7 @@ import { ServicesAccessor } from '../../../../platform/instantiation/common/inst
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_IX_OVERLAY_FILE, IGoalWorkspaceService, type GoalSurface } from '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
+import { matchSurfaceToIxSubsystems } from '../../../../../custom/goalWorkspace/surfaceIxMatch.js';
 import { IIxIntegrationService } from '../../../../../custom/ix/IxIntegrationService.js';
 import { formatIxSubsystemsDetailedDiscoveryCommand, parseSubsystemFingerprints, runSubsystemsDetailedDiscovery, type SubsystemFingerprint } from './processNotesSubsystemSnapshot.js';
 
@@ -102,75 +103,17 @@ function buildGoalWorkspaceIxSurfaceOverlay(surfaces: readonly GoalSurface[], su
 			path: subsystem.entryPath,
 			fileCount: subsystem.fileCount
 		})),
-		surfaces: surfaces.map(surface => matchSurfaceToIxSubsystems(surface, subsystems))
+		surfaces: surfaces.map(surface => matchSurfaceToIxSubsystems(surface, subsystems.map(toIxRegion)))
 	};
 }
 
-function matchSurfaceToIxSubsystems(surface: GoalSurface, subsystems: readonly SubsystemFingerprint[]): { surfaceId: string; subsystemIds: string[]; subsystemLabels: string[]; matchReason: string } {
-	const declaredMatches = new Set([
-		...surface.ixSubsystems,
-		...(surface.ix?.subsystemIds ?? []),
-		...(surface.ix?.subsystemLabels ?? []),
-	].map(normalizeIxText).filter(Boolean));
-	const surfaceTokens = surfaceMatchTokens(surface);
-	const matched: SubsystemFingerprint[] = [];
-	let usedDeclared = false;
-
-	for (const subsystem of subsystems) {
-		const candidates = [
-			subsystem.regionId,
-			subsystem.name,
-			subsystem.entryPath ?? '',
-			...subsystem.memberFiles,
-		].map(normalizeIxText).filter(Boolean);
-
-		if (candidates.some(candidate => declaredMatches.has(candidate))) {
-			matched.push(subsystem);
-			usedDeclared = true;
-			continue;
-		}
-
-		if (surfaceTokens.length > 0 && candidates.some(candidate => surfaceTokens.some(token => candidate.includes(token)))) {
-			matched.push(subsystem);
-		}
-	}
-
+function toIxRegion(subsystem: SubsystemFingerprint): { regionId: string; name: string; entryPath?: string; memberFiles?: readonly string[] } {
 	return {
-		surfaceId: surface.id,
-		subsystemIds: uniqueStrings(matched.map(subsystem => subsystem.regionId)),
-		subsystemLabels: uniqueStrings(matched.map(subsystem => subsystem.name)),
-		matchReason: usedDeclared ? 'declared ix metadata' : 'heuristic name/path match'
+		regionId: subsystem.regionId,
+		name: subsystem.name,
+		entryPath: subsystem.entryPath,
+		memberFiles: subsystem.memberFiles,
 	};
-}
-
-function surfaceMatchTokens(surface: GoalSurface): readonly string[] {
-	return uniqueStrings([
-		surface.id,
-		surface.name,
-		surface.path ?? '',
-		...(surface.capabilities ?? []),
-		...(surface.entities ?? []),
-	].flatMap(value => normalizeIxText(value).split(/[^a-z0-9]+/i))
-		.filter(token => token.length >= 3));
-}
-
-function normalizeIxText(value: string): string {
-	return value.trim().toLowerCase().replace(/\\/g, '/');
-}
-
-function uniqueStrings(values: readonly string[]): string[] {
-	const seen = new Set<string>();
-	const result: string[] = [];
-	for (const value of values) {
-		const normalized = value.trim();
-		const key = normalized.toLowerCase();
-		if (!normalized || seen.has(key)) {
-			continue;
-		}
-		seen.add(key);
-		result.push(normalized);
-	}
-	return result;
 }
 
 registerAction2(class extends Action2 {

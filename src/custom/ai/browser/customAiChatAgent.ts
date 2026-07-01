@@ -55,7 +55,7 @@ import {
 import { CustomAiInvalidApiKeyError, readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
 import { IGoalWorkspaceService, listGoalWorkspaceCrossAppWorkflows, type GoalWorkspaceContextFile, type GoalWorkspaceIxOverlay, type GoalWorkspaceState, type GoalSurface } from '../../goalWorkspace/GoalWorkspaceService.js';
 import { SurfaceBuilderHandoffState } from '../../goalWorkspace/surfaceBuilderHandoffState.js';
-import { CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_LINES } from '../common/customAiSurfaceScaffold.js';
+import { CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_LINES } from '../common/customAiSurfaceScaffold.js';
 import { ICustomAiChatTraceService, summarizeTraceMessages } from './customAiChatTrace.js';
 
 const MAX_TOOL_ROUNDS = 15;
@@ -70,8 +70,9 @@ export const CUSTOM_AI_PRODUCT_SYSTEM_PROMPT = [
 	'The user is usually creating or editing a collection of related app surfaces that serve one business goal.',
 	'Use the goal workspace as the product model: goal, surfaces, shared domain, events, workflows, analytics, durable memory, and Ix/code metadata.',
 	'For business/product changes, first identify the affected surfaces and shared context, then make cohesive edits across the manifest, app files, shared packages, and agent memory as needed.',
-	'When creating a new surface, register it in workspace.goal.json, scaffold its app files, connect it to relevant shared workflows/entities/events, and note memory/Ix updates.',
+	'When creating a new surface, finalize `.agent/surfaces/<surface-id>.blueprint.json` before scaffolding, then register it in workspace.goal.json, scaffold app files, call `verifySurfaceBlueprint`, and connect shared workflows/entities/events.',
 	CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE,
+	CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_GUIDANCE,
 	'Ask one focused question only when a missing business decision would materially change the implementation.'
 ].join('\n');
 
@@ -260,6 +261,29 @@ export function buildCustomAiWorkflowToolHint(state: GoalWorkspaceState): string
 	].join(' ');
 }
 
+export function buildCustomAiSurfaceHandoffContextBlock(): string | undefined {
+	const handoff = SurfaceBuilderHandoffState.getActive();
+	if (!handoff || handoff.kind !== 'surface') {
+		return undefined;
+	}
+	return [
+		'Surface builder handoff:',
+		`- Phase: ${handoff.phase}`,
+		`- Surface: ${handoff.surfaceName} (${handoff.surfaceId})`,
+		`- Template: ${handoff.templateId}`,
+		handoff.blueprintResource ? `- Blueprint: ${handoff.blueprintResource}` : undefined,
+		handoff.phase === 'blueprint'
+			? '- Edit the blueprint JSON only. Do not scaffold app files yet.'
+			: undefined,
+		handoff.phase === 'scaffold'
+			? '- Scaffold every blueprint subsystem, update workspace.goal.json, then call verifySurfaceBlueprint.'
+			: undefined,
+		handoff.phase === 'repair'
+			? '- Fix only the reported blueprint gaps, then call verifySurfaceBlueprint again.'
+			: undefined,
+	].filter((line): line is string => Boolean(line)).join('\n');
+}
+
 export interface CustomAiSystemMessageOptions {
 	readonly customSystemPrompt?: string;
 	readonly toolsEnabled: boolean;
@@ -275,6 +299,10 @@ export function buildCustomAiSystemMessageParts(options: CustomAiSystemMessageOp
 	const workflowHint = buildCustomAiWorkflowToolHint(options.goalWorkspaceState);
 	if (workflowHint) {
 		parts.push(workflowHint);
+	}
+	const handoffContext = buildCustomAiSurfaceHandoffContextBlock();
+	if (handoffContext) {
+		parts.push(handoffContext);
 	}
 	if (options.customSystemPrompt?.trim()) {
 		parts.push(options.customSystemPrompt.trim());
@@ -608,39 +636,57 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 
 	async provideFollowups(_request: IChatAgentRequest, _result: IChatAgentResult, _history: IChatAgentHistoryEntry[], _token: CancellationToken): Promise<IChatFollowup[]> {
 		const handoff = SurfaceBuilderHandoffState.getActive();
-		if (handoff?.kind === 'context') {
-			return [
-				{
-					kind: 'reply',
-					agentId: 'custom.ai',
-					title: localize('customAi.followup.contextNextTitle', 'Save & next topic'),
-					message: localize('customAi.followup.contextNextMessage', 'Save what we captured to the context file for "{0}", then ask me the next missing context question.', handoff.title),
-				},
-				{
-					kind: 'reply',
-					agentId: 'custom.ai',
-					title: localize('customAi.followup.contextSkipTitle', 'Skip this topic'),
-					message: localize('customAi.followup.contextSkipMessage', 'Skip the "{0}" context topic for now and move on.', handoff.title),
-				},
-			];
-		}
 		if (handoff?.kind === 'surface') {
+			const surfaceName = handoff.surfaceName ?? handoff.title;
+			if (handoff.phase === 'blueprint') {
+				return [
+					{
+						kind: 'reply',
+						agentId: 'custom.ai',
+						title: localize('customAi.followup.finalizeBlueprintTitle', 'Finalize blueprint'),
+						message: localize(
+							'customAi.followup.finalizeBlueprintMessage',
+							'Finalize the blueprint for {0} in `.agent/surfaces/{1}.blueprint.json`, then register the surface metadata in workspace.goal.json. Do not scaffold app files yet.',
+							surfaceName,
+							handoff.surfaceId,
+						),
+					},
+					{
+						kind: 'reply',
+						agentId: 'custom.ai',
+						title: localize('customAi.followup.surfaceScaffoldTitle', 'Scaffold this surface'),
+						message: localize(
+							'customAi.followup.surfaceScaffoldBlueprintMessage',
+							'The blueprint for {0} is ready. Scaffold the surface, implement every subsystem, then call verifySurfaceBlueprint.',
+							surfaceName,
+						),
+					},
+				];
+			}
+			if (handoff.phase === 'scaffold' || handoff.phase === 'verify') {
+				return [
+					{
+						kind: 'reply',
+						agentId: 'custom.ai',
+						title: localize('customAi.followup.verifySurfaceTitle', 'Verify surface'),
+						message: localize(
+							'customAi.followup.verifySurfaceMessage',
+							'Call verifySurfaceBlueprint for {0} and fix any reported gaps.',
+							handoff.surfaceId,
+						),
+					},
+				];
+			}
 			return [
 				{
 					kind: 'reply',
 					agentId: 'custom.ai',
-					title: localize('customAi.followup.surfaceScaffoldTitle', 'Scaffold this surface'),
+					title: localize('customAi.followup.repairSurfaceTitle', 'Repair surface gaps'),
 					message: localize(
-						'customAi.followup.surfaceScaffoldMessage',
-						'Scaffold the {0} surface, register it in workspace.goal.json, and connect it to shared workflows and Ix metadata.',
-						handoff.surfaceName ?? handoff.title,
+						'customAi.followup.repairSurfaceMessage',
+						'Fix the reported blueprint gaps for {0}, then call verifySurfaceBlueprint again.',
+						surfaceName,
 					),
-				},
-				{
-					kind: 'reply',
-					agentId: 'custom.ai',
-					title: localize('customAi.followup.surfaceCancelTitle', 'Cancel surface draft'),
-					message: localize('customAi.followup.surfaceCancelMessage', 'Stop drafting this surface for now.'),
 				},
 			];
 		}

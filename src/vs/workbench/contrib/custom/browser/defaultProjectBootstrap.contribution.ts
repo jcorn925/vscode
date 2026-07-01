@@ -11,6 +11,7 @@ import '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
 import { DefaultProjectBootstrapContribution } from './defaultProjectBootstrap.js';
 import { DockerMcpBootstrapContribution } from './dockerMcpBootstrap.js';
 import './goalWorkspace.contribution.js';
+import './surfaceBlueprint.contribution.js';
 
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 	id: 'custom',

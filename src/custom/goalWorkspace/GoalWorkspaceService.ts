@@ -30,6 +30,14 @@ export interface GoalWorkspaceGoal {
 	readonly northStarMetric?: string;
 }
 
+export interface GoalWorkspaceBrand {
+	readonly primaryColor?: string;
+	readonly secondaryColor?: string;
+	readonly accentColor?: string;
+	readonly logoPath?: string;
+	readonly logoMarkPath?: string;
+}
+
 export interface GoalWorkspaceSurface {
 	readonly id: string;
 	readonly name: string;
@@ -184,6 +192,7 @@ export interface GoalWorkspace {
 	readonly workspaceFolder: URI;
 	readonly manifestResource: URI;
 	readonly goal: GoalWorkspaceGoal;
+	readonly brand?: GoalWorkspaceBrand;
 	readonly surfaces: readonly GoalWorkspaceSurface[];
 	readonly shared: GoalWorkspaceShared;
 }
@@ -476,6 +485,8 @@ export function parseGoalWorkspaceManifest(raw: unknown, workspaceFolder: URI, m
 		northStarMetric: optionalString(goalRaw, 'northStarMetric', '$.goal.northStarMetric', diagnostics)
 	};
 
+	const brand = parseBrand(raw.brand, diagnostics);
+
 	const surfacesRaw = raw.surfaces;
 	const surfaces: GoalWorkspaceSurface[] = [];
 	if (surfacesRaw === undefined) {
@@ -511,6 +522,7 @@ export function parseGoalWorkspaceManifest(raw: unknown, workspaceFolder: URI, m
 			workspaceFolder,
 			manifestResource,
 			goal,
+			brand,
 			surfaces,
 			shared
 		},
@@ -1052,6 +1064,27 @@ function parseSurfaceIxMetadata(raw: unknown, path: string, diagnostics: GoalWor
 		tags,
 		notes
 	};
+}
+
+function parseBrand(raw: unknown, diagnostics: GoalWorkspaceDiagnostic[]): GoalWorkspaceBrand | undefined {
+	if (raw === undefined) {
+		return undefined;
+	}
+	if (!isRecord(raw)) {
+		diagnostics.push({ path: '$.brand', message: 'Brand must be an object.' });
+		return undefined;
+	}
+	const brand: GoalWorkspaceBrand = {
+		primaryColor: optionalString(raw, 'primaryColor', '$.brand.primaryColor', diagnostics),
+		secondaryColor: optionalString(raw, 'secondaryColor', '$.brand.secondaryColor', diagnostics),
+		accentColor: optionalString(raw, 'accentColor', '$.brand.accentColor', diagnostics),
+		logoPath: optionalString(raw, 'logoPath', '$.brand.logoPath', diagnostics),
+		logoMarkPath: optionalString(raw, 'logoMarkPath', '$.brand.logoMarkPath', diagnostics),
+	};
+	if (!brand.primaryColor && !brand.secondaryColor && !brand.accentColor && !brand.logoPath && !brand.logoMarkPath) {
+		return undefined;
+	}
+	return brand;
 }
 
 function parseShared(raw: unknown, diagnostics: GoalWorkspaceDiagnostic[]): GoalWorkspaceShared {

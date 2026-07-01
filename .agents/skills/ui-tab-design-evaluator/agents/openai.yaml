@@ -1,4 +1,4 @@
 interface:
   display_name: "UI Tab Design Evaluator"
-  short_description: "Score the UI tab against its target design"
-  default_prompt: "Use $ui-tab-design-evaluator to evaluate whether the UI tab implementation matches the approved design."
+  short_description: "Score the goal-workspace UI tab landing page and Guided Builder against the approved design"
+  default_prompt: "Use $ui-tab-design-evaluator to evaluate whether the UI tab landing callout and single-scroll Guided Builder match the approved design."
