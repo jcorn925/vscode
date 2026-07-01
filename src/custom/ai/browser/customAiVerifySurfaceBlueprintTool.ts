@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationToken } from '../../../vs/base/common/cancellation.js';
-import { joinPath } from '../../../vs/base/common/resources.js';
 import { IFileService } from '../../../vs/platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../vs/platform/workspace/common/workspace.js';
 import {
@@ -60,7 +59,7 @@ export class CustomAiVerifySurfaceBlueprintTool implements IToolImpl {
 		return {
 			invocationMessage: `Verifying surface blueprint for ${String(context.parameters.surfaceId ?? 'surface')}`,
 			pastTenseMessage: 'Verified surface blueprint',
-			presentation: ToolInvocationPresentation.hidden,
+			presentation: ToolInvocationPresentation.Hidden,
 		};
 	}
 

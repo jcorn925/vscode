@@ -133,6 +133,23 @@
 			"checks": [
 				{ "type": "npmScript", "script": "compile-check-ts-native" }
 			]
+		},
+		{
+			"id": "surface-blueprint-generation",
+			"title": "Surface blueprint plan-verify loop",
+			"description": "Surface creation uses subsystem templates, persisted blueprints, Ix-backed verification, and auto-repair handoff.",
+			"paths": [
+				"src/custom/goalWorkspace/surfaceBlueprintVerify.ts",
+				"src/custom/goalWorkspace/surfaceBlueprintTemplateRegistry.ts",
+				"src/custom/ai/browser/customAiVerifySurfaceBlueprintTool.ts",
+				"src/vs/workbench/contrib/custom/browser/surfaceBlueprint.contribution.ts",
+				".agents/skills/surface-blueprint-evaluator/SKILL.md"
+			],
+			"checks": [
+				{ "type": "fileExists", "path": "src/custom/goalWorkspace/surfaceBlueprintVerify.ts" },
+				{ "type": "fileExists", "path": ".agents/skills/surface-blueprint-evaluator/SKILL.md" },
+				{ "type": "testGrep", "pattern": "surfaceBlueprintVerify", "script": "scripts/test.sh" }
+			]
 		}
 	]
 }

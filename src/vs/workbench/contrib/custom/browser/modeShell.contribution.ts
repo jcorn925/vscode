@@ -100,6 +100,14 @@ const STORAGE_CONTEXT_GATHERING_OPEN = 'modeShell.contextGatheringOpen';
 const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
 const GOAL_OVERVIEW_SURFACE_ID = '__goal_overview__';
 const ADD_SURFACE_ID = '__add_surface__';
+
+function slugifySurfaceId(value: string): string {
+	return value.trim().toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		|| 'custom-surface';
+}
+
 interface StarterSurface {
 	readonly id: string;
 	readonly name: string;
@@ -3000,25 +3008,28 @@ class ModeShellContribution extends Disposable {
 		this._register(addDisposableListener(this.uiChatReopenBtn, 'click', () => this.setUiChatDismissed(false)));
 
 		SurfaceBlueprintOrchestrator.setRepairHandler(({ report, surfaceName, attempt }) => {
-			if (attempt > MAX_SURFACE_BLUEPRINT_REPAIR_ATTEMPTS) {
-				this.notificationService.warn(localize(
-					'customMode.surfaceBlueprintRepairLimit',
-					'Surface blueprint verification still has gaps for {0} after {1} repair attempts.',
-					surfaceName,
-					MAX_SURFACE_BLUEPRINT_REPAIR_ATTEMPTS,
-				));
-				return;
-			}
 			const repairPrompt = localize(
 				'customMode.surfaceBlueprintRepairPrompt',
-				'The {0} surface blueprint verification failed. Fix only the gaps below, then call verifySurfaceBlueprint again.\n\n{1}',
+				'The {0} surface blueprint verification failed (attempt {1}). Fix only the gaps below, then call verifySurfaceBlueprint again.\n\n{2}',
 				surfaceName,
+				attempt,
 				report,
 			);
 			this.uiChatWidget.setInput(repairPrompt);
 			this.uiChatWidget.focusInput();
 		});
-		this._register(toDisposable(() => SurfaceBlueprintOrchestrator.setRepairHandler(undefined)));
+		SurfaceBlueprintOrchestrator.setRepairLimitHandler(({ surfaceName }) => {
+			this.notificationService.warn(localize(
+				'customMode.surfaceBlueprintRepairLimit',
+				'Surface blueprint verification still has gaps for {0} after {1} repair attempts.',
+				surfaceName,
+				MAX_SURFACE_BLUEPRINT_REPAIR_ATTEMPTS,
+			));
+		});
+		this._register(toDisposable(() => {
+			SurfaceBlueprintOrchestrator.setRepairHandler(undefined);
+			SurfaceBlueprintOrchestrator.setRepairLimitHandler(undefined);
+		}));
 
 		this.modeTopBar.appendChild(this.uiSurfaceSwitcher);
 		const topBarSpacer = $('div.custom-mode-top-spacer');

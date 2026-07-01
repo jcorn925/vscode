@@ -14,6 +14,7 @@ import { IGoalWorkspaceService } from '../../../../../custom/goalWorkspace/GoalW
 import { formatSurfaceBlueprintGapReport, verifySurfaceBlueprint } from '../../../../../custom/goalWorkspace/surfaceBlueprintVerify.js';
 import { discoverIxSubsystemRegions } from '../../../../../custom/goalWorkspace/surfaceBlueprintIxDiscovery.js';
 import { SurfaceBlueprintOrchestrator } from '../../../../../custom/goalWorkspace/surfaceBlueprintOrchestrator.js';
+import { IIxIntegrationService } from '../../../../../custom/ix/IxIntegrationService.js';
 
 registerAction2(class extends Action2 {
 	constructor() {
