@@ -1,6 +1,6 @@
 {
-	"nameShort": "Code - OSS",
-	"nameLong": "Code - OSS",
+	"nameShort": "GoalConsole.ai",
+	"nameLong": "GoalConsole.ai",
 	"applicationName": "code-oss",
 	"dataFolderName": ".vscode-oss",
 	"sharedDataFolderName": ".vscode-oss-shared",
@@ -199,8 +199,7 @@
 		},
 		{
 			"id": "hc-light",
-			"label": "Light High Contrast",
-			"themeId": "Default High Contrast Light",
+			"label": "Default High Contrast Light",
 			"type": "hcLight"
 		},
 		{
