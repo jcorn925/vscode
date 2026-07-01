@@ -96,7 +96,6 @@ import {
 } from '../../../../../custom/goalWorkspace/goalWorkspaceSurfaceSetup.js';
 import { SurfaceBuilderHandoffState, type SurfaceBuilderHandoffStateValue } from '../../../../../custom/goalWorkspace/surfaceBuilderHandoffState.js';
 import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER } from '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
-import { CUSTOM_AI_SURFACE_SETUP_PROMPT_SUFFIX } from '../../../../../custom/ai/common/customAiSurfaceScaffold.js';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
@@ -207,6 +206,7 @@ class ModeShellContribution extends Disposable {
 	private uiSurfaceSetupHandoffTopicChip!: HTMLElement;
 	private uiSurfaceSetupHandoffSubtitle!: HTMLElement;
 	private uiSurfaceSetupHandoffHost!: HTMLElement;
+	private uiSurfaceSetupHandoffNextBtn!: HTMLButtonElement;
 	private readonly uiProjectNameContextBadge: HTMLElement;
 	private surfaceSetupActiveHandoffTopicId: string | undefined;
 	private surfaceSetupCurrentStep: SurfaceSetupStep = 'context';
@@ -1063,6 +1063,10 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-ui-surface-handoff-action:hover {
 				background: var(--vscode-button-secondaryHoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-handoff-action.hidden {
+				display: none;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-handoff-chat-host {
@@ -3682,12 +3686,15 @@ class ModeShellContribution extends Disposable {
 		this.uiContainer.classList.toggle('custom-mode-ui-chat-dismissed', dismissed);
 		this.storageService.store(STORAGE_UI_CHAT_DISMISSED, dismissed ? '1' : '0', StorageScope.PROFILE, StorageTarget.USER);
 		if (dismissed) {
-			this.setSurfaceSetupBuilderHandoff(false);
+			this.endSurfaceSetupHandoff();
 		}
 		const inUi = this.modeService.getMode() === 'UI';
-		const showUiChat = inUi && !dismissed;
-		this.uiChatContainer.classList.toggle('visible', showUiChat);
-		this.uiChatWidget.setVisible(showUiChat);
+		const builderHandoff = this.uiContainer.classList.contains('custom-mode-ui-surface-builder-handoff');
+		const builderOpen = this.uiContainer.classList.contains('custom-mode-ui-surface-builder-open');
+		const showUiChat = inUi && !dismissed && !(builderOpen && !builderHandoff);
+		this.uiChatContainer.classList.toggle('visible', showUiChat || (builderHandoff && builderOpen && inUi));
+		this.uiChatWidget.setVisible(showUiChat || (builderHandoff && builderOpen && inUi));
+		this.syncHandoffChatPlacement();
 		queueMicrotask(() => this.layoutService.layout());
 	}
 
@@ -3708,8 +3715,10 @@ class ModeShellContribution extends Disposable {
 	private async updateEmbeddedChat(mode: Mode): Promise<void> {
 		const showUi = mode === 'UI';
 		const showProcess = mode === 'Process';
-		const uiChatOpen = showUi && !this._uiChatDismissed;
-		this.uiChatContainer.classList.toggle('visible', uiChatOpen);
+		const builderHandoff = this.uiContainer.classList.contains('custom-mode-ui-surface-builder-handoff');
+		const builderOpen = this.uiContainer.classList.contains('custom-mode-ui-surface-builder-open');
+		const uiChatOpen = showUi && !this._uiChatDismissed && !(builderOpen && !builderHandoff);
+		this.uiChatContainer.classList.toggle('visible', uiChatOpen || (showUi && builderHandoff && builderOpen));
 		const processChatOpen = showProcess && !this._processChatDismissed;
 		this.processChatContainer.classList.toggle('visible', processChatOpen);
 
@@ -3719,8 +3728,12 @@ class ModeShellContribution extends Disposable {
 			await this.ensureEmbeddedChatModel('Process');
 		}
 
-		this.uiChatWidget.setVisible(uiChatOpen);
+		this.uiChatWidget.setVisible(uiChatOpen || (showUi && builderHandoff && builderOpen));
 		this.processChatWidget.setVisible(processChatOpen);
+		this.syncHandoffChatPlacement();
+		if (mode === 'Code') {
+			this.endSurfaceSetupHandoff();
+		}
 	}
 
 	private async ensureEmbeddedChatModel(mode: 'UI' | 'Process'): Promise<void> {
@@ -3883,6 +3896,7 @@ class ModeShellContribution extends Disposable {
 		const handoffSkip = $('button.custom-mode-ui-surface-handoff-action', { type: 'button' }, localize('customMode.surfaceHandoffSkip', 'Skip')) as HTMLButtonElement;
 		const handoffComplete = $('button.custom-mode-ui-surface-handoff-action', { type: 'button' }, localize('customMode.surfaceHandoffComplete', 'Mark complete')) as HTMLButtonElement;
 		const handoffNext = $('button.custom-mode-ui-surface-handoff-action', { type: 'button' }, localize('customMode.surfaceHandoffNext', 'Save & next topic')) as HTMLButtonElement;
+		this.uiSurfaceSetupHandoffNextBtn = handoffNext;
 		this._register(addDisposableListener(handoffSkip, 'click', () => this.endSurfaceSetupHandoff()));
 		this._register(addDisposableListener(handoffComplete, 'click', () => void this.completeContextHandoffTopic()));
 		this._register(addDisposableListener(handoffNext, 'click', () => void this.saveAndAdvanceContextHandoffTopic()));
@@ -4034,6 +4048,7 @@ class ModeShellContribution extends Disposable {
 			this.uiSurfaceSetupHandoffSubtitle.textContent = '';
 			return;
 		}
+		this.uiSurfaceSetupHandoffNextBtn.classList.toggle('hidden', state.kind !== 'context');
 		if (state.kind === 'context') {
 			this.uiSurfaceSetupHandoffTitle.textContent = localize('customMode.surfaceHandoffContextTitle', 'Context assistant');
 			this.uiSurfaceSetupHandoffTopicChip.textContent = state.fileName
@@ -4333,19 +4348,13 @@ class ModeShellContribution extends Disposable {
 		const notes = this.uiSurfaceSetupAgentNotesTextarea.value.trim();
 		const userPrompt = localize(
 			'customMode.surfaceSetupUserPrompt',
-			'Create a {0} surface for this goal workspace.',
+			'Create a {0} surface for this goal workspace focused on {1}.',
 			surfaceName,
+			workflow,
 		);
-		const agentPrompt = [
-			localize(
-				'customMode.surfaceSetupPrompt',
-				'Create a {0} surface for this goal workspace. Register it in workspace.goal.json, scaffold the app, and connect it to the shared {1} workflow. Update shared domain/events, durable memory, and Ix metadata as needed.',
-				surfaceName,
-				workflow
-			),
-			notes ? localize('customMode.surfaceSetupPromptNotes', 'Builder notes from the user:\n{0}', notes) : '',
-			CUSTOM_AI_SURFACE_SETUP_PROMPT_SUFFIX,
-		].filter(Boolean).join('\n\n');
+		const inputText = notes
+			? `${userPrompt}\n\n${localize('customMode.surfaceSetupPromptNotes', 'Builder notes from the user:\n{0}', notes)}`
+			: userPrompt;
 		try {
 			this.setSurfaceSetupBuilderHandoff(true, {
 				kind: 'surface',
@@ -4356,10 +4365,21 @@ class ModeShellContribution extends Disposable {
 			this.ensureWorkspaceView();
 			await this.ensureEmbeddedChatModel('UI');
 			await this.clearHandoffChatAttachments();
-			this.uiChatWidget.setInput(userPrompt);
-			this.uiChatWidget.setValue?.(userPrompt);
-			// Keep the detailed scaffold instructions out of the visible input; agent still receives them on send via session if needed.
-			void agentPrompt;
+			const workspaceFolder = this.getWorkspaceFolderUri();
+			if (workspaceFolder && this.embeddedChatRefs.UI.value) {
+				const manifest = joinPath(workspaceFolder, 'workspace.goal.json');
+				try {
+					this.uiChatWidget.input.attachmentModel.addContext({
+						kind: 'file',
+						value: { uri: manifest },
+						id: 'surface-handoff:workspace.goal.json',
+						name: 'workspace.goal.json',
+					} satisfies IChatRequestFileEntry);
+				} catch {
+					// ignore attachment failures
+				}
+			}
+			this.uiChatWidget.setInput(inputText);
 			this.uiChatWidget.focusInput();
 		} catch (e: unknown) {
 			this.pushUiRuntimeLog(`[surface-setup:chat] failed to draft prompt: ${String((e as Error)?.message ?? e)}`);
@@ -4385,6 +4405,9 @@ class ModeShellContribution extends Disposable {
 
 	private toggleWorkspaceContextGathering(): void {
 		this.contextGatheringOpen = !this.contextGatheringOpen;
+		if (!this.contextGatheringOpen) {
+			this.endSurfaceSetupHandoff();
+		}
 		this.persistContextGatheringOpen();
 		this.syncContextGatheringUi();
 		this.ensureWorkspaceView();
@@ -4399,6 +4422,9 @@ class ModeShellContribution extends Disposable {
 		this.container.classList.toggle('custom-mode-context-gathering-open', this.contextGatheringOpen);
 		this.uiProjectName.classList.toggle('active', this.contextGatheringOpen);
 		this.uiProjectName.setAttribute('aria-pressed', String(this.contextGatheringOpen));
+		this.uiProjectName.title = this.contextGatheringOpen
+			? localize('customMode.workspaceNameToggleActive', 'Context gathering is on — click to show surface preview')
+			: localize('customMode.workspaceNameToggleInactive', 'Context gathering is off — click to open the guided builder');
 	}
 
 	private applySurfaceSelection(surfaceId: string, options?: { contextGathering?: boolean }): void {

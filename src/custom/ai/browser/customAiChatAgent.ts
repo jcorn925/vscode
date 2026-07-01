@@ -54,6 +54,7 @@ import {
 } from '../common/customAiConstants.js';
 import { CustomAiInvalidApiKeyError, readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
 import { IGoalWorkspaceService, listGoalWorkspaceCrossAppWorkflows, type GoalWorkspaceContextFile, type GoalWorkspaceIxOverlay, type GoalWorkspaceState, type GoalSurface } from '../../goalWorkspace/GoalWorkspaceService.js';
+import { SurfaceBuilderHandoffState } from '../../goalWorkspace/surfaceBuilderHandoffState.js';
 import { CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_LINES } from '../common/customAiSurfaceScaffold.js';
 import { ICustomAiChatTraceService, summarizeTraceMessages } from './customAiChatTrace.js';
 
@@ -606,6 +607,44 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 	}
 
 	async provideFollowups(_request: IChatAgentRequest, _result: IChatAgentResult, _history: IChatAgentHistoryEntry[], _token: CancellationToken): Promise<IChatFollowup[]> {
+		const handoff = SurfaceBuilderHandoffState.getActive();
+		if (handoff?.kind === 'context') {
+			return [
+				{
+					kind: 'reply',
+					agentId: 'custom.ai',
+					title: localize('customAi.followup.contextNextTitle', 'Save & next topic'),
+					message: localize('customAi.followup.contextNextMessage', 'Save what we captured to the context file for "{0}", then ask me the next missing context question.', handoff.title),
+				},
+				{
+					kind: 'reply',
+					agentId: 'custom.ai',
+					title: localize('customAi.followup.contextSkipTitle', 'Skip this topic'),
+					message: localize('customAi.followup.contextSkipMessage', 'Skip the "{0}" context topic for now and move on.', handoff.title),
+				},
+			];
+		}
+		if (handoff?.kind === 'surface') {
+			return [
+				{
+					kind: 'reply',
+					agentId: 'custom.ai',
+					title: localize('customAi.followup.surfaceScaffoldTitle', 'Scaffold this surface'),
+					message: localize(
+						'customAi.followup.surfaceScaffoldMessage',
+						'Scaffold the {0} surface, register it in workspace.goal.json, and connect it to shared workflows and Ix metadata.',
+						handoff.surfaceName ?? handoff.title,
+					),
+				},
+				{
+					kind: 'reply',
+					agentId: 'custom.ai',
+					title: localize('customAi.followup.surfaceCancelTitle', 'Cancel surface draft'),
+					message: localize('customAi.followup.surfaceCancelMessage', 'Stop drafting this surface for now.'),
+				},
+			];
+		}
+
 		const state = this._goalWorkspaceService.getState();
 		if (state.status === 'loaded' && state.workspace) {
 			const firstSurface = state.workspace.surfaces[0];
