@@ -181,10 +181,111 @@ button {
 }
 
 .mock-body {
-	display: block;
+	display: flex;
+	align-items: stretch;
+	min-height: 520px;
 	max-height: min(72vh, 720px);
+	overflow: hidden;
+}
+
+.mock-workspace {
+	flex: 1 1 auto;
+	min-width: 0;
 	overflow: auto;
 	overscroll-behavior: contain;
+}
+
+.mock-chat-column {
+	display: flex;
+	flex-direction: column;
+	flex: 0 0 min(320px, 34%);
+	width: min(320px, 34%);
+	max-width: 380px;
+	min-width: 240px;
+	border-left: 1px solid var(--border);
+	background: #0d1218;
+}
+
+.mock-chat-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--border);
+	background: #11161d;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.mock-chat-header button {
+	border: none;
+	background: transparent;
+	color: var(--muted);
+	font-size: 18px;
+	line-height: 1;
+	padding: 0 4px;
+}
+
+.mock-chat-messages {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: auto;
+	padding: 12px 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.mock-chat-message {
+	padding: 10px 12px;
+	border-radius: 8px;
+	font-size: 12px;
+	line-height: 1.45;
+}
+
+.mock-chat-message p {
+	margin: 0;
+}
+
+.mock-chat-message.user {
+	background: rgb(77 170 252 / 10%);
+	border: 1px solid rgb(77 170 252 / 22%);
+}
+
+.mock-chat-message.agent {
+	background: var(--panel);
+	border: 1px solid var(--border);
+}
+
+.mock-chat-message code {
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 11px;
+	color: #9cdcfe;
+}
+
+.mock-chat-attachment {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	align-self: flex-start;
+	padding: 6px 10px;
+	border-radius: 999px;
+	border: 1px solid var(--border);
+	background: #101822;
+	color: var(--muted);
+	font-size: 11px;
+}
+
+.mock-chat-input {
+	flex: 0 0 auto;
+	margin: 0 10px 10px;
+	padding: 10px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--border);
+	background: #101822;
+	color: var(--subtle);
+	font-size: 12px;
 }
 
 .builder-pane {
@@ -564,6 +665,21 @@ h1 {
 }
 
 @media (max-width: 1020px) {
+	.mock-body {
+		flex-direction: column;
+		max-height: none;
+	}
+
+	.mock-chat-column {
+		flex: 0 0 auto;
+		width: 100%;
+		max-width: none;
+		min-width: 0;
+		border-left: 0;
+		border-top: 1px solid var(--border);
+		max-height: 280px;
+	}
+
 	.workbench-mockup .surface-grid {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
