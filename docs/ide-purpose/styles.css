@@ -112,6 +112,86 @@ button {
 	overflow: hidden;
 }
 
+.mock-titlebar {
+	min-height: 50px;
+	display: flex;
+	align-items: center;
+	gap: 18px;
+	padding: 0 14px;
+	background: #11161d;
+	border-bottom: 1px solid var(--border);
+	color: #c8d1db;
+	font-size: 13px;
+}
+
+.traffic {
+	display: flex;
+	gap: 7px;
+}
+
+.traffic span {
+	width: 11px;
+	height: 11px;
+	border-radius: 50%;
+	background: #ef5b54;
+}
+
+.traffic span:nth-child(2) {
+	background: #e7bd45;
+}
+
+.traffic span:nth-child(3) {
+	background: #4cc060;
+}
+
+.mock-titlebar nav {
+	display: flex;
+	align-items: stretch;
+	gap: 3px;
+	height: 50px;
+	margin-left: auto;
+}
+
+.tab {
+	display: inline-flex;
+	align-items: center;
+	padding: 0 14px;
+	color: var(--muted);
+	border-left: 1px solid transparent;
+	border-right: 1px solid transparent;
+}
+
+.tab.active {
+	color: var(--text);
+	border-bottom: 2px solid var(--blue);
+	background: #151b24;
+}
+
+.tab.add {
+	color: #d8dee6;
+}
+
+.mock-titlebar .workspace-tab {
+	padding: 4px 10px;
+	border: 1px solid rgb(77 170 252 / 45%);
+	border-radius: 6px;
+	color: var(--text);
+	font-size: 12px;
+	font-weight: 650;
+}
+
+.mock-body {
+	display: block;
+	max-height: min(72vh, 720px);
+	overflow: auto;
+	overscroll-behavior: contain;
+}
+
+.builder-pane {
+	padding: 22px 24px 28px;
+	background: #11161d;
+}
+
 .eyebrow,
 .panel-kicker {
 	margin: 0 0 12px;
@@ -203,27 +283,6 @@ h1 {
 	color: var(--muted);
 	font-size: 13px;
 	line-height: 1.45;
-}
-
-.mock-titlebar .workspace-tab {
-	padding: 4px 10px;
-	border: 1px solid rgb(77 170 252 / 45%);
-	border-radius: 6px;
-	color: var(--text);
-	font-size: 12px;
-	font-weight: 650;
-}
-
-.mock-body {
-	display: block;
-	max-height: min(72vh, 720px);
-	overflow: auto;
-	overscroll-behavior: contain;
-}
-
-.builder-pane {
-	padding: 22px 24px 28px;
-	background: #11161d;
 }
 
 .builder-section {

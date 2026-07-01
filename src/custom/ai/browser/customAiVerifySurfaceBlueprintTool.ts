@@ -18,7 +18,7 @@ import {
 	ToolInvocationPresentation,
 	ToolProgress,
 } from '../../../vs/workbench/contrib/chat/common/tools/languageModelToolsService.js';
-import { IGoalWorkspaceService } from '../../goalWorkspace/GoalWorkspaceService.js';
+import { IGoalConsoleService } from '../../goalWorkspace/GoalConsoleService.js';
 import { SurfaceBlueprintOrchestrator } from '../../goalWorkspace/surfaceBlueprintOrchestrator.js';
 import { formatSurfaceBlueprintGapReport, verifySurfaceBlueprint } from '../../goalWorkspace/surfaceBlueprintVerify.js';
 import { CUSTOM_AI_VERIFY_SURFACE_BLUEPRINT_TOOL_ID, CUSTOM_AI_VERIFY_SURFACE_BLUEPRINT_TOOL_NAME } from '../common/customAiConstants.js';
@@ -51,7 +51,7 @@ export class CustomAiVerifySurfaceBlueprintTool implements IToolImpl {
 	constructor(
 		@IFileService private readonly fileService: IFileService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
-		@IGoalWorkspaceService private readonly goalWorkspaceService: IGoalWorkspaceService,
+		@IGoalConsoleService private readonly goalConsoleService: IGoalConsoleService,
 		@IIxIntegrationService private readonly ixIntegrationService: IIxIntegrationService,
 	) { }
 
@@ -84,7 +84,7 @@ export class CustomAiVerifySurfaceBlueprintTool implements IToolImpl {
 			ixSubsystems,
 		});
 
-		const surfaceName = this.goalWorkspaceService.getSurface(surfaceId)?.name ?? surfaceId;
+		const surfaceName = this.goalConsoleService.getSurface(surfaceId)?.name ?? surfaceId;
 		SurfaceBlueprintOrchestrator.handleVerificationResult(result, surfaceName);
 
 		return {

@@ -25,7 +25,7 @@ import {
 	GOAL_WORKSPACE_IX_OVERLAY_FILE,
 	GOAL_WORKSPACE_MANIFEST,
 	parseGoalWorkspaceManifestText,
-} from '../../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
+} from '../../../../../../custom/goalWorkspace/GoalConsoleService.js';
 
 suite('CustomAiChatAgent', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();

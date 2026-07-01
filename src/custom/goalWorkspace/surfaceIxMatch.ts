@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { GoalSurface } from './GoalWorkspaceService.js';
+import type { GoalSurface } from './GoalConsoleService.js';
 import type { SurfaceSubsystemSpec } from './surfaceBlueprintTypes.js';
 
 export interface IxSubsystemRegion {

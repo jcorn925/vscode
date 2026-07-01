@@ -10,7 +10,7 @@ import { ServicesAccessor } from '../../../../platform/instantiation/common/inst
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
-import { IGoalWorkspaceService } from '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
+import { IGoalConsoleService } from '../../../../../custom/goalWorkspace/GoalConsoleService.js';
 import { formatSurfaceBlueprintGapReport, verifySurfaceBlueprint } from '../../../../../custom/goalWorkspace/surfaceBlueprintVerify.js';
 import { discoverIxSubsystemRegions } from '../../../../../custom/goalWorkspace/surfaceBlueprintIxDiscovery.js';
 import { SurfaceBlueprintOrchestrator } from '../../../../../custom/goalWorkspace/surfaceBlueprintOrchestrator.js';
@@ -27,7 +27,7 @@ registerAction2(class extends Action2 {
 	}
 
 	override async run(accessor: ServicesAccessor, surfaceId?: string): Promise<void> {
-		const goalWorkspace = accessor.get(IGoalWorkspaceService);
+		const goalWorkspace = accessor.get(IGoalConsoleService);
 		const workspaceContextService = accessor.get(IWorkspaceContextService);
 		const fileService = accessor.get(IFileService);
 		const ix = accessor.get(IIxIntegrationService);

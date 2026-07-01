@@ -7,7 +7,7 @@ import { localize } from '../../../../nls.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { WorkbenchPhase, registerWorkbenchContribution2 } from '../../../common/contributions.js';
-import '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
+import '../../../../../custom/goalWorkspace/GoalConsoleService.js';
 import { DefaultProjectBootstrapContribution } from './defaultProjectBootstrap.js';
 import { DockerMcpBootstrapContribution } from './dockerMcpBootstrap.js';
 import './goalWorkspace.contribution.js';

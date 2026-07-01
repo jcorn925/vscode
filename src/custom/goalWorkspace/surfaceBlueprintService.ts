@@ -7,8 +7,8 @@ import { VSBuffer } from '../../vs/base/common/buffer.js';
 import { URI } from '../../vs/base/common/uri.js';
 import { joinPath } from '../../vs/base/common/resources.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
-import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER } from './GoalWorkspaceService.js';
-import type { GoalWorkspaceGoal } from './GoalWorkspaceService.js';
+import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER } from './GoalConsoleService.js';
+import type { GoalWorkspaceGoal } from './GoalConsoleService.js';
 import { loadSurfaceTemplate } from './surfaceBlueprintTemplateRegistry.js';
 import type { SurfaceBlueprint, SurfaceBlueprintTemplate } from './surfaceBlueprintTypes.js';
 

@@ -6,8 +6,8 @@
 import { URI } from '../../vs/base/common/uri.js';
 import { joinPath } from '../../vs/base/common/resources.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
-import { GOAL_WORKSPACE_MANIFEST } from './GoalWorkspaceService.js';
-import type { GoalWorkspaceSurface } from './GoalWorkspaceService.js';
+import { GOAL_WORKSPACE_MANIFEST } from './GoalConsoleService.js';
+import type { GoalWorkspaceSurface } from './GoalConsoleService.js';
 import { blueprintResource, readBlueprint } from './surfaceBlueprintService.js';
 import { blueprintSubsystemMatchesIx, type IxSubsystemRegion } from './surfaceIxMatch.js';
 import type { SurfaceBlueprintGap, SurfaceBlueprintVerificationResult } from './surfaceBlueprintTypes.js';

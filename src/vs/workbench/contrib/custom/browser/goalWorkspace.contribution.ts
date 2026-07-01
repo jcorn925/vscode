@@ -8,7 +8,7 @@ import { Action2, registerAction2 } from '../../../../platform/actions/common/ac
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
-import { ADD_TRAINING_PACKAGE_WORKFLOW_ID, formatCrossAppWorkflowPlanMarkdown, IGoalWorkspaceService } from '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
+import { ADD_TRAINING_PACKAGE_WORKFLOW_ID, formatCrossAppWorkflowPlanMarkdown, IGoalConsoleService } from '../../../../../custom/goalWorkspace/GoalConsoleService.js';
 
 registerAction2(class extends Action2 {
 	constructor() {
@@ -21,7 +21,7 @@ registerAction2(class extends Action2 {
 	}
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
-		const goalWorkspace = accessor.get(IGoalWorkspaceService);
+		const goalWorkspace = accessor.get(IGoalConsoleService);
 		const notificationService = accessor.get(INotificationService);
 		const clipboardService = accessor.get(IClipboardService);
 

@@ -11,7 +11,7 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
-import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_IX_OVERLAY_FILE, IGoalWorkspaceService, type GoalSurface } from '../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
+import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_IX_OVERLAY_FILE, IGoalConsoleService, type GoalSurface } from '../../../../../custom/goalWorkspace/GoalConsoleService.js';
 import { matchSurfaceToIxSubsystems } from '../../../../../custom/goalWorkspace/surfaceIxMatch.js';
 import { IIxIntegrationService } from '../../../../../custom/ix/IxIntegrationService.js';
 import { formatIxSubsystemsDetailedDiscoveryCommand, parseSubsystemFingerprints, runSubsystemsDetailedDiscovery, type SubsystemFingerprint } from './processNotesSubsystemSnapshot.js';
@@ -44,7 +44,7 @@ registerAction2(class extends Action2 {
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const ix = accessor.get(IIxIntegrationService);
-		const goalWorkspace = accessor.get(IGoalWorkspaceService);
+		const goalWorkspace = accessor.get(IGoalConsoleService);
 		const workspaceContextService = accessor.get(IWorkspaceContextService);
 		const fileService = accessor.get(IFileService);
 		const notificationService = accessor.get(INotificationService);

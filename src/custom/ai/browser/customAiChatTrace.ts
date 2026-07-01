@@ -11,7 +11,7 @@ import { FileOperationError, FileOperationResult, IFileService } from '../../../
 import { createDecorator } from '../../../vs/platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../vs/platform/log/common/log.js';
 import { IWorkspaceContextService } from '../../../vs/platform/workspace/common/workspace.js';
-import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER } from '../../goalWorkspace/GoalWorkspaceService.js';
+import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER } from '../../goalWorkspace/GoalConsoleService.js';
 
 export const CUSTOM_AI_OBSERVABILITY_FOLDER = 'observability';
 export const CUSTOM_AI_CHAT_TRACE_FILE = 'custom-ai-chat.jsonl';

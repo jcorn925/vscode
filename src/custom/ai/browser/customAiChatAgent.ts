@@ -53,7 +53,7 @@ import {
 	pickCustomAiOpenAiCompatibleModelId,
 } from '../common/customAiConstants.js';
 import { CustomAiInvalidApiKeyError, readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
-import { IGoalWorkspaceService, listGoalWorkspaceCrossAppWorkflows, type GoalWorkspaceContextFile, type GoalWorkspaceIxOverlay, type GoalWorkspaceState, type GoalSurface } from '../../goalWorkspace/GoalWorkspaceService.js';
+import { IGoalConsoleService, listGoalWorkspaceCrossAppWorkflows, type GoalWorkspaceContextFile, type GoalWorkspaceIxOverlay, type GoalWorkspaceState, type GoalSurface } from '../../goalWorkspace/GoalConsoleService.js';
 import { SurfaceBuilderHandoffState } from '../../goalWorkspace/surfaceBuilderHandoffState.js';
 import { CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_LINES } from '../common/customAiSurfaceScaffold.js';
 import { ICustomAiChatTraceService, summarizeTraceMessages } from './customAiChatTrace.js';
@@ -326,7 +326,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 		@IRequestService private readonly _requestService: IRequestService,
 		@IFileService private readonly _fileService: IFileService,
 		@IModelService private readonly _modelService: IModelService,
-		@IGoalWorkspaceService private readonly _goalWorkspaceService: IGoalWorkspaceService,
+		@IGoalConsoleService private readonly _goalConsoleService: IGoalConsoleService,
 		@ICustomAiChatTraceService private readonly _traceService: ICustomAiChatTraceService,
 	) {
 		super();
@@ -355,7 +355,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 			trace.event('chat.model.resolved', {
 				modelId,
 				userSelectedModelId: request.userSelectedModelId,
-				goalWorkspace: summarizeGoalWorkspaceForTrace(this._goalWorkspaceService.getState()),
+				goalWorkspace: summarizeGoalWorkspaceForTrace(this._goalConsoleService.getState()),
 				retryAfterKeyUpdate,
 			});
 			const metadata = this._languageModels.lookupLanguageModel(modelId);
@@ -429,7 +429,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 			trace.event('chat.context.assembled', {
 				...summarizeTraceMessages(messages),
 				historyEntries: history.length,
-				goalWorkspace: summarizeGoalWorkspaceForTrace(this._goalWorkspaceService.getState()),
+				goalWorkspace: summarizeGoalWorkspaceForTrace(this._goalConsoleService.getState()),
 			});
 			const countTokens: CountTokensCallback = async (input, t) => this._languageModels.computeTokenLength(modelId, input, t);
 			let totalTextChunks = 0;
@@ -691,7 +691,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 			];
 		}
 
-		const state = this._goalWorkspaceService.getState();
+		const state = this._goalConsoleService.getState();
 		if (state.status === 'loaded' && state.workspace) {
 			const firstSurface = state.workspace.surfaces[0];
 			return [
@@ -834,7 +834,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 		const systemParts = buildCustomAiSystemMessageParts({
 			customSystemPrompt: system,
 			toolsEnabled: this._configurationService.getValue<boolean>('custom.ai.tools.enabled') !== false,
-			goalWorkspaceState: this._goalWorkspaceService.getState(),
+			goalWorkspaceState: this._goalConsoleService.getState(),
 		});
 		if (systemParts.length) {
 			messages.push({ role: ChatMessageRole.System, content: [{ type: 'text', value: systemParts.join('\n\n') }] });

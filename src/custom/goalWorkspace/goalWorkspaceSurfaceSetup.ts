@@ -7,8 +7,8 @@ import { VSBuffer } from '../../vs/base/common/buffer.js';
 import { URI } from '../../vs/base/common/uri.js';
 import { joinPath } from '../../vs/base/common/resources.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
-import type { GoalWorkspaceBrand, GoalWorkspaceShared } from './GoalWorkspaceService.js';
-import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_MANIFEST } from './GoalWorkspaceService.js';
+import type { GoalWorkspaceBrand, GoalWorkspaceShared } from './GoalConsoleService.js';
+import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_MANIFEST } from './GoalConsoleService.js';
 
 export const GOAL_WORKSPACE_BUILDER_DRAFT_FILE = 'builder-draft.json';
 export const GOAL_WORKSPACE_BRAND_SUBFOLDER = 'brand';

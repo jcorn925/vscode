@@ -6,10 +6,10 @@
 import { CancellationToken } from '../../../vs/base/common/cancellation.js';
 import {
 	formatCrossAppWorkflowPlanMarkdown,
-	IGoalWorkspaceService,
+	IGoalConsoleService,
 	listGoalWorkspaceCrossAppWorkflows,
 	type GoalWorkspaceTrainingPackageDraft,
-} from '../../goalWorkspace/GoalWorkspaceService.js';
+} from '../../goalWorkspace/GoalConsoleService.js';
 import {
 	CountTokensCallback,
 	IPreparedToolInvocation,
@@ -86,7 +86,7 @@ interface PlanWorkflowToolParams {
 export class CustomAiPlanCrossAppWorkflowTool implements IToolImpl {
 
 	constructor(
-		@IGoalWorkspaceService private readonly _goalWorkspaceService: IGoalWorkspaceService,
+		@IGoalConsoleService private readonly _goalConsoleService: IGoalConsoleService,
 	) { }
 
 	async prepareToolInvocation(_context: IToolInvocationPreparationContext, _token: CancellationToken): Promise<IPreparedToolInvocation | undefined> {
@@ -100,19 +100,19 @@ export class CustomAiPlanCrossAppWorkflowTool implements IToolImpl {
 			return errorResult('Missing required argument: workflowId');
 		}
 
-		const workflow = this._goalWorkspaceService.getCrossAppWorkflow(workflowId);
+		const workflow = this._goalConsoleService.getCrossAppWorkflow(workflowId);
 		if (!workflow) {
 			const known = KNOWN_WORKFLOW_IDS.join(', ') || '(none)';
 			return errorResult(`Unknown workflow id "${workflowId}". Known workflows: ${known}.`);
 		}
 
-		const state = this._goalWorkspaceService.getState();
+		const state = this._goalConsoleService.getState();
 		if (state.status !== 'loaded') {
 			return errorResult('Open a valid goal workspace with workspace.goal.json before planning a cross-app workflow.');
 		}
 
 		const packageDraft = parsePackageDraft(params.packageDraft);
-		const plan = this._goalWorkspaceService.buildCrossAppWorkflowPlan(workflowId, packageDraft);
+		const plan = this._goalConsoleService.buildCrossAppWorkflowPlan(workflowId, packageDraft);
 		if (!plan) {
 			return errorResult(`Could not build workflow plan for "${workflowId}". Ensure workspace.goal.json is loaded and valid.`);
 		}

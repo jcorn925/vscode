@@ -214,7 +214,7 @@ export interface GoalWorkspaceState {
 	readonly diagnostics: readonly GoalWorkspaceDiagnostic[];
 }
 
-export interface IGoalWorkspaceService {
+export interface IGoalConsoleService {
 	readonly _serviceBrand: undefined;
 	readonly onDidChangeGoalWorkspace: Event<void>;
 	readonly onDidChangeState: Event<GoalWorkspaceState>;
@@ -234,7 +234,7 @@ export interface IGoalWorkspaceService {
 	refresh(): Promise<GoalWorkspaceState>;
 }
 
-export const IGoalWorkspaceService = createDecorator<IGoalWorkspaceService>('goalWorkspaceService');
+export const IGoalConsoleService = createDecorator<IGoalConsoleService>('goalConsoleService');
 
 const EMPTY_SHARED: GoalWorkspaceShared = {};
 const EMPTY_CONTEXT: GoalWorkspaceContext = {
@@ -272,7 +272,7 @@ export function getGoalWorkspaceCrossAppWorkflow(id: string): GoalWorkspaceCross
 	return CROSS_APP_WORKFLOWS.find(workflow => workflow.id === id);
 }
 
-export class GoalWorkspaceService extends Disposable implements IGoalWorkspaceService {
+export class GoalConsoleService extends Disposable implements IGoalConsoleService {
 	readonly _serviceBrand: undefined;
 
 	private readonly _onDidChangeGoalWorkspace = this._register(new Emitter<void>());
@@ -1259,4 +1259,4 @@ async function safeExists(fileService: IFileService, resource: URI): Promise<boo
 	}
 }
 
-registerSingleton(IGoalWorkspaceService, GoalWorkspaceService, InstantiationType.Delayed);
+registerSingleton(IGoalConsoleService, GoalConsoleService, InstantiationType.Delayed);

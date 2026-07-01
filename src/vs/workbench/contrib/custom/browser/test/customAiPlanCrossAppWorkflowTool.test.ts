@@ -15,9 +15,9 @@ import {
 	createMissingGoalWorkspaceState,
 	getGoalWorkspaceCrossAppWorkflow,
 	GOAL_WORKSPACE_MANIFEST,
-	IGoalWorkspaceService,
+	IGoalConsoleService,
 	parseGoalWorkspaceManifestText,
-} from '../../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
+} from '../../../../../../custom/goalWorkspace/GoalConsoleService.js';
 
 suite('CustomAiPlanCrossAppWorkflowTool', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -67,7 +67,7 @@ suite('CustomAiPlanCrossAppWorkflowTool', () => {
 		}), workspaceFolder, manifestResource);
 	}
 
-	function createService(state: ReturnType<typeof createLoadedState>): IGoalWorkspaceService {
+	function createService(state: ReturnType<typeof createLoadedState>): IGoalConsoleService {
 		return {
 			_serviceBrand: undefined,
 			onDidChangeGoalWorkspace: () => ({ dispose: () => { } }),

@@ -9,7 +9,7 @@ import { joinPath } from '../../../../../base/common/resources.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { IFileContent, IFileService, IFileStat } from '../../../../../platform/files/common/files.js';
-import { GOAL_WORKSPACE_MANIFEST } from '../../../../../../custom/goalWorkspace/GoalWorkspaceService.js';
+import { GOAL_WORKSPACE_MANIFEST } from '../../../../../../custom/goalWorkspace/GoalConsoleService.js';
 import { instantiateBlueprintFromTemplate, writeBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintService.js';
 import { listSurfaceTemplateIds, loadSurfaceTemplate } from '../../../../../../custom/goalWorkspace/surfaceBlueprintTemplateRegistry.js';
 import { blueprintSubsystemMatchesIx, matchSurfaceToIxSubsystems } from '../../../../../../custom/goalWorkspace/surfaceIxMatch.js';
