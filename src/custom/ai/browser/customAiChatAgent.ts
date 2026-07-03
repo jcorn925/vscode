@@ -54,7 +54,7 @@ import {
 } from '../common/customAiConstants.js';
 import { CustomAiInvalidApiKeyError, readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
 import { IGoalConsoleService, listGoalWorkspaceCrossAppWorkflows, type GoalWorkspaceContextFile, type GoalWorkspaceIxOverlay, type GoalWorkspaceState, type GoalSurface } from '../../goalWorkspace/GoalConsoleService.js';
-import { SurfaceBuilderHandoffState } from '../../goalWorkspace/surfaceBuilderHandoffState.js';
+import { SurfaceBuilderHandoffState, type SurfaceBuilderHandoffStateValue } from '../../goalWorkspace/surfaceBuilderHandoffState.js';
 import { CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_LINES } from '../common/customAiSurfaceScaffold.js';
 import { ICustomAiChatTraceService, summarizeTraceMessages } from './customAiChatTrace.js';
 
@@ -276,12 +276,29 @@ export function buildCustomAiSurfaceHandoffContextBlock(): string | undefined {
 			? '- Edit the blueprint JSON only. Do not scaffold app files yet.'
 			: undefined,
 		handoff.phase === 'scaffold'
-			? '- Scaffold every blueprint subsystem, update workspace.goal.json, then call verifySurfaceBlueprint.'
+			? '- This is an active scaffold handoff. Call editFile for workspace.goal.json and app files, scaffold every blueprint subsystem, then call verifySurfaceBlueprint. A text-only plan is invalid.'
 			: undefined,
 		handoff.phase === 'repair'
-			? '- Fix only the reported blueprint gaps, then call verifySurfaceBlueprint again.'
+			? '- This is an active repair handoff. Call editFile to fix only the reported blueprint gaps, then call verifySurfaceBlueprint again. A text-only plan is invalid.'
 			: undefined,
 	].filter((line): line is string => Boolean(line)).join('\n');
+}
+
+function isActionSurfaceHandoff(handoff: SurfaceBuilderHandoffStateValue | undefined): handoff is SurfaceBuilderHandoffStateValue {
+	return handoff?.kind === 'surface' && (handoff.phase === 'scaffold' || handoff.phase === 'repair');
+}
+
+export function buildCustomAiSurfaceHandoffToolRecoveryMessage(handoff: SurfaceBuilderHandoffStateValue): string {
+	const action = handoff.phase === 'repair' ? 'repair' : 'scaffold';
+	return [
+		`Continue the active ${action} handoff for ${handoff.surfaceName} (${handoff.surfaceId}).`,
+		'Your previous response did not call any tools, so it did not change the workspace.',
+		'Required now:',
+		`1. Call editFile for workspace.goal.json and every app/shared file needed by .agent/surfaces/${handoff.surfaceId}.blueprint.json.`,
+		`2. Call verifySurfaceBlueprint with {"surfaceId":"${handoff.surfaceId}"}.`,
+		'3. Only report success if verification passes.',
+		'If the tools are unavailable or blocked, say exactly why and do not claim the surface is implemented.',
+	].join('\n');
 }
 
 export interface CustomAiSystemMessageOptions {
@@ -435,6 +452,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 			let totalTextChunks = 0;
 			let totalResponseChars = 0;
 			let totalToolUses = 0;
+			let retriedToollessSurfaceHandoff = false;
 
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 				if (token.isCancellationRequested) {
@@ -522,6 +540,38 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 				const toolUses = assistantParts.filter((p): p is IChatResponseToolUsePart => p.type === 'tool_use');
 				if (!toolUses.length) {
 					trace.event('chat.tool_round.none', { round });
+					const handoff = SurfaceBuilderHandoffState.getActive();
+					if (isActionSurfaceHandoff(handoff)) {
+						if (!retriedToollessSurfaceHandoff && toolsEnabled && tools.length > 0) {
+							retriedToollessSurfaceHandoff = true;
+							const recoveryMessage = buildCustomAiSurfaceHandoffToolRecoveryMessage(handoff);
+							trace.event('chat.surface_handoff.toolless_retry', {
+								round,
+								phase: handoff.phase,
+								surfaceId: handoff.surfaceId,
+								toolCount: tools.length,
+							});
+							messages.push({ role: ChatMessageRole.User, content: [{ type: 'text', value: recoveryMessage }] });
+							continue;
+						}
+						const blocked = toolsEnabled && tools.length > 0
+							? localize(
+								'customAi.surfaceHandoffToollessBlocked',
+								'\n\n**Surface scaffold blocked:** the model did not call `editFile` or `verifySurfaceBlueprint`, so no surface files were created. The handoff is still active; send the scaffold request again or switch to a model that reliably uses tools.'
+							)
+							: localize(
+								'customAi.surfaceHandoffToolsDisabledBlocked',
+								'\n\n**Surface scaffold blocked:** Custom AI tools are disabled or unavailable, so I cannot create files or run `verifySurfaceBlueprint` from this chat.'
+							);
+						trace.event('chat.surface_handoff.toolless_blocked', {
+							round,
+							phase: handoff.phase,
+							surfaceId: handoff.surfaceId,
+							toolsEnabled,
+							toolCount: tools.length,
+						});
+						emit({ kind: 'markdownContent', content: new MarkdownString(blocked, false) } satisfies IChatMarkdownContent);
+					}
 					break;
 				}
 

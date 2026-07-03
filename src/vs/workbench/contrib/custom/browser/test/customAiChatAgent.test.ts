@@ -9,11 +9,14 @@ import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import {
 	buildCustomAiGoalWorkspaceContextBlock,
+	buildCustomAiSurfaceHandoffContextBlock,
+	buildCustomAiSurfaceHandoffToolRecoveryMessage,
 	buildCustomAiSystemMessageParts,
 	CUSTOM_AI_EDIT_TOOL_SYSTEM_PROMPT,
 	CUSTOM_AI_PRODUCT_SYSTEM_PROMPT,
 	formatGoalWorkspaceIxContextLines,
 } from '../../../../../../custom/ai/browser/customAiChatAgent.js';
+import { SurfaceBuilderHandoffState } from '../../../../../../custom/goalWorkspace/surfaceBuilderHandoffState.js';
 import {
 	sanitizeTraceValue,
 	summarizeTraceMessages,
@@ -163,6 +166,35 @@ suite('CustomAiChatAgent', () => {
 		assert.match(joined, /goal-workspace IDE/);
 		assert.doesNotMatch(joined, /editFile/);
 		assert.ok(!parts.includes(CUSTOM_AI_EDIT_TOOL_SYSTEM_PROMPT));
+	});
+
+	test('surface scaffold handoff requires file edits and blueprint verification', () => {
+		const handoff = {
+			kind: 'surface' as const,
+			templateId: 'booking',
+			surfaceId: 'booking',
+			surfaceName: 'Booking',
+			title: 'Booking',
+			phase: 'scaffold' as const,
+			blueprintResource: '/workspace/.agent/surfaces/booking.blueprint.json',
+		};
+		SurfaceBuilderHandoffState.setActive(handoff);
+		try {
+			const block = buildCustomAiSurfaceHandoffContextBlock();
+			assert.ok(block);
+			assert.match(block, /active scaffold handoff/);
+			assert.match(block, /Call editFile/);
+			assert.match(block, /verifySurfaceBlueprint/);
+			assert.match(block, /text-only plan is invalid/);
+
+			const recovery = buildCustomAiSurfaceHandoffToolRecoveryMessage(handoff);
+			assert.match(recovery, /previous response did not call any tools/);
+			assert.match(recovery, /workspace\.goal\.json/);
+			assert.match(recovery, /\.agent\/surfaces\/booking\.blueprint\.json/);
+			assert.match(recovery, /"surfaceId":"booking"/);
+		} finally {
+			SurfaceBuilderHandoffState.setActive(undefined);
+		}
 	});
 
 	test('trace sanitizer redacts secrets and summarizes content by default', () => {
