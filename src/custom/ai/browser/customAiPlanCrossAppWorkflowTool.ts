@@ -6,10 +6,10 @@
 import { CancellationToken } from '../../../vs/base/common/cancellation.js';
 import {
 	formatCrossAppWorkflowPlanMarkdown,
-	IGoalConsoleService,
-	listGoalWorkspaceCrossAppWorkflows,
-	type GoalWorkspaceTrainingPackageDraft,
-} from '../../goalWorkspace/GoalConsoleService.js';
+	IConsoleService,
+	listCrossAppWorkflows,
+	type TrainingPackageDraft,
+} from '../../goalWorkspace/ConsoleService.js';
 import {
 	CountTokensCallback,
 	IPreparedToolInvocation,
@@ -24,10 +24,10 @@ import {
 } from '../../../vs/workbench/contrib/chat/common/tools/languageModelToolsService.js';
 import { CUSTOM_AI_PLAN_WORKFLOW_TOOL_ID, CUSTOM_AI_PLAN_WORKFLOW_TOOL_NAME } from '../common/customAiConstants.js';
 
-const KNOWN_WORKFLOW_IDS = listGoalWorkspaceCrossAppWorkflows().map(workflow => workflow.id);
+const KNOWN_WORKFLOW_IDS = listCrossAppWorkflows().map(workflow => workflow.id);
 
 function buildWorkflowCatalogDescription(): string {
-	return listGoalWorkspaceCrossAppWorkflows()
+	return listCrossAppWorkflows()
 		.map(workflow => `  ${workflow.id}: ${workflow.label} (task kinds: ${workflow.taskKinds.join(', ')})`)
 		.join('\n');
 }
@@ -80,13 +80,13 @@ export const CustomAiPlanCrossAppWorkflowToolData: IToolData = {
 
 interface PlanWorkflowToolParams {
 	workflowId: string;
-	packageDraft?: Partial<GoalWorkspaceTrainingPackageDraft>;
+	packageDraft?: Partial<TrainingPackageDraft>;
 }
 
 export class CustomAiPlanCrossAppWorkflowTool implements IToolImpl {
 
 	constructor(
-		@IGoalConsoleService private readonly _goalConsoleService: IGoalConsoleService,
+		@IConsoleService private readonly _consoleService: IConsoleService,
 	) { }
 
 	async prepareToolInvocation(_context: IToolInvocationPreparationContext, _token: CancellationToken): Promise<IPreparedToolInvocation | undefined> {
@@ -100,19 +100,19 @@ export class CustomAiPlanCrossAppWorkflowTool implements IToolImpl {
 			return errorResult('Missing required argument: workflowId');
 		}
 
-		const workflow = this._goalConsoleService.getCrossAppWorkflow(workflowId);
+		const workflow = this._consoleService.getCrossAppWorkflow(workflowId);
 		if (!workflow) {
 			const known = KNOWN_WORKFLOW_IDS.join(', ') || '(none)';
 			return errorResult(`Unknown workflow id "${workflowId}". Known workflows: ${known}.`);
 		}
 
-		const state = this._goalConsoleService.getState();
+		const state = this._consoleService.getState();
 		if (state.status !== 'loaded') {
 			return errorResult('Open a valid goal workspace with workspace.goal.json before planning a cross-app workflow.');
 		}
 
 		const packageDraft = parsePackageDraft(params.packageDraft);
-		const plan = this._goalConsoleService.buildCrossAppWorkflowPlan(workflowId, packageDraft);
+		const plan = this._consoleService.buildCrossAppWorkflowPlan(workflowId, packageDraft);
 		if (!plan) {
 			return errorResult(`Could not build workflow plan for "${workflowId}". Ensure workspace.goal.json is loaded and valid.`);
 		}
@@ -121,7 +121,7 @@ export class CustomAiPlanCrossAppWorkflowTool implements IToolImpl {
 	}
 }
 
-function parsePackageDraft(raw: unknown): Partial<GoalWorkspaceTrainingPackageDraft> | undefined {
+function parsePackageDraft(raw: unknown): Partial<TrainingPackageDraft> | undefined {
 	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
 		return undefined;
 	}
@@ -148,7 +148,7 @@ function parsePackageDraft(raw: unknown): Partial<GoalWorkspaceTrainingPackageDr
 	if (record.status === 'draft' || record.status === 'active') {
 		draft.status = record.status;
 	}
-	return Object.keys(draft).length ? draft as Partial<GoalWorkspaceTrainingPackageDraft> : undefined;
+	return Object.keys(draft).length ? draft as Partial<TrainingPackageDraft> : undefined;
 }
 
 function errorResult(message: string): IToolResult {

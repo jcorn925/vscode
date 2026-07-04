@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { GoalSurface } from './GoalConsoleService.js';
+import type { WorkspaceSurface } from './ConsoleService.js';
 import type { SurfaceSubsystemSpec } from './surfaceBlueprintTypes.js';
 
 export interface IxSubsystemRegion {
@@ -32,7 +32,7 @@ export function uniqueStrings(values: readonly string[]): string[] {
 	return result;
 }
 
-export function surfaceMatchTokens(surface: GoalSurface): readonly string[] {
+export function surfaceMatchTokens(surface: WorkspaceSurface): readonly string[] {
 	return uniqueStrings([
 		surface.id,
 		surface.name,
@@ -44,7 +44,7 @@ export function surfaceMatchTokens(surface: GoalSurface): readonly string[] {
 }
 
 export function matchSurfaceToIxSubsystems(
-	surface: GoalSurface,
+	surface: WorkspaceSurface,
 	subsystems: readonly IxSubsystemRegion[],
 ): { surfaceId: string; subsystemIds: string[]; subsystemLabels: string[]; matchReason: string } {
 	const declaredMatches = new Set([

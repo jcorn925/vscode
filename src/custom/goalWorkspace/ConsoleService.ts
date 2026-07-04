@@ -12,9 +12,9 @@ import { createDecorator } from '../../vs/platform/instantiation/common/instanti
 import { FileChangeType, IFileService } from '../../vs/platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../vs/platform/workspace/common/workspace.js';
 
-export const GOAL_WORKSPACE_MANIFEST = 'workspace.goal.json';
-export const GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER = '.agent';
-export const GOAL_WORKSPACE_IX_OVERLAY_FILE = 'ix-surface-map.json';
+export const WORKSPACE_MANIFEST = 'workspace.goal.json';
+export const AGENT_CONTEXT_FOLDER = '.agent';
+export const IX_OVERLAY_FILE = 'ix-surface-map.json';
 
 const GLOBAL_AGENT_CONTEXT_FILES = [
 	{ id: 'workspace', relativePath: 'workspace.md' },
@@ -23,14 +23,14 @@ const GLOBAL_AGENT_CONTEXT_FILES = [
 	{ id: 'decisions', relativePath: 'decisions.md' },
 ] as const;
 
-export interface GoalWorkspaceGoal {
+export interface WorkspaceGoal {
 	readonly id: string;
 	readonly name: string;
 	readonly description?: string;
 	readonly northStarMetric?: string;
 }
 
-export interface GoalWorkspaceBrand {
+export interface WorkspaceBrand {
 	readonly primaryColor?: string;
 	readonly secondaryColor?: string;
 	readonly accentColor?: string;
@@ -38,7 +38,7 @@ export interface GoalWorkspaceBrand {
 	readonly logoMarkPath?: string;
 }
 
-export interface GoalWorkspaceSurface {
+export interface WorkspaceSurface {
 	readonly id: string;
 	readonly name: string;
 	readonly type?: string;
@@ -50,19 +50,18 @@ export interface GoalWorkspaceSurface {
 	readonly events: readonly string[];
 	readonly entities: readonly string[];
 	readonly ixSubsystems: readonly string[];
-	readonly ix?: GoalSurfaceIxMetadata;
+	readonly ix?: SurfaceIxMetadata;
 }
 
-export type GoalSurface = GoalWorkspaceSurface;
 
-export interface GoalSurfaceIxMetadata {
+export interface SurfaceIxMetadata {
 	readonly subsystemIds: readonly string[];
 	readonly subsystemLabels: readonly string[];
 	readonly tags: readonly string[];
 	readonly notes?: string;
 }
 
-export interface GoalWorkspaceShared {
+export interface WorkspaceShared {
 	readonly domain?: string;
 	readonly events?: string;
 	readonly ui?: string;
@@ -70,31 +69,31 @@ export interface GoalWorkspaceShared {
 	readonly workflows?: string;
 }
 
-export type GoalWorkspaceContextFileKind = 'workspace' | 'domain' | 'events' | 'decisions' | 'surface';
+export type WorkspaceContextFileKind = 'workspace' | 'domain' | 'events' | 'decisions' | 'surface';
 
-export interface GoalWorkspaceContextFile {
+export interface WorkspaceContextFile {
 	readonly id: string;
-	readonly kind: GoalWorkspaceContextFileKind;
+	readonly kind: WorkspaceContextFileKind;
 	readonly resource: URI;
 	readonly relativePath: string;
 	readonly summary: string;
 }
 
-export interface GoalSurfaceContextSummary {
+export interface SurfaceContextSummary {
 	readonly surfaceId: string;
 	readonly surfaceName: string;
-	readonly files: readonly GoalWorkspaceContextFile[];
+	readonly files: readonly WorkspaceContextFile[];
 	readonly summary: string;
 }
 
-export interface GoalWorkspaceContext {
+export interface WorkspaceContext {
 	readonly root: URI | undefined;
-	readonly globalFiles: readonly GoalWorkspaceContextFile[];
-	readonly surfaceFiles: readonly GoalWorkspaceContextFile[];
-	readonly surfaceSummaries: readonly GoalSurfaceContextSummary[];
+	readonly globalFiles: readonly WorkspaceContextFile[];
+	readonly surfaceFiles: readonly WorkspaceContextFile[];
+	readonly surfaceSummaries: readonly SurfaceContextSummary[];
 }
 
-export interface GoalWorkspaceIxDiscoveredSubsystem {
+export interface IxDiscoveredSubsystem {
 	readonly id: string;
 	readonly label: string;
 	readonly kind?: string;
@@ -102,28 +101,28 @@ export interface GoalWorkspaceIxDiscoveredSubsystem {
 	readonly fileCount?: number;
 }
 
-export interface GoalWorkspaceIxSurfaceOverlay {
+export interface IxSurfaceOverlay {
 	readonly surfaceId: string;
 	readonly subsystemIds: readonly string[];
 	readonly subsystemLabels: readonly string[];
 	readonly matchReason?: string;
 }
 
-export interface GoalWorkspaceIxOverlay {
+export interface IxOverlay {
 	readonly resource: URI;
 	readonly generatedAt: string | undefined;
 	readonly command: string | undefined;
-	readonly discoveredSubsystems: readonly GoalWorkspaceIxDiscoveredSubsystem[];
-	readonly surfaces: readonly GoalWorkspaceIxSurfaceOverlay[];
+	readonly discoveredSubsystems: readonly IxDiscoveredSubsystem[];
+	readonly surfaces: readonly IxSurfaceOverlay[];
 }
 
-export interface GoalWorkspaceIxState {
+export interface IxState {
 	readonly root: URI | undefined;
 	readonly overlayResource: URI | undefined;
-	readonly overlay: GoalWorkspaceIxOverlay | undefined;
+	readonly overlay: IxOverlay | undefined;
 }
 
-export interface GoalWorkspaceCrossAppWorkflow {
+export interface CrossAppWorkflow {
 	readonly id: string;
 	readonly label: string;
 	readonly taskKinds: readonly string[];
@@ -132,7 +131,7 @@ export interface GoalWorkspaceCrossAppWorkflow {
 	readonly fallbackSurfaceIds: readonly string[];
 }
 
-export interface GoalWorkspaceTrainingPackageDraft {
+export interface TrainingPackageDraft {
 	readonly id: string;
 	readonly name: string;
 	readonly durationWeeks: number;
@@ -143,7 +142,7 @@ export interface GoalWorkspaceTrainingPackageDraft {
 	readonly features: readonly string[];
 }
 
-export interface GoalWorkspaceSurfaceImpact {
+export interface SurfaceImpact {
 	readonly surfaceId: string;
 	readonly surfaceName: string;
 	readonly path?: string;
@@ -155,95 +154,95 @@ export interface GoalWorkspaceSurfaceImpact {
 	readonly ixSubsystemLabels: readonly string[];
 }
 
-export interface GoalWorkspaceSharedContextBundle {
+export interface SharedContextBundle {
 	readonly domainFiles: readonly string[];
 	readonly eventFiles: readonly string[];
 	readonly workflowFiles: readonly string[];
 	readonly globalContextFiles: readonly string[];
 }
 
-export interface GoalWorkspaceCrossAppContextBundle {
+export interface CrossAppContextBundle {
 	readonly taskKind: string;
 	readonly goalId?: string;
 	readonly goalName?: string;
-	readonly packageDraft: GoalWorkspaceTrainingPackageDraft;
-	readonly affectedSurfaces: readonly GoalWorkspaceSurfaceImpact[];
-	readonly sharedContext: GoalWorkspaceSharedContextBundle;
+	readonly packageDraft: TrainingPackageDraft;
+	readonly affectedSurfaces: readonly SurfaceImpact[];
+	readonly sharedContext: SharedContextBundle;
 	readonly priorDecisions: readonly string[];
 	readonly ixCommand?: string;
 }
 
-export interface GoalWorkspaceCrossAppPlanStep {
+export interface CrossAppPlanStep {
 	readonly surfaceId: string;
 	readonly title: string;
 	readonly details: readonly string[];
 }
 
-export interface GoalWorkspaceCrossAppPlan {
-	readonly workflow: GoalWorkspaceCrossAppWorkflow;
-	readonly context: GoalWorkspaceCrossAppContextBundle;
-	readonly steps: readonly GoalWorkspaceCrossAppPlanStep[];
+export interface CrossAppPlan {
+	readonly workflow: CrossAppWorkflow;
+	readonly context: CrossAppContextBundle;
+	readonly steps: readonly CrossAppPlanStep[];
 	readonly unknowns: readonly string[];
-	readonly validation: readonly GoalWorkspaceCrossAppPlanStep[];
+	readonly validation: readonly CrossAppPlanStep[];
 	readonly memoryUpdates: readonly string[];
 }
 
-export interface GoalWorkspace {
+export interface ConsoleWorkspace {
 	readonly workspaceFolder: URI;
 	readonly manifestResource: URI;
-	readonly goal: GoalWorkspaceGoal;
-	readonly brand?: GoalWorkspaceBrand;
-	readonly surfaces: readonly GoalWorkspaceSurface[];
-	readonly shared: GoalWorkspaceShared;
+	readonly goal: WorkspaceGoal;
+	readonly brand?: WorkspaceBrand;
+	readonly surfaces: readonly WorkspaceSurface[];
+	readonly shared: WorkspaceShared;
 }
 
-export interface GoalWorkspaceDiagnostic {
+export interface WorkspaceDiagnostic {
 	readonly path: string;
 	readonly message: string;
 }
 
-export type GoalWorkspaceManifestStatus = 'no-workspace' | 'missing' | 'loaded' | 'invalid';
+export type WorkspaceManifestStatus = 'no-workspace' | 'missing' | 'loaded' | 'invalid';
 
-export interface GoalWorkspaceState {
-	readonly status: GoalWorkspaceManifestStatus;
+export interface ConsoleState {
+	readonly status: WorkspaceManifestStatus;
 	readonly workspaceFolder: URI | undefined;
 	readonly manifestResource: URI | undefined;
-	readonly workspace: GoalWorkspace | undefined;
-	readonly context: GoalWorkspaceContext;
-	readonly ix: GoalWorkspaceIxState;
-	readonly diagnostics: readonly GoalWorkspaceDiagnostic[];
+	readonly workspace: ConsoleWorkspace | undefined;
+	readonly context: WorkspaceContext;
+	readonly ix: IxState;
+	readonly diagnostics: readonly WorkspaceDiagnostic[];
 }
 
-export interface IGoalConsoleService {
+export interface IConsoleService {
 	readonly _serviceBrand: undefined;
-	readonly onDidChangeGoalWorkspace: Event<void>;
-	readonly onDidChangeState: Event<GoalWorkspaceState>;
+	readonly onDidChangeWorkspace: Event<void>;
+	readonly onDidChangeState: Event<ConsoleState>;
 
-	getState(): GoalWorkspaceState;
-	getGoal(): GoalWorkspaceGoal | undefined;
-	getGoalWorkspace(): GoalWorkspace | undefined;
-	getSurfaces(): readonly GoalSurface[];
-	getSurface(id: string): GoalSurface | undefined;
-	getContext(): GoalWorkspaceContext;
-	getSurfaceContext(surfaceId: string): GoalSurfaceContextSummary | undefined;
-	getIx(): GoalWorkspaceIxState;
-	getSurfaceIxOverlay(surfaceId: string): GoalWorkspaceIxSurfaceOverlay | undefined;
-	getAffectedSurfacesForIxSubsystem(subsystem: string): readonly GoalSurface[];
-	getCrossAppWorkflow(id: string): GoalWorkspaceCrossAppWorkflow | undefined;
-	buildCrossAppWorkflowPlan(id: string, packageDraft?: Partial<GoalWorkspaceTrainingPackageDraft>): GoalWorkspaceCrossAppPlan | undefined;
-	refresh(): Promise<GoalWorkspaceState>;
+	getState(): ConsoleState;
+	getGoal(): WorkspaceGoal | undefined;
+	getWorkspace(): ConsoleWorkspace | undefined;
+	getSurfaces(): readonly WorkspaceSurface[];
+	getSurface(id: string): WorkspaceSurface | undefined;
+	getContext(): WorkspaceContext;
+	getSurfaceContext(surfaceId: string): SurfaceContextSummary | undefined;
+	getIx(): IxState;
+	getSurfaceIxOverlay(surfaceId: string): IxSurfaceOverlay | undefined;
+	getAffectedSurfacesForIxSubsystem(subsystem: string): readonly WorkspaceSurface[];
+	getCrossAppWorkflow(id: string): CrossAppWorkflow | undefined;
+	buildCrossAppWorkflowPlan(id: string, packageDraft?: Partial<TrainingPackageDraft>): CrossAppPlan | undefined;
+	refresh(): Promise<ConsoleState>;
 }
 
-export const IGoalConsoleService = createDecorator<IGoalConsoleService>('goalConsoleService');
+export const IConsoleService = createDecorator<IConsoleService>('consoleService');
 
-const EMPTY_SHARED: GoalWorkspaceShared = {};
-const EMPTY_CONTEXT: GoalWorkspaceContext = {
+const EMPTY_SHARED: WorkspaceShared = {};
+const EMPTY_CONTEXT: WorkspaceContext = {
 	root: undefined,
 	globalFiles: [],
 	surfaceFiles: [],
 	surfaceSummaries: []
 };
-const EMPTY_IX: GoalWorkspaceIxState = {
+const EMPTY_IX: IxState = {
 	root: undefined,
 	overlayResource: undefined,
 	overlay: undefined
@@ -251,7 +250,7 @@ const EMPTY_IX: GoalWorkspaceIxState = {
 
 export const ADD_TRAINING_PACKAGE_WORKFLOW_ID = 'add-training-package';
 
-const ADD_TRAINING_PACKAGE_WORKFLOW: GoalWorkspaceCrossAppWorkflow = {
+const ADD_TRAINING_PACKAGE_WORKFLOW: CrossAppWorkflow = {
 	id: ADD_TRAINING_PACKAGE_WORKFLOW_ID,
 	label: 'Add Training Package',
 	taskKinds: ['create-package', 'add-offer', 'add-training-program'],
@@ -260,28 +259,28 @@ const ADD_TRAINING_PACKAGE_WORKFLOW: GoalWorkspaceCrossAppWorkflow = {
 	fallbackSurfaceIds: ['marketing', 'booking', 'subscriptions', 'admin', 'analytics', 'content']
 };
 
-const CROSS_APP_WORKFLOWS: readonly GoalWorkspaceCrossAppWorkflow[] = [
+const CROSS_APP_WORKFLOWS: readonly CrossAppWorkflow[] = [
 	ADD_TRAINING_PACKAGE_WORKFLOW
 ];
 
-export function listGoalWorkspaceCrossAppWorkflows(): readonly GoalWorkspaceCrossAppWorkflow[] {
+export function listCrossAppWorkflows(): readonly CrossAppWorkflow[] {
 	return CROSS_APP_WORKFLOWS;
 }
 
-export function getGoalWorkspaceCrossAppWorkflow(id: string): GoalWorkspaceCrossAppWorkflow | undefined {
+export function getCrossAppWorkflow(id: string): CrossAppWorkflow | undefined {
 	return CROSS_APP_WORKFLOWS.find(workflow => workflow.id === id);
 }
 
-export class GoalConsoleService extends Disposable implements IGoalConsoleService {
+export class ConsoleService extends Disposable implements IConsoleService {
 	readonly _serviceBrand: undefined;
 
-	private readonly _onDidChangeGoalWorkspace = this._register(new Emitter<void>());
-	readonly onDidChangeGoalWorkspace = this._onDidChangeGoalWorkspace.event;
+	private readonly _onDidChangeWorkspace = this._register(new Emitter<void>());
+	readonly onDidChangeWorkspace = this._onDidChangeWorkspace.event;
 
-	private readonly _onDidChangeState = this._register(new Emitter<GoalWorkspaceState>());
+	private readonly _onDidChangeState = this._register(new Emitter<ConsoleState>());
 	readonly onDidChangeState = this._onDidChangeState.event;
 
-	private state: GoalWorkspaceState = createNoWorkspaceGoalWorkspaceState();
+	private state: ConsoleState = createEmptyConsoleState();
 
 	constructor(
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
@@ -292,7 +291,7 @@ export class GoalConsoleService extends Disposable implements IGoalConsoleServic
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => void this.refresh()));
 		this._register(this.fileService.onDidFilesChange(e => {
 			const manifestResource = this.state.manifestResource;
-			const agentContextRoot = this.state.workspaceFolder ? joinPath(this.state.workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER) : undefined;
+			const agentContextRoot = this.state.workspaceFolder ? joinPath(this.state.workspaceFolder, AGENT_CONTEXT_FOLDER) : undefined;
 			if (manifestResource && e.contains(manifestResource, FileChangeType.ADDED, FileChangeType.UPDATED, FileChangeType.DELETED)) {
 				void this.refresh();
 				return;
@@ -304,43 +303,43 @@ export class GoalConsoleService extends Disposable implements IGoalConsoleServic
 		void this.refresh();
 	}
 
-	getState(): GoalWorkspaceState {
+	getState(): ConsoleState {
 		return this.state;
 	}
 
-	getGoal(): GoalWorkspaceGoal | undefined {
+	getGoal(): WorkspaceGoal | undefined {
 		return this.state.workspace?.goal;
 	}
 
-	getGoalWorkspace(): GoalWorkspace | undefined {
+	getWorkspace(): ConsoleWorkspace | undefined {
 		return this.state.workspace;
 	}
 
-	getSurfaces(): readonly GoalSurface[] {
+	getSurfaces(): readonly WorkspaceSurface[] {
 		return this.state.workspace?.surfaces ?? [];
 	}
 
-	getSurface(id: string): GoalSurface | undefined {
+	getSurface(id: string): WorkspaceSurface | undefined {
 		return this.getSurfaces().find(surface => surface.id === id);
 	}
 
-	getContext(): GoalWorkspaceContext {
+	getContext(): WorkspaceContext {
 		return this.state.context;
 	}
 
-	getSurfaceContext(surfaceId: string): GoalSurfaceContextSummary | undefined {
+	getSurfaceContext(surfaceId: string): SurfaceContextSummary | undefined {
 		return this.state.context.surfaceSummaries.find(summary => summary.surfaceId === surfaceId);
 	}
 
-	getIx(): GoalWorkspaceIxState {
+	getIx(): IxState {
 		return this.state.ix;
 	}
 
-	getSurfaceIxOverlay(surfaceId: string): GoalWorkspaceIxSurfaceOverlay | undefined {
+	getSurfaceIxOverlay(surfaceId: string): IxSurfaceOverlay | undefined {
 		return this.state.ix.overlay?.surfaces.find(surface => surface.surfaceId === surfaceId);
 	}
 
-	getAffectedSurfacesForIxSubsystem(subsystem: string): readonly GoalSurface[] {
+	getAffectedSurfacesForIxSubsystem(subsystem: string): readonly WorkspaceSurface[] {
 		const normalized = normalizeIxMatchText(subsystem);
 		if (!normalized) {
 			return [];
@@ -364,11 +363,11 @@ export class GoalConsoleService extends Disposable implements IGoalConsoleServic
 		});
 	}
 
-	getCrossAppWorkflow(id: string): GoalWorkspaceCrossAppWorkflow | undefined {
-		return getGoalWorkspaceCrossAppWorkflow(id);
+	getCrossAppWorkflow(id: string): CrossAppWorkflow | undefined {
+		return getCrossAppWorkflow(id);
 	}
 
-	buildCrossAppWorkflowPlan(id: string, packageDraft: Partial<GoalWorkspaceTrainingPackageDraft> = {}): GoalWorkspaceCrossAppPlan | undefined {
+	buildCrossAppWorkflowPlan(id: string, packageDraft: Partial<TrainingPackageDraft> = {}): CrossAppPlan | undefined {
 		const workflow = this.getCrossAppWorkflow(id);
 		if (!workflow || this.state.status !== 'loaded') {
 			return undefined;
@@ -376,22 +375,22 @@ export class GoalConsoleService extends Disposable implements IGoalConsoleServic
 		return buildCrossAppWorkflowPlan(this.state, workflow, packageDraft);
 	}
 
-	async refresh(): Promise<GoalWorkspaceState> {
+	async refresh(): Promise<ConsoleState> {
 		const workspaceFolder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceFolder) {
-			return this.setState(createNoWorkspaceGoalWorkspaceState());
+			return this.setState(createEmptyConsoleState());
 		}
 
-		const manifestResource = joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST);
+		const manifestResource = joinPath(workspaceFolder, WORKSPACE_MANIFEST);
 		const context = await this.readAgentContext(workspaceFolder, []);
 		const ix = await this.readIxOverlay(workspaceFolder);
 		if (!(await this.fileService.exists(manifestResource))) {
-			return this.setState(createMissingGoalWorkspaceState(workspaceFolder, manifestResource, context, ix));
+			return this.setState(createMissingConsoleState(workspaceFolder, manifestResource, context, ix));
 		}
 
 		try {
 			const content = (await this.fileService.readFile(manifestResource)).value.toString();
-			const parsed = parseGoalWorkspaceManifestText(content, workspaceFolder, manifestResource);
+			const parsed = parseWorkspaceManifestText(content, workspaceFolder, manifestResource);
 			const parsedContext = await this.readAgentContext(workspaceFolder, parsed.workspace?.surfaces ?? []);
 			const parsedIx = await this.readIxOverlay(workspaceFolder);
 			return this.setState(withIxOverlay(withAgentContext(parsed, parsedContext), parsedIx));
@@ -403,28 +402,28 @@ export class GoalConsoleService extends Disposable implements IGoalConsoleServic
 				workspace: undefined,
 				context,
 				ix,
-				diagnostics: [{ path: '$', message: `Failed to read ${GOAL_WORKSPACE_MANIFEST}: ${String((e as Error)?.message ?? e)}` }]
+				diagnostics: [{ path: '$', message: `Failed to read ${WORKSPACE_MANIFEST}: ${String((e as Error)?.message ?? e)}` }]
 			});
 		}
 	}
 
-	private async readAgentContext(workspaceFolder: URI, surfaces: readonly GoalSurface[]): Promise<GoalWorkspaceContext> {
-		return discoverGoalWorkspaceContext(this.fileService, workspaceFolder, surfaces);
+	private async readAgentContext(workspaceFolder: URI, surfaces: readonly WorkspaceSurface[]): Promise<WorkspaceContext> {
+		return discoverWorkspaceContext(this.fileService, workspaceFolder, surfaces);
 	}
 
-	private async readIxOverlay(workspaceFolder: URI): Promise<GoalWorkspaceIxState> {
-		return discoverGoalWorkspaceIxOverlay(this.fileService, workspaceFolder);
+	private async readIxOverlay(workspaceFolder: URI): Promise<IxState> {
+		return discoverIxOverlay(this.fileService, workspaceFolder);
 	}
 
-	private setState(state: GoalWorkspaceState): GoalWorkspaceState {
+	private setState(state: ConsoleState): ConsoleState {
 		this.state = state;
-		this._onDidChangeGoalWorkspace.fire();
+		this._onDidChangeWorkspace.fire();
 		this._onDidChangeState.fire(this.state);
 		return this.state;
 	}
 }
 
-export function createNoWorkspaceGoalWorkspaceState(): GoalWorkspaceState {
+export function createEmptyConsoleState(): ConsoleState {
 	return {
 		status: 'no-workspace',
 		workspaceFolder: undefined,
@@ -436,7 +435,7 @@ export function createNoWorkspaceGoalWorkspaceState(): GoalWorkspaceState {
 	};
 }
 
-export function createMissingGoalWorkspaceState(workspaceFolder: URI, manifestResource: URI, context: GoalWorkspaceContext = createEmptyAgentContext(workspaceFolder), ix: GoalWorkspaceIxState = createEmptyIxState(workspaceFolder)): GoalWorkspaceState {
+export function createMissingConsoleState(workspaceFolder: URI, manifestResource: URI, context: WorkspaceContext = createEmptyAgentContext(workspaceFolder), ix: IxState = createEmptyIxState(workspaceFolder)): ConsoleState {
 	return {
 		status: 'missing',
 		workspaceFolder,
@@ -448,7 +447,7 @@ export function createMissingGoalWorkspaceState(workspaceFolder: URI, manifestRe
 	};
 }
 
-export function parseGoalWorkspaceManifestText(text: string, workspaceFolder: URI, manifestResource: URI): GoalWorkspaceState {
+export function parseWorkspaceManifestText(text: string, workspaceFolder: URI, manifestResource: URI): ConsoleState {
 	let raw: unknown;
 	try {
 		raw = JSON.parse(text);
@@ -464,11 +463,11 @@ export function parseGoalWorkspaceManifestText(text: string, workspaceFolder: UR
 		};
 	}
 
-	return parseGoalWorkspaceManifest(raw, workspaceFolder, manifestResource);
+	return parseWorkspaceManifest(raw, workspaceFolder, manifestResource);
 }
 
-export function parseGoalWorkspaceManifest(raw: unknown, workspaceFolder: URI, manifestResource: URI): GoalWorkspaceState {
-	const diagnostics: GoalWorkspaceDiagnostic[] = [];
+export function parseWorkspaceManifest(raw: unknown, workspaceFolder: URI, manifestResource: URI): ConsoleState {
+	const diagnostics: WorkspaceDiagnostic[] = [];
 	if (!isRecord(raw)) {
 		return invalidState(workspaceFolder, manifestResource, [{ path: '$', message: 'Manifest must be an object.' }]);
 	}
@@ -478,7 +477,7 @@ export function parseGoalWorkspaceManifest(raw: unknown, workspaceFolder: URI, m
 		return invalidState(workspaceFolder, manifestResource, [{ path: '$.goal', message: 'Goal must be an object.' }]);
 	}
 
-	const goal: GoalWorkspaceGoal = {
+	const goal: WorkspaceGoal = {
 		id: requiredString(goalRaw, 'id', '$.goal.id', diagnostics),
 		name: requiredString(goalRaw, 'name', '$.goal.name', diagnostics),
 		description: optionalString(goalRaw, 'description', '$.goal.description', diagnostics),
@@ -488,7 +487,7 @@ export function parseGoalWorkspaceManifest(raw: unknown, workspaceFolder: URI, m
 	const brand = parseBrand(raw.brand, diagnostics);
 
 	const surfacesRaw = raw.surfaces;
-	const surfaces: GoalWorkspaceSurface[] = [];
+	const surfaces: WorkspaceSurface[] = [];
 	if (surfacesRaw === undefined) {
 		diagnostics.push({ path: '$.surfaces', message: 'Surfaces must be an array.' });
 	} else if (!Array.isArray(surfacesRaw)) {
@@ -532,10 +531,10 @@ export function parseGoalWorkspaceManifest(raw: unknown, workspaceFolder: URI, m
 	};
 }
 
-export async function discoverGoalWorkspaceContext(fileService: IFileService, workspaceFolder: URI, surfaces: readonly GoalSurface[]): Promise<GoalWorkspaceContext> {
-	const root = joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER);
-	const globalFiles: GoalWorkspaceContextFile[] = [];
-	const surfaceFiles: GoalWorkspaceContextFile[] = [];
+export async function discoverWorkspaceContext(fileService: IFileService, workspaceFolder: URI, surfaces: readonly WorkspaceSurface[]): Promise<WorkspaceContext> {
+	const root = joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER);
+	const globalFiles: WorkspaceContextFile[] = [];
+	const surfaceFiles: WorkspaceContextFile[] = [];
 
 	for (const file of GLOBAL_AGENT_CONTEXT_FILES) {
 		const contextFile = await readAgentContextFile(fileService, root, file.relativePath, file.id, file.id);
@@ -560,29 +559,29 @@ export async function discoverGoalWorkspaceContext(fileService: IFileService, wo
 	};
 }
 
-function createEmptyAgentContext(workspaceFolder: URI | undefined): GoalWorkspaceContext {
+function createEmptyAgentContext(workspaceFolder: URI | undefined): WorkspaceContext {
 	return {
-		root: workspaceFolder ? joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER) : undefined,
+		root: workspaceFolder ? joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER) : undefined,
 		globalFiles: [],
 		surfaceFiles: [],
 		surfaceSummaries: []
 	};
 }
 
-function withAgentContext(state: GoalWorkspaceState, context: GoalWorkspaceContext): GoalWorkspaceState {
+function withAgentContext(state: ConsoleState, context: WorkspaceContext): ConsoleState {
 	return { ...state, context };
 }
 
-export async function discoverGoalWorkspaceIxOverlay(fileService: IFileService, workspaceFolder: URI): Promise<GoalWorkspaceIxState> {
-	const root = joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER);
-	const overlayResource = joinPath(root, GOAL_WORKSPACE_IX_OVERLAY_FILE);
+export async function discoverIxOverlay(fileService: IFileService, workspaceFolder: URI): Promise<IxState> {
+	const root = joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER);
+	const overlayResource = joinPath(root, IX_OVERLAY_FILE);
 	if (!(await safeExists(fileService, overlayResource))) {
 		return createEmptyIxState(workspaceFolder);
 	}
 
 	try {
 		const raw = JSON.parse((await fileService.readFile(overlayResource)).value.toString());
-		const overlay = parseGoalWorkspaceIxOverlay(raw, overlayResource);
+		const overlay = parseIxOverlay(raw, overlayResource);
 		return {
 			root,
 			overlayResource,
@@ -593,20 +592,20 @@ export async function discoverGoalWorkspaceIxOverlay(fileService: IFileService, 
 	}
 }
 
-function createEmptyIxState(workspaceFolder: URI | undefined): GoalWorkspaceIxState {
-	const root = workspaceFolder ? joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER) : undefined;
+function createEmptyIxState(workspaceFolder: URI | undefined): IxState {
+	const root = workspaceFolder ? joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER) : undefined;
 	return {
 		root,
-		overlayResource: root ? joinPath(root, GOAL_WORKSPACE_IX_OVERLAY_FILE) : undefined,
+		overlayResource: root ? joinPath(root, IX_OVERLAY_FILE) : undefined,
 		overlay: undefined
 	};
 }
 
-function withIxOverlay(state: GoalWorkspaceState, ix: GoalWorkspaceIxState): GoalWorkspaceState {
+function withIxOverlay(state: ConsoleState, ix: IxState): ConsoleState {
 	return { ...state, ix };
 }
 
-export function createDefaultEightWeekTrainingPackageDraft(overrides: Partial<GoalWorkspaceTrainingPackageDraft> = {}): GoalWorkspaceTrainingPackageDraft {
+export function createDefaultEightWeekTrainingPackageDraft(overrides: Partial<TrainingPackageDraft> = {}): TrainingPackageDraft {
 	return {
 		id: overrides.id ?? 'strength-reset-8-week',
 		name: overrides.name ?? '8-Week Strength Reset',
@@ -624,7 +623,7 @@ export function createDefaultEightWeekTrainingPackageDraft(overrides: Partial<Go
 	};
 }
 
-export function buildCrossAppWorkflowPlan(state: GoalWorkspaceState, workflow: GoalWorkspaceCrossAppWorkflow, packageDraftOverrides: Partial<GoalWorkspaceTrainingPackageDraft> = {}): GoalWorkspaceCrossAppPlan | undefined {
+export function buildCrossAppWorkflowPlan(state: ConsoleState, workflow: CrossAppWorkflow, packageDraftOverrides: Partial<TrainingPackageDraft> = {}): CrossAppPlan | undefined {
 	if (state.status !== 'loaded' || !state.workspace) {
 		return undefined;
 	}
@@ -635,7 +634,7 @@ export function buildCrossAppWorkflowPlan(state: GoalWorkspaceState, workflow: G
 	const priorDecisions = state.context.globalFiles
 		.filter(file => file.kind === 'decisions')
 		.map(file => `${file.relativePath}: ${file.summary}`);
-	const context: GoalWorkspaceCrossAppContextBundle = {
+	const context: CrossAppContextBundle = {
 		taskKind: 'create-package',
 		goalId: state.workspace.goal.id,
 		goalName: state.workspace.goal.name,
@@ -665,7 +664,7 @@ export function buildCrossAppWorkflowPlan(state: GoalWorkspaceState, workflow: G
 	};
 }
 
-export function formatCrossAppWorkflowPlanMarkdown(plan: GoalWorkspaceCrossAppPlan): string {
+export function formatCrossAppWorkflowPlanMarkdown(plan: CrossAppPlan): string {
 	const dollars = `$${(plan.context.packageDraft.priceCents / 100).toFixed(0)}`;
 	const lines: string[] = [
 		`# ${plan.workflow.label}`,
@@ -732,9 +731,9 @@ export function formatCrossAppWorkflowPlanMarkdown(plan: GoalWorkspaceCrossAppPl
 	return `${lines.join('\n')}\n`;
 }
 
-function resolveAffectedSurfaces(state: GoalWorkspaceState, workflow: GoalWorkspaceCrossAppWorkflow): readonly GoalWorkspaceSurfaceImpact[] {
+function resolveAffectedSurfaces(state: ConsoleState, workflow: CrossAppWorkflow): readonly SurfaceImpact[] {
 	const surfaces = state.workspace?.surfaces ?? [];
-	const affected = new Map<string, GoalWorkspaceSurfaceImpact>();
+	const affected = new Map<string, SurfaceImpact>();
 	for (const surface of surfaces) {
 		const matchedCapabilities = surface.capabilities.filter(capability => workflow.affectedCapabilities.some(required => normalizeCapability(required) === normalizeCapability(capability)));
 		const isFallbackSurface = workflow.fallbackSurfaceIds.some(id => normalizeCapability(id) === normalizeCapability(surface.id));
@@ -759,11 +758,11 @@ function resolveAffectedSurfaces(state: GoalWorkspaceState, workflow: GoalWorksp
 
 	return workflow.fallbackSurfaceIds
 		.map(id => affected.get(id))
-		.filter((impact): impact is GoalWorkspaceSurfaceImpact => Boolean(impact))
+		.filter((impact): impact is SurfaceImpact => Boolean(impact))
 		.concat(Array.from(affected.values()).filter(impact => !workflow.fallbackSurfaceIds.includes(impact.surfaceId)));
 }
 
-function buildSharedContextBundle(state: GoalWorkspaceState): GoalWorkspaceSharedContextBundle {
+function buildSharedContextBundle(state: ConsoleState): SharedContextBundle {
 	const shared = state.workspace?.shared ?? EMPTY_SHARED;
 	const sharedPaths = [shared.domain, shared.events, shared.workflows].filter((path): path is string => Boolean(path));
 	return {
@@ -783,8 +782,8 @@ function buildSharedContextBundle(state: GoalWorkspaceState): GoalWorkspaceShare
 	};
 }
 
-function buildAddTrainingPackageSteps(packageDraft: GoalWorkspaceTrainingPackageDraft, affectedSurfaces: readonly GoalWorkspaceSurfaceImpact[]): readonly GoalWorkspaceCrossAppPlanStep[] {
-	const steps: GoalWorkspaceCrossAppPlanStep[] = [{
+function buildAddTrainingPackageSteps(packageDraft: TrainingPackageDraft, affectedSurfaces: readonly SurfaceImpact[]): readonly CrossAppPlanStep[] {
+	const steps: CrossAppPlanStep[] = [{
 		surfaceId: 'shared-domain',
 		title: 'Shared Domain',
 		details: [
@@ -803,7 +802,7 @@ function buildAddTrainingPackageSteps(packageDraft: GoalWorkspaceTrainingPackage
 	return steps;
 }
 
-function buildAddTrainingPackageValidation(packageDraft: GoalWorkspaceTrainingPackageDraft, affectedSurfaces: readonly GoalWorkspaceSurfaceImpact[]): readonly GoalWorkspaceCrossAppPlanStep[] {
+function buildAddTrainingPackageValidation(packageDraft: TrainingPackageDraft, affectedSurfaces: readonly SurfaceImpact[]): readonly CrossAppPlanStep[] {
 	return affectedSurfaces.map(surface => ({
 		surfaceId: surface.surfaceId,
 		title: `${surface.surfaceName} Validation`,
@@ -811,7 +810,7 @@ function buildAddTrainingPackageValidation(packageDraft: GoalWorkspaceTrainingPa
 	}));
 }
 
-function addTrainingPackageSurfacePlanDetails(surfaceId: string, packageDraft: GoalWorkspaceTrainingPackageDraft): readonly string[] {
+function addTrainingPackageSurfacePlanDetails(surfaceId: string, packageDraft: TrainingPackageDraft): readonly string[] {
 	switch (surfaceId) {
 		case 'marketing':
 			return [
@@ -849,7 +848,7 @@ function addTrainingPackageSurfacePlanDetails(surfaceId: string, packageDraft: G
 	}
 }
 
-function addTrainingPackageSurfaceValidationDetails(surfaceId: string, packageDraft: GoalWorkspaceTrainingPackageDraft): readonly string[] {
+function addTrainingPackageSurfaceValidationDetails(surfaceId: string, packageDraft: TrainingPackageDraft): readonly string[] {
 	switch (surfaceId) {
 		case 'marketing':
 			return [`Preview contains "${packageDraft.name}".`, `CTA contains \`package=${packageDraft.id}\`.`];
@@ -868,7 +867,7 @@ function addTrainingPackageSurfaceValidationDetails(surfaceId: string, packageDr
 	}
 }
 
-function surfaceImpactReason(surface: GoalSurface, matchedCapabilities: readonly string[]): string {
+function surfaceImpactReason(surface: WorkspaceSurface, matchedCapabilities: readonly string[]): string {
 	const id = surface.id.toLowerCase();
 	if (id === 'marketing') {
 		return 'Public offer/pricing pages need to show the new package and route visitors into booking.';
@@ -898,7 +897,7 @@ function normalizeCapability(value: string): string {
 	return value.trim().toLowerCase().replace(/[\s_]+/g, '-');
 }
 
-function parseGoalWorkspaceIxOverlay(raw: unknown, resource: URI): GoalWorkspaceIxOverlay | undefined {
+function parseIxOverlay(raw: unknown, resource: URI): IxOverlay | undefined {
 	if (!isRecord(raw)) {
 		return undefined;
 	}
@@ -911,11 +910,11 @@ function parseGoalWorkspaceIxOverlay(raw: unknown, resource: URI): GoalWorkspace
 	};
 }
 
-function parseIxDiscoveredSubsystems(raw: unknown): readonly GoalWorkspaceIxDiscoveredSubsystem[] {
+function parseIxDiscoveredSubsystems(raw: unknown): readonly IxDiscoveredSubsystem[] {
 	if (!Array.isArray(raw)) {
 		return [];
 	}
-	const result: GoalWorkspaceIxDiscoveredSubsystem[] = [];
+	const result: IxDiscoveredSubsystem[] = [];
 	for (const item of raw) {
 		if (!isRecord(item)) {
 			continue;
@@ -937,11 +936,11 @@ function parseIxDiscoveredSubsystems(raw: unknown): readonly GoalWorkspaceIxDisc
 	return result;
 }
 
-function parseIxSurfaceOverlays(raw: unknown): readonly GoalWorkspaceIxSurfaceOverlay[] {
+function parseIxSurfaceOverlays(raw: unknown): readonly IxSurfaceOverlay[] {
 	if (!Array.isArray(raw)) {
 		return [];
 	}
-	const result: GoalWorkspaceIxSurfaceOverlay[] = [];
+	const result: IxSurfaceOverlay[] = [];
 	for (const item of raw) {
 		if (!isRecord(item)) {
 			continue;
@@ -960,7 +959,7 @@ function parseIxSurfaceOverlays(raw: unknown): readonly GoalWorkspaceIxSurfaceOv
 	return result;
 }
 
-async function readAgentContextFile(fileService: IFileService, root: URI, relativePath: string, id: string, kind: GoalWorkspaceContextFileKind): Promise<GoalWorkspaceContextFile | undefined> {
+async function readAgentContextFile(fileService: IFileService, root: URI, relativePath: string, id: string, kind: WorkspaceContextFileKind): Promise<WorkspaceContextFile | undefined> {
 	const resource = joinPath(root, ...relativePath.split('/'));
 	if (!(await safeExists(fileService, resource))) {
 		return undefined;
@@ -972,7 +971,7 @@ async function readAgentContextFile(fileService: IFileService, root: URI, relati
 			id,
 			kind,
 			resource,
-			relativePath: `${GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER}/${relativePath}`,
+			relativePath: `${AGENT_CONTEXT_FOLDER}/${relativePath}`,
 			summary: summarizeAgentContextMarkdown(content)
 		};
 	} catch {
@@ -980,7 +979,7 @@ async function readAgentContextFile(fileService: IFileService, root: URI, relati
 	}
 }
 
-function createSurfaceContextSummary(surface: GoalSurface, globalFiles: readonly GoalWorkspaceContextFile[], surfaceFiles: readonly GoalWorkspaceContextFile[]): GoalSurfaceContextSummary {
+function createSurfaceContextSummary(surface: WorkspaceSurface, globalFiles: readonly WorkspaceContextFile[], surfaceFiles: readonly WorkspaceContextFile[]): SurfaceContextSummary {
 	const parts = [...globalFiles, ...surfaceFiles]
 		.map(file => `${file.relativePath}: ${file.summary}`)
 		.filter(part => part.trim().length > 0);
@@ -1011,7 +1010,7 @@ function summarizeAgentContextMarkdown(content: string): string {
 	return firstContentLine.length > 160 ? `${firstContentLine.slice(0, 157)}...` : firstContentLine;
 }
 
-function parseSurface(raw: unknown, index: number, diagnostics: GoalWorkspaceDiagnostic[]): GoalWorkspaceSurface | undefined {
+function parseSurface(raw: unknown, index: number, diagnostics: WorkspaceDiagnostic[]): WorkspaceSurface | undefined {
 	const basePath = `$.surfaces[${index}]`;
 	if (!isRecord(raw)) {
 		diagnostics.push({ path: basePath, message: 'Surface must be an object.' });
@@ -1042,7 +1041,7 @@ function parseSurface(raw: unknown, index: number, diagnostics: GoalWorkspaceDia
 	};
 }
 
-function parseSurfaceIxMetadata(raw: unknown, path: string, diagnostics: GoalWorkspaceDiagnostic[]): GoalSurfaceIxMetadata | undefined {
+function parseSurfaceIxMetadata(raw: unknown, path: string, diagnostics: WorkspaceDiagnostic[]): SurfaceIxMetadata | undefined {
 	if (raw === undefined) {
 		return undefined;
 	}
@@ -1066,7 +1065,7 @@ function parseSurfaceIxMetadata(raw: unknown, path: string, diagnostics: GoalWor
 	};
 }
 
-function parseBrand(raw: unknown, diagnostics: GoalWorkspaceDiagnostic[]): GoalWorkspaceBrand | undefined {
+function parseBrand(raw: unknown, diagnostics: WorkspaceDiagnostic[]): WorkspaceBrand | undefined {
 	if (raw === undefined) {
 		return undefined;
 	}
@@ -1074,7 +1073,7 @@ function parseBrand(raw: unknown, diagnostics: GoalWorkspaceDiagnostic[]): GoalW
 		diagnostics.push({ path: '$.brand', message: 'Brand must be an object.' });
 		return undefined;
 	}
-	const brand: GoalWorkspaceBrand = {
+	const brand: WorkspaceBrand = {
 		primaryColor: optionalString(raw, 'primaryColor', '$.brand.primaryColor', diagnostics),
 		secondaryColor: optionalString(raw, 'secondaryColor', '$.brand.secondaryColor', diagnostics),
 		accentColor: optionalString(raw, 'accentColor', '$.brand.accentColor', diagnostics),
@@ -1087,7 +1086,7 @@ function parseBrand(raw: unknown, diagnostics: GoalWorkspaceDiagnostic[]): GoalW
 	return brand;
 }
 
-function parseShared(raw: unknown, diagnostics: GoalWorkspaceDiagnostic[]): GoalWorkspaceShared {
+function parseShared(raw: unknown, diagnostics: WorkspaceDiagnostic[]): WorkspaceShared {
 	if (raw === undefined) {
 		return EMPTY_SHARED;
 	}
@@ -1104,7 +1103,7 @@ function parseShared(raw: unknown, diagnostics: GoalWorkspaceDiagnostic[]): Goal
 	};
 }
 
-function invalidState(workspaceFolder: URI, manifestResource: URI, diagnostics: readonly GoalWorkspaceDiagnostic[]): GoalWorkspaceState {
+function invalidState(workspaceFolder: URI, manifestResource: URI, diagnostics: readonly WorkspaceDiagnostic[]): ConsoleState {
 	return {
 		status: 'invalid',
 		workspaceFolder,
@@ -1116,7 +1115,7 @@ function invalidState(workspaceFolder: URI, manifestResource: URI, diagnostics: 
 	};
 }
 
-function requiredString(raw: Record<string, unknown>, key: string, path: string, diagnostics: GoalWorkspaceDiagnostic[]): string {
+function requiredString(raw: Record<string, unknown>, key: string, path: string, diagnostics: WorkspaceDiagnostic[]): string {
 	const value = raw[key];
 	if (typeof value === 'string' && value.trim().length > 0) {
 		return value.trim();
@@ -1125,7 +1124,7 @@ function requiredString(raw: Record<string, unknown>, key: string, path: string,
 	return '';
 }
 
-function optionalString(raw: Record<string, unknown>, key: string, path: string, diagnostics: GoalWorkspaceDiagnostic[]): string | undefined {
+function optionalString(raw: Record<string, unknown>, key: string, path: string, diagnostics: WorkspaceDiagnostic[]): string | undefined {
 	const value = raw[key];
 	if (value === undefined) {
 		return undefined;
@@ -1138,7 +1137,7 @@ function optionalString(raw: Record<string, unknown>, key: string, path: string,
 	return undefined;
 }
 
-function optionalWorkspaceRelativePath(raw: Record<string, unknown>, key: string, path: string, diagnostics: GoalWorkspaceDiagnostic[]): string | undefined {
+function optionalWorkspaceRelativePath(raw: Record<string, unknown>, key: string, path: string, diagnostics: WorkspaceDiagnostic[]): string | undefined {
 	const value = optionalString(raw, key, path, diagnostics);
 	if (value === undefined) {
 		return undefined;
@@ -1160,7 +1159,7 @@ function optionalWorkspaceRelativePath(raw: Record<string, unknown>, key: string
 	return normalized;
 }
 
-function optionalLocalPreviewUrl(raw: Record<string, unknown>, key: string, path: string, diagnostics: GoalWorkspaceDiagnostic[]): string | undefined {
+function optionalLocalPreviewUrl(raw: Record<string, unknown>, key: string, path: string, diagnostics: WorkspaceDiagnostic[]): string | undefined {
 	const value = optionalString(raw, key, path, diagnostics);
 	if (value === undefined) {
 		return undefined;
@@ -1191,7 +1190,7 @@ function isLocalPreviewHostname(hostname: string): boolean {
 		|| normalized === '[::1]';
 }
 
-function optionalStringArray(raw: Record<string, unknown>, key: string, path: string, diagnostics: GoalWorkspaceDiagnostic[]): readonly string[] {
+function optionalStringArray(raw: Record<string, unknown>, key: string, path: string, diagnostics: WorkspaceDiagnostic[]): readonly string[] {
 	const value = raw[key];
 	if (value === undefined) {
 		return [];
@@ -1259,4 +1258,4 @@ async function safeExists(fileService: IFileService, resource: URI): Promise<boo
 	}
 }
 
-registerSingleton(IGoalConsoleService, GoalConsoleService, InstantiationType.Delayed);
+registerSingleton(IConsoleService, ConsoleService, InstantiationType.Delayed);

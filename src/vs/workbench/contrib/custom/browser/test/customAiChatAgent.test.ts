@@ -8,13 +8,13 @@ import { joinPath } from '../../../../../base/common/resources.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import {
-	buildCustomAiGoalWorkspaceContextBlock,
+	buildCustomAiWorkspaceContextBlock,
 	buildCustomAiSurfaceHandoffContextBlock,
 	buildCustomAiSurfaceHandoffToolRecoveryMessage,
 	buildCustomAiSystemMessageParts,
 	CUSTOM_AI_EDIT_TOOL_SYSTEM_PROMPT,
 	CUSTOM_AI_PRODUCT_SYSTEM_PROMPT,
-	formatGoalWorkspaceIxContextLines,
+	formatIxContextLines,
 } from '../../../../../../custom/ai/browser/customAiChatAgent.js';
 import { SurfaceBuilderHandoffState } from '../../../../../../custom/goalWorkspace/surfaceBuilderHandoffState.js';
 import {
@@ -24,17 +24,17 @@ import {
 } from '../../../../../../custom/ai/browser/customAiChatTrace.js';
 import {
 	ADD_TRAINING_PACKAGE_WORKFLOW_ID,
-	createMissingGoalWorkspaceState,
-	GOAL_WORKSPACE_IX_OVERLAY_FILE,
-	GOAL_WORKSPACE_MANIFEST,
-	parseGoalWorkspaceManifestText,
-} from '../../../../../../custom/goalWorkspace/GoalConsoleService.js';
+	createMissingConsoleState,
+	IX_OVERLAY_FILE,
+	WORKSPACE_MANIFEST,
+	parseWorkspaceManifestText,
+} from '../../../../../../custom/goalWorkspace/ConsoleService.js';
 
 suite('CustomAiChatAgent', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
 	const workspaceFolder = URI.file('/workspace');
-	const manifestResource = joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST);
+	const manifestResource = joinPath(workspaceFolder, WORKSPACE_MANIFEST);
 
 	test('product system prompt describes goal-workspace agent behavior', () => {
 		assert.match(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT, /goal-workspace IDE/);
@@ -50,7 +50,7 @@ suite('CustomAiChatAgent', () => {
 	});
 
 	test('renders loaded goal workspace context for Custom AI messages', () => {
-		const state = parseGoalWorkspaceManifestText(JSON.stringify({
+		const state = parseWorkspaceManifestText(JSON.stringify({
 			goal: {
 				id: 'personal-training-business',
 				name: 'Online Personal Training Business',
@@ -79,7 +79,7 @@ suite('CustomAiChatAgent', () => {
 			}
 		}), workspaceFolder, manifestResource);
 
-		const block = buildCustomAiGoalWorkspaceContextBlock(state);
+		const block = buildCustomAiWorkspaceContextBlock(state);
 		assert.ok(block);
 		assert.match(block, /Goal: Online Personal Training Business/);
 		assert.match(block, /North-star metric: active_paid_clients/);
@@ -91,21 +91,21 @@ suite('CustomAiChatAgent', () => {
 	});
 
 	test('renders missing and invalid manifest guidance', () => {
-		const missing = buildCustomAiGoalWorkspaceContextBlock(createMissingGoalWorkspaceState(workspaceFolder, manifestResource));
+		const missing = buildCustomAiWorkspaceContextBlock(createMissingConsoleState(workspaceFolder, manifestResource));
 		assert.ok(missing);
 		assert.match(missing, /workspace\.goal\.json is missing/);
 		assert.match(missing, /create workspace\.goal\.json before scaffolding surfaces/);
 
-		const invalidState = parseGoalWorkspaceManifestText('{ nope', workspaceFolder, manifestResource);
-		const invalid = buildCustomAiGoalWorkspaceContextBlock(invalidState);
+		const invalidState = parseWorkspaceManifestText('{ nope', workspaceFolder, manifestResource);
+		const invalid = buildCustomAiWorkspaceContextBlock(invalidState);
 		assert.ok(invalid);
 		assert.match(invalid, /present but invalid/);
 		assert.match(invalid, /Invalid JSON/);
 	});
 
 	test('renders Ix overlay subsystem labels and surface mappings', () => {
-		const lines = formatGoalWorkspaceIxContextLines({
-			resource: joinPath(workspaceFolder, GOAL_WORKSPACE_IX_OVERLAY_FILE),
+		const lines = formatIxContextLines({
+			resource: joinPath(workspaceFolder, IX_OVERLAY_FILE),
 			generatedAt: '2026-06-29T00:00:00.000Z',
 			command: 'ix subsystems --list',
 			discoveredSubsystems: [
@@ -128,7 +128,7 @@ suite('CustomAiChatAgent', () => {
 	});
 
 	test('buildCustomAiSystemMessageParts includes workflow hint and edit guidance for loaded workspace', () => {
-		const state = parseGoalWorkspaceManifestText(JSON.stringify({
+		const state = parseWorkspaceManifestText(JSON.stringify({
 			goal: { id: 'demo', name: 'Demo Goal' },
 			surfaces: [{ id: 'booking', name: 'Booking', capabilities: [], events: [], entities: [], ixSubsystems: [] }],
 			shared: {}
@@ -151,7 +151,7 @@ suite('CustomAiChatAgent', () => {
 	});
 
 	test('buildCustomAiSystemMessageParts omits edit guidance when tools are disabled', () => {
-		const state = parseGoalWorkspaceManifestText(JSON.stringify({
+		const state = parseWorkspaceManifestText(JSON.stringify({
 			goal: { id: 'demo', name: 'Demo Goal' },
 			surfaces: [],
 			shared: {}

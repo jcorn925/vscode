@@ -11,7 +11,7 @@ import { FileOperationError, FileOperationResult, IFileService } from '../../../
 import { createDecorator } from '../../../vs/platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../vs/platform/log/common/log.js';
 import { IWorkspaceContextService } from '../../../vs/platform/workspace/common/workspace.js';
-import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER } from '../../goalWorkspace/GoalConsoleService.js';
+import { AGENT_CONTEXT_FOLDER } from '../../goalWorkspace/ConsoleService.js';
 
 export const CUSTOM_AI_OBSERVABILITY_FOLDER = 'observability';
 export const CUSTOM_AI_CHAT_TRACE_FILE = 'custom-ai-chat.jsonl';
@@ -99,7 +99,7 @@ export class CustomAiChatTraceService implements ICustomAiChatTraceService {
 		if (!folder) {
 			return undefined;
 		}
-		return joinPath(folder.uri, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, CUSTOM_AI_OBSERVABILITY_FOLDER, CUSTOM_AI_CHAT_TRACE_FILE);
+		return joinPath(folder.uri, AGENT_CONTEXT_FOLDER, CUSTOM_AI_OBSERVABILITY_FOLDER, CUSTOM_AI_CHAT_TRACE_FILE);
 	}
 
 	private async appendTrace(resource: URI, encoded: string): Promise<void> {

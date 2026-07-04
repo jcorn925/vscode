@@ -12,7 +12,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/tes
 import { IFileContent, IFileService, IFileStat } from '../../../../../platform/files/common/files.js';
 import { TestContextService } from '../../../../test/common/workbenchTestServices.js';
 import { CustomAiVerifySurfaceBlueprintTool } from '../../../../../../custom/ai/browser/customAiVerifySurfaceBlueprintTool.js';
-import { GOAL_WORKSPACE_MANIFEST, createMissingGoalWorkspaceState, IGoalConsoleService } from '../../../../../../custom/goalWorkspace/GoalConsoleService.js';
+import { WORKSPACE_MANIFEST, createMissingConsoleState, IConsoleService } from '../../../../../../custom/goalWorkspace/ConsoleService.js';
 import { instantiateBlueprintFromTemplate, writeBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintService.js';
 import { loadSurfaceTemplate } from '../../../../../../custom/goalWorkspace/surfaceBlueprintTemplateRegistry.js';
 import { IIxIntegrationService } from '../../../../../../custom/ix/IxIntegrationService.js';
@@ -22,15 +22,15 @@ suite('CustomAiVerifySurfaceBlueprintTool', () => {
 
 	const workspaceFolder = URI.file('/workspace');
 
-	function createGoalConsoleService(): IGoalConsoleService {
-		const state = createMissingGoalWorkspaceState(workspaceFolder, joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST));
+	function createConsoleService(): IConsoleService {
+		const state = createMissingConsoleState(workspaceFolder, joinPath(workspaceFolder, WORKSPACE_MANIFEST));
 		return {
 			_serviceBrand: undefined,
-			onDidChangeGoalWorkspace: () => ({ dispose: () => { } }),
+			onDidChangeWorkspace: () => ({ dispose: () => { } }),
 			onDidChangeState: () => ({ dispose: () => { } }),
 			getState: () => state,
 			getGoal: () => undefined,
-			getGoalWorkspace: () => undefined,
+			getWorkspace: () => undefined,
 			getSurfaces: () => [],
 			getSurface: (id: string) => ({ id, name: id, capabilities: [], events: [], entities: [], ixSubsystems: [] }),
 			getContext: () => state.context,
@@ -70,7 +70,7 @@ suite('CustomAiVerifySurfaceBlueprintTool', () => {
 		const tool = new CustomAiVerifySurfaceBlueprintTool(
 			new TestBlueprintFileService() as unknown as IFileService,
 			new TestContextService(),
-			createGoalConsoleService(),
+			createConsoleService(),
 			createIxService(),
 		);
 		const result = await tool.invoke({
@@ -91,7 +91,7 @@ suite('CustomAiVerifySurfaceBlueprintTool', () => {
 		const tool = new CustomAiVerifySurfaceBlueprintTool(
 			fileService as unknown as IFileService,
 			workspaceContextService,
-			createGoalConsoleService(),
+			createConsoleService(),
 			createIxService(),
 		);
 		const result = await tool.invoke({
@@ -111,7 +111,7 @@ suite('CustomAiVerifySurfaceBlueprintTool', () => {
 		const template = loadSurfaceTemplate('booking')!;
 		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'booking', surfaceName: 'Booking' });
 		await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
-		fileService.setFile(joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST), createManifest('booking', 'Booking', {
+		fileService.setFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST), createManifest('booking', 'Booking', {
 			capabilities: [...blueprint.manifest.capabilities],
 			events: [...blueprint.manifest.events],
 			entities: [...blueprint.manifest.entities],
@@ -130,7 +130,7 @@ suite('CustomAiVerifySurfaceBlueprintTool', () => {
 		const tool = new CustomAiVerifySurfaceBlueprintTool(
 			fileService as unknown as IFileService,
 			workspaceContextService,
-			createGoalConsoleService(),
+			createConsoleService(),
 			createIxService(),
 		);
 		const result = await tool.invoke({

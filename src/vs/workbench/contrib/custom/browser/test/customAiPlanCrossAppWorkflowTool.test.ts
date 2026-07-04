@@ -12,21 +12,21 @@ import { CustomAiPlanCrossAppWorkflowTool } from '../../../../../../custom/ai/br
 import {
 	ADD_TRAINING_PACKAGE_WORKFLOW_ID,
 	buildCrossAppWorkflowPlan,
-	createMissingGoalWorkspaceState,
-	getGoalWorkspaceCrossAppWorkflow,
-	GOAL_WORKSPACE_MANIFEST,
-	IGoalConsoleService,
-	parseGoalWorkspaceManifestText,
-} from '../../../../../../custom/goalWorkspace/GoalConsoleService.js';
+	createMissingConsoleState,
+	getCrossAppWorkflow,
+	WORKSPACE_MANIFEST,
+	IConsoleService,
+	parseWorkspaceManifestText,
+} from '../../../../../../custom/goalWorkspace/ConsoleService.js';
 
 suite('CustomAiPlanCrossAppWorkflowTool', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
 	const workspaceFolder = URI.file('/workspace');
-	const manifestResource = joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST);
+	const manifestResource = joinPath(workspaceFolder, WORKSPACE_MANIFEST);
 
 	function createLoadedState() {
-		return parseGoalWorkspaceManifestText(JSON.stringify({
+		return parseWorkspaceManifestText(JSON.stringify({
 			goal: {
 				id: 'personal-training-business',
 				name: 'Online Personal Training Business',
@@ -67,14 +67,14 @@ suite('CustomAiPlanCrossAppWorkflowTool', () => {
 		}), workspaceFolder, manifestResource);
 	}
 
-	function createService(state: ReturnType<typeof createLoadedState>): IGoalConsoleService {
+	function createService(state: ReturnType<typeof createLoadedState>): IConsoleService {
 		return {
 			_serviceBrand: undefined,
-			onDidChangeGoalWorkspace: () => ({ dispose: () => { } }),
+			onDidChangeWorkspace: () => ({ dispose: () => { } }),
 			onDidChangeState: () => ({ dispose: () => { } }),
 			getState: () => state,
 			getGoal: () => state.workspace?.goal,
-			getGoalWorkspace: () => state.workspace,
+			getWorkspace: () => state.workspace,
 			getSurfaces: () => state.workspace?.surfaces ?? [],
 			getSurface: (id: string) => state.workspace?.surfaces.find(surface => surface.id === id),
 			getContext: () => state.context,
@@ -82,9 +82,9 @@ suite('CustomAiPlanCrossAppWorkflowTool', () => {
 			getIx: () => state.ix,
 			getSurfaceIxOverlay: () => undefined,
 			getAffectedSurfacesForIxSubsystem: () => [],
-			getCrossAppWorkflow: (id: string) => getGoalWorkspaceCrossAppWorkflow(id),
+			getCrossAppWorkflow: (id: string) => getCrossAppWorkflow(id),
 			buildCrossAppWorkflowPlan: (id: string, packageDraft = {}) => {
-				const workflow = getGoalWorkspaceCrossAppWorkflow(id);
+				const workflow = getCrossAppWorkflow(id);
 				if (!workflow || state.status !== 'loaded') {
 					return undefined;
 				}
@@ -111,7 +111,7 @@ suite('CustomAiPlanCrossAppWorkflowTool', () => {
 	});
 
 	test('returns actionable error when goal workspace manifest is missing', async () => {
-		const state = createMissingGoalWorkspaceState(workspaceFolder, manifestResource);
+		const state = createMissingConsoleState(workspaceFolder, manifestResource);
 		const tool = new CustomAiPlanCrossAppWorkflowTool(createService(state));
 		const result = await tool.invoke({
 			callId: 'test',

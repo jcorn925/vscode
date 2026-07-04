@@ -6,8 +6,8 @@
 import { URI } from '../../vs/base/common/uri.js';
 import { joinPath } from '../../vs/base/common/resources.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
-import { GOAL_WORKSPACE_MANIFEST } from './GoalConsoleService.js';
-import type { GoalWorkspaceSurface } from './GoalConsoleService.js';
+import { WORKSPACE_MANIFEST } from './ConsoleService.js';
+import type { WorkspaceSurface } from './ConsoleService.js';
 import { applyBlueprintVerificationStatus, blueprintResource, readBlueprint } from './surfaceBlueprintService.js';
 import { blueprintSubsystemMatchesIx, type IxSubsystemRegion } from './surfaceIxMatch.js';
 import type { SurfaceBlueprintGap, SurfaceBlueprintVerificationResult } from './surfaceBlueprintTypes.js';
@@ -129,9 +129,9 @@ async function readManifestSurface(
 	fileService: IFileService,
 	workspaceFolder: URI,
 	surfaceId: string,
-): Promise<GoalWorkspaceSurface | undefined> {
+): Promise<WorkspaceSurface | undefined> {
 	try {
-		const manifestUri = joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST);
+		const manifestUri = joinPath(workspaceFolder, WORKSPACE_MANIFEST);
 		if (!(await fileService.exists(manifestUri))) {
 			return undefined;
 		}
@@ -186,7 +186,7 @@ async function verifyScaffoldBaseline(
 	fileService: IFileService,
 	workspaceFolder: URI,
 	surfaceId: string,
-	manifestSurface: GoalWorkspaceSurface | undefined,
+	manifestSurface: WorkspaceSurface | undefined,
 ): Promise<SurfaceBlueprintGap[]> {
 	const gaps: SurfaceBlueprintGap[] = [];
 	const appRoot = joinPath(workspaceFolder, manifestSurface?.path ?? `apps/${surfaceId}`);

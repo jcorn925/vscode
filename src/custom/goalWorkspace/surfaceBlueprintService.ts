@@ -7,20 +7,20 @@ import { VSBuffer } from '../../vs/base/common/buffer.js';
 import { URI } from '../../vs/base/common/uri.js';
 import { joinPath } from '../../vs/base/common/resources.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
-import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER } from './GoalConsoleService.js';
-import type { GoalWorkspaceGoal } from './GoalConsoleService.js';
+import { AGENT_CONTEXT_FOLDER } from './ConsoleService.js';
+import type { WorkspaceGoal } from './ConsoleService.js';
 import { loadSurfaceTemplate } from './surfaceBlueprintTemplateRegistry.js';
 import type { SurfaceBlueprint, SurfaceBlueprintTemplate } from './surfaceBlueprintTypes.js';
 
 export const GOAL_WORKSPACE_SURFACE_BLUEPRINTS_FOLDER = 'surfaces';
 
 export function blueprintResource(workspaceFolder: URI, surfaceId: string): URI {
-	return joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_SURFACE_BLUEPRINTS_FOLDER, `${surfaceId}.blueprint.json`);
+	return joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_SURFACE_BLUEPRINTS_FOLDER, `${surfaceId}.blueprint.json`);
 }
 
 export function instantiateBlueprintFromTemplate(
 	template: SurfaceBlueprintTemplate,
-	options: { surfaceId: string; surfaceName?: string; goal?: GoalWorkspaceGoal },
+	options: { surfaceId: string; surfaceName?: string; goal?: WorkspaceGoal },
 ): SurfaceBlueprint {
 	const now = new Date().toISOString();
 	const surfaceAppPrefix = `apps/${options.surfaceId}`;
@@ -58,7 +58,7 @@ export async function readBlueprint(fileService: IFileService, resource: URI): P
 
 export async function writeBlueprint(fileService: IFileService, workspaceFolder: URI, blueprint: SurfaceBlueprint): Promise<URI> {
 	const resource = blueprintResource(workspaceFolder, blueprint.surfaceId);
-	await fileService.createFolder(joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_SURFACE_BLUEPRINTS_FOLDER));
+	await fileService.createFolder(joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_SURFACE_BLUEPRINTS_FOLDER));
 	await fileService.writeFile(resource, VSBuffer.fromString(`${JSON.stringify(blueprint, null, '\t')}\n`));
 	return resource;
 }
@@ -80,7 +80,7 @@ export async function createBlueprintFromTemplateId(
 	fileService: IFileService,
 	workspaceFolder: URI,
 	templateId: string,
-	options: { surfaceId?: string; surfaceName?: string; goal?: GoalWorkspaceGoal },
+	options: { surfaceId?: string; surfaceName?: string; goal?: WorkspaceGoal },
 ): Promise<{ blueprint: SurfaceBlueprint; resource: URI } | undefined> {
 	const template = loadSurfaceTemplate(templateId);
 	if (!template) {

@@ -9,8 +9,9 @@ import { joinPath } from '../../../../../base/common/resources.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { IFileContent, IFileService, IFileStat } from '../../../../../platform/files/common/files.js';
-import { GOAL_WORKSPACE_MANIFEST } from '../../../../../../custom/goalWorkspace/GoalConsoleService.js';
+import { WORKSPACE_MANIFEST } from '../../../../../../custom/goalWorkspace/ConsoleService.js';
 import { blueprintResource, instantiateBlueprintFromTemplate, readBlueprint, writeBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintService.js';
+import { scaffoldSurfaceFromBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintScaffold.js';
 import { listSurfaceTemplateIds, loadSurfaceTemplate } from '../../../../../../custom/goalWorkspace/surfaceBlueprintTemplateRegistry.js';
 import { blueprintSubsystemMatchesIx, matchSurfaceToIxSubsystems } from '../../../../../../custom/goalWorkspace/surfaceIxMatch.js';
 import { verifySurfaceBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintVerify.js';
@@ -41,7 +42,7 @@ suite('surfaceBlueprintVerify', () => {
 		const template = loadSurfaceTemplate('booking')!;
 		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'booking', surfaceName: 'Booking' });
 		await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
-		fileService.setFile(joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST), createManifest('booking', 'Booking', {
+		fileService.setFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST), createManifest('booking', 'Booking', {
 			capabilities: [...blueprint.manifest.capabilities],
 			events: [...blueprint.manifest.events],
 			entities: [...blueprint.manifest.entities],
@@ -64,7 +65,7 @@ suite('surfaceBlueprintVerify', () => {
 		const template = loadSurfaceTemplate('booking')!;
 		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'booking', surfaceName: 'Booking' });
 		await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
-		fileService.setFile(joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST), createManifest('booking', 'Booking', {
+		fileService.setFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST), createManifest('booking', 'Booking', {
 			capabilities: [...blueprint.manifest.capabilities],
 			events: [...blueprint.manifest.events],
 			entities: [...blueprint.manifest.entities],
@@ -91,7 +92,7 @@ suite('surfaceBlueprintVerify', () => {
 		const template = loadSurfaceTemplate('booking')!;
 		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'booking', surfaceName: 'Booking' });
 		await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
-		fileService.setFile(joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST), createManifest('booking', 'Booking', {
+		fileService.setFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST), createManifest('booking', 'Booking', {
 			capabilities: [...blueprint.manifest.capabilities],
 			events: [...blueprint.manifest.events],
 			entities: [...blueprint.manifest.entities],
@@ -116,6 +117,71 @@ suite('surfaceBlueprintVerify', () => {
 		const persisted = await readBlueprint(fileService as unknown as IFileService, blueprintResource(workspaceFolder, 'booking'));
 		assert.strictEqual(persisted?.status, 'verified');
 		assert.ok(persisted?.verifiedAt);
+	});
+
+	test('scaffolds a runnable baseline from a persisted blueprint', async () => {
+		const fileService = new TestBlueprintFileService();
+		const template = loadSurfaceTemplate('booking')!;
+		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'booking', surfaceName: 'Booking' });
+		await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+		fileService.setFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST), JSON.stringify({
+			goal: {
+				id: 'personal-training-business',
+				name: 'Online Personal Training Business',
+			},
+			surfaces: [],
+		}));
+
+		const scaffold = await scaffoldSurfaceFromBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+		assert.strictEqual(scaffold.appPath, 'apps/booking');
+		assert.ok(scaffold.createdFiles.includes('apps/booking/package.json'));
+		assert.ok(scaffold.createdFiles.includes('apps/booking/app/packages/page.tsx'));
+
+		const result = await verifySurfaceBlueprint({
+			fileService: fileService as unknown as IFileService,
+			workspaceFolder,
+			surfaceId: 'booking',
+			persistStatus: true,
+		});
+		assert.strictEqual(result.passed, true, JSON.stringify(result.gaps));
+		const persisted = await readBlueprint(fileService as unknown as IFileService, blueprintResource(workspaceFolder, 'booking'));
+		assert.strictEqual(persisted?.status, 'verified');
+	});
+
+	test('scaffold repairs legacy root-shaped manifest before verification', async () => {
+		const fileService = new TestBlueprintFileService();
+		const template = loadSurfaceTemplate('booking')!;
+		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'booking', surfaceName: 'Booking' });
+		await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+		fileService.setFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST), JSON.stringify({
+			id: 'personal-training-business',
+			name: 'Online Personal Training Business',
+			description: 'Acquire clients and run coaching operations across workspace surfaces.',
+			northStarMetric: 'active_paid_clients',
+			branding: {
+				primaryColor: '#0EA5E9',
+				secondaryColor: '#22C55E',
+				accentColor: '#F97316',
+				logoLight: '/brand/logo-light.svg',
+			},
+			surfaces: [],
+		}));
+
+		await scaffoldSurfaceFromBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+
+		const manifest = JSON.parse((await fileService.readFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST))).value.toString());
+		assert.strictEqual(manifest.goal.id, 'personal-training-business');
+		assert.strictEqual(manifest.goal.northStarMetric, 'active_paid_clients');
+		assert.strictEqual(manifest.id, undefined);
+		assert.strictEqual(manifest.brand.primaryColor, '#0EA5E9');
+		assert.strictEqual(manifest.surfaces[0].id, 'booking');
+
+		const result = await verifySurfaceBlueprint({
+			fileService: fileService as unknown as IFileService,
+			workspaceFolder,
+			surfaceId: 'booking',
+		});
+		assert.strictEqual(result.passed, true, JSON.stringify(result.gaps));
 	});
 
 	test('matchSurfaceToIxSubsystems uses declared metadata', () => {
@@ -146,13 +212,15 @@ suite('surfaceBlueprintVerify', () => {
 
 class TestBlueprintFileService {
 	private readonly files = new Map<string, string>();
+	private readonly dirs = new Set<string>();
 
 	setFile(resource: URI, content: string): void {
+		this.addParentDirs(resource);
 		this.files.set(resource.toString(), content);
 	}
 
 	async exists(resource: URI): Promise<boolean> {
-		return this.files.has(resource.toString());
+		return this.files.has(resource.toString()) || this.dirs.has(resource.toString());
 	}
 
 	async readFile(resource: URI): Promise<IFileContent> {
@@ -175,6 +243,39 @@ class TestBlueprintFileService {
 	}
 
 	async resolve(resource: URI): Promise<IFileStat> {
+		if (this.dirs.has(resource.toString())) {
+			const prefix = resource.toString().replace(/\/$/, '') + '/';
+			const children = [...this.files.keys(), ...this.dirs.keys()]
+				.filter(key => key.startsWith(prefix) && key !== resource.toString())
+				.map(key => URI.parse(key));
+			return {
+				resource,
+				name: resource.path.split('/').pop() ?? 'folder',
+				isDirectory: true,
+				isFile: false,
+				isSymbolicLink: false,
+				readonly: false,
+				locked: false,
+				children: children.map(child => ({
+					resource: child,
+					name: child.path.split('/').pop() ?? 'child',
+					isDirectory: this.dirs.has(child.toString()),
+					isFile: this.files.has(child.toString()),
+					isSymbolicLink: false,
+					readonly: false,
+					locked: false,
+					children: undefined,
+					mtime: 0,
+					ctime: 0,
+					size: 0,
+					etag: 'test',
+				})),
+				mtime: 0,
+				ctime: 0,
+				size: 0,
+				etag: 'test',
+			};
+		}
 		const content = this.files.get(resource.toString());
 		return {
 			resource,
@@ -192,10 +293,12 @@ class TestBlueprintFileService {
 		};
 	}
 
-	async createFolder(): Promise<IFileStat> {
+	async createFolder(resource: URI): Promise<IFileStat> {
+		this.addParentDirs(resource);
+		this.dirs.add(resource.toString());
 		return {
-			resource: URI.file('/'),
-			name: '',
+			resource,
+			name: resource.path.split('/').pop() ?? '',
 			isDirectory: true,
 			isFile: false,
 			isSymbolicLink: false,
@@ -212,6 +315,15 @@ class TestBlueprintFileService {
 	async writeFile(resource: URI, content: VSBuffer): Promise<IFileStat> {
 		this.setFile(resource, content.toString());
 		return this.resolve(resource);
+	}
+
+	private addParentDirs(resource: URI): void {
+		const parts = resource.path.split('/').filter(Boolean);
+		let current = '';
+		for (let i = 0; i < parts.length - 1; i++) {
+			current += `/${parts[i]}`;
+			this.dirs.add(resource.with({ path: current }).toString());
+		}
 	}
 }
 

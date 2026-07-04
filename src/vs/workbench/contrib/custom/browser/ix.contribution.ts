@@ -11,7 +11,7 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
-import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_IX_OVERLAY_FILE, IGoalConsoleService, type GoalSurface } from '../../../../../custom/goalWorkspace/GoalConsoleService.js';
+import { AGENT_CONTEXT_FOLDER, IX_OVERLAY_FILE, IConsoleService, type WorkspaceSurface } from '../../../../../custom/goalWorkspace/ConsoleService.js';
 import { matchSurfaceToIxSubsystems } from '../../../../../custom/goalWorkspace/surfaceIxMatch.js';
 import { IIxIntegrationService } from '../../../../../custom/ix/IxIntegrationService.js';
 import { formatIxSubsystemsDetailedDiscoveryCommand, parseSubsystemFingerprints, runSubsystemsDetailedDiscovery, type SubsystemFingerprint } from './processNotesSubsystemSnapshot.js';
@@ -44,7 +44,7 @@ registerAction2(class extends Action2 {
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const ix = accessor.get(IIxIntegrationService);
-		const goalWorkspace = accessor.get(IGoalConsoleService);
+		const goalWorkspace = accessor.get(IConsoleService);
 		const workspaceContextService = accessor.get(IWorkspaceContextService);
 		const fileService = accessor.get(IFileService);
 		const notificationService = accessor.get(INotificationService);
@@ -78,10 +78,10 @@ registerAction2(class extends Action2 {
 		}
 
 		const subsystems = parseSubsystemFingerprints(discovery.value);
-		const overlay = buildGoalWorkspaceIxSurfaceOverlay(surfaces, subsystems, formatIxSubsystemsDetailedDiscoveryCommand(discovery.args));
-		const agentRoot = joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER);
+		const overlay = buildIxSurfaceOverlay(surfaces, subsystems, formatIxSubsystemsDetailedDiscoveryCommand(discovery.args));
+		const agentRoot = joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER);
 		await fileService.createFolder(agentRoot);
-		await fileService.writeFile(joinPath(agentRoot, GOAL_WORKSPACE_IX_OVERLAY_FILE), VSBuffer.fromString(`${JSON.stringify(overlay, null, 2)}\n`));
+		await fileService.writeFile(joinPath(agentRoot, IX_OVERLAY_FILE), VSBuffer.fromString(`${JSON.stringify(overlay, null, 2)}\n`));
 		await goalWorkspace.refresh();
 
 		notificationService.notify({
@@ -91,7 +91,7 @@ registerAction2(class extends Action2 {
 	}
 });
 
-function buildGoalWorkspaceIxSurfaceOverlay(surfaces: readonly GoalSurface[], subsystems: readonly SubsystemFingerprint[], command: string): unknown {
+function buildIxSurfaceOverlay(surfaces: readonly WorkspaceSurface[], subsystems: readonly SubsystemFingerprint[], command: string): unknown {
 	return {
 		version: 1,
 		generatedAt: new Date().toISOString(),

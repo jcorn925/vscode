@@ -7,8 +7,8 @@ import { VSBuffer } from '../../vs/base/common/buffer.js';
 import { URI } from '../../vs/base/common/uri.js';
 import { joinPath } from '../../vs/base/common/resources.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
-import type { GoalWorkspaceBrand, GoalWorkspaceShared } from './GoalConsoleService.js';
-import { GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_MANIFEST } from './GoalConsoleService.js';
+import type { WorkspaceBrand, WorkspaceShared } from './ConsoleService.js';
+import { AGENT_CONTEXT_FOLDER, WORKSPACE_MANIFEST } from './ConsoleService.js';
 
 export const GOAL_WORKSPACE_BUILDER_DRAFT_FILE = 'builder-draft.json';
 export const GOAL_WORKSPACE_BRAND_SUBFOLDER = 'brand';
@@ -26,10 +26,10 @@ export interface SurfaceSetupDraft {
 export interface GoalWorkspaceBuilderInput {
 	readonly name: string;
 	readonly description: string;
-	readonly brand: GoalWorkspaceBrandInput;
+	readonly brand: WorkspaceBrandInput;
 }
 
-export interface GoalWorkspaceBrandInput {
+export interface WorkspaceBrandInput {
 	readonly primaryColor?: string;
 	readonly secondaryColor?: string;
 	readonly accentColor?: string;
@@ -38,14 +38,14 @@ export interface GoalWorkspaceBrandInput {
 }
 
 export function brandFolderResource(workspaceFolder: URI): URI {
-	return joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_BRAND_SUBFOLDER);
+	return joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_BRAND_SUBFOLDER);
 }
 
 export function builderDraftResource(workspaceFolder: URI): URI {
-	return joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_BUILDER_DRAFT_FILE);
+	return joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER, GOAL_WORKSPACE_BUILDER_DRAFT_FILE);
 }
 
-export function hasBrandConfigured(brand: GoalWorkspaceBrand | GoalWorkspaceBrandInput | undefined): boolean {
+export function hasBrandConfigured(brand: WorkspaceBrand | WorkspaceBrandInput | undefined): boolean {
 	if (!brand) {
 		return false;
 	}
@@ -132,7 +132,7 @@ export async function saveSurfaceSetupDraft(
 		currentStep: draft.currentStep,
 		savedAt: draft.savedAt ?? new Date().toISOString(),
 	};
-	await fileService.createFolder(joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER));
+	await fileService.createFolder(joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER));
 	await fileService.writeFile(resource, VSBuffer.fromString(JSON.stringify(payload, null, 2)));
 	return payload;
 }
@@ -146,7 +146,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function cleanBrandInput(brand: GoalWorkspaceBrandInput): Record<string, string> {
+function cleanBrandInput(brand: WorkspaceBrandInput): Record<string, string> {
 	const payload: Record<string, string> = {};
 	if (brand.primaryColor?.trim()) {
 		payload.primaryColor = brand.primaryColor.trim();
@@ -166,7 +166,7 @@ function cleanBrandInput(brand: GoalWorkspaceBrandInput): Record<string, string>
 	return payload;
 }
 
-const DEFAULT_SHARED_PATHS: GoalWorkspaceShared = {
+const DEFAULT_SHARED_PATHS: WorkspaceShared = {
 	domain: 'packages/domain',
 	events: 'packages/events',
 	ui: 'packages/ui',
@@ -180,7 +180,7 @@ export async function saveGoalWorkspaceBuilderFields(
 	input: GoalWorkspaceBuilderInput,
 	existingGoalId?: string,
 ): Promise<void> {
-	const manifestResource = joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST);
+	const manifestResource = joinPath(workspaceFolder, WORKSPACE_MANIFEST);
 	let raw: Record<string, unknown> = {};
 	try {
 		const content = await fileService.readFile(manifestResource);

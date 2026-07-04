@@ -79,7 +79,7 @@ import {
 import { IStartupGuideService } from '../../../../../custom/startup/StartupGuideService.js';
 import { IAppLaunchGuideService } from '../../../../../custom/appLaunch/AppLaunchGuideService.js';
 import { SetupGuidePanel } from './setupGuidePanel.js';
-import { IGoalConsoleService, type GoalSurface } from '../../../../../custom/goalWorkspace/GoalConsoleService.js';
+import { IConsoleService, type WorkspaceSurface } from '../../../../../custom/goalWorkspace/ConsoleService.js';
 import {
 	brandFolderResource,
 	hasBrandConfigured,
@@ -91,6 +91,8 @@ import {
 } from '../../../../../custom/goalWorkspace/goalWorkspaceSurfaceSetup.js';
 import { SurfaceBuilderHandoffState, type SurfaceBuilderHandoffStateValue } from '../../../../../custom/goalWorkspace/surfaceBuilderHandoffState.js';
 import { createBlueprintFromTemplateId } from '../../../../../custom/goalWorkspace/surfaceBlueprintService.js';
+import { scaffoldSurfaceFromBlueprint } from '../../../../../custom/goalWorkspace/surfaceBlueprintScaffold.js';
+import { verifySurfaceBlueprint } from '../../../../../custom/goalWorkspace/surfaceBlueprintVerify.js';
 import { getSurfaceHandoffGuidance, type SurfaceHandoffPhase } from '../../../../../custom/goalWorkspace/surfaceHandoffPrompt.js';
 import { MAX_SURFACE_BLUEPRINT_REPAIR_ATTEMPTS, SurfaceBlueprintOrchestrator } from '../../../../../custom/goalWorkspace/surfaceBlueprintOrchestrator.js';
 
@@ -389,7 +391,7 @@ class ModeShellContribution extends Disposable {
 		@IOpenerService private readonly openerService: IOpenerService,
 		@IStartupGuideService private readonly startupGuideService: IStartupGuideService,
 		@IAppLaunchGuideService private readonly appLaunchGuideService: IAppLaunchGuideService,
-		@IGoalConsoleService private readonly goalConsoleService: IGoalConsoleService,
+		@IConsoleService private readonly consoleService: IConsoleService,
 		@IQuickInputService private readonly quickInputService: IQuickInputService,
 	) {
 		super();
@@ -3304,7 +3306,7 @@ class ModeShellContribution extends Disposable {
 		this.syncContextGatheringUi();
 		this._register(this.modeService.onDidChange(mode => this.updateMode(mode)));
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.updateProjectState()));
-		this._register(this.goalConsoleService.onDidChangeGoalWorkspace(() => {
+		this._register(this.consoleService.onDidChangeWorkspace(() => {
 			this.syncGoalSurfaceSwitcher();
 			void this.refreshSurfaceSetupDashboard();
 		}));
@@ -4444,7 +4446,7 @@ class ModeShellContribution extends Disposable {
 		if (!workspaceFolder) {
 			return false;
 		}
-		const surface = this.goalConsoleService.getSurface(surfaceId);
+		const surface = this.consoleService.getSurface(surfaceId);
 		const appPath = surface?.path ?? `apps/${surfaceId}`;
 		try {
 			await this.fileService.stat(joinPath(workspaceFolder, appPath, 'package.json'));
@@ -4493,8 +4495,8 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private populateSurfaceSetupBuilderFields(): void {
-		const goal = this.goalConsoleService.getGoal();
-		const brand = this.goalConsoleService.getGoalWorkspace()?.brand;
+		const goal = this.consoleService.getGoal();
+		const brand = this.consoleService.getWorkspace()?.brand;
 		this.uiSurfaceSetupGoalNameInput.value = goal?.name ?? '';
 		this.uiSurfaceSetupGoalDescriptionInput.value = goal?.description ?? '';
 		this.uiSurfaceSetupPrimaryColorInput.value = brand?.primaryColor ?? '#2563eb';
@@ -4521,9 +4523,9 @@ class ModeShellContribution extends Disposable {
 		} finally {
 			this.surfaceSetupHydrating = false;
 		}
-		const goal = this.goalConsoleService.getGoal();
-		const brand = this.goalConsoleService.getGoalWorkspace()?.brand;
-		const surfaces = this.goalConsoleService.getSurfaces();
+		const goal = this.consoleService.getGoal();
+		const brand = this.consoleService.getWorkspace()?.brand;
+		const surfaces = this.consoleService.getSurfaces();
 		const inferredStep = inferSurfaceSetupStep(Boolean(goal?.name?.trim()), hasBrandConfigured(brand), surfaces.length);
 		const step = draft?.currentStep ?? inferredStep;
 		this.surfaceSetupDraftDirty = false;
@@ -4552,9 +4554,9 @@ class ModeShellContribution extends Disposable {
 				this.fileService,
 				workspaceFolder,
 				builderInput,
-				this.goalConsoleService.getGoal()?.id,
+				this.consoleService.getGoal()?.id,
 			);
-			await this.goalConsoleService.refresh();
+			await this.consoleService.refresh();
 			await saveSurfaceSetupDraft(this.fileService, workspaceFolder, {
 				currentStep: this.surfaceSetupCurrentStep,
 			});
@@ -4589,12 +4591,20 @@ class ModeShellContribution extends Disposable {
 			const blueprintResult = await createBlueprintFromTemplateId(this.fileService, workspaceFolder, templateId, {
 				surfaceId,
 				surfaceName,
-				goal: this.goalConsoleService.getGoal(),
+				goal: this.consoleService.getGoal(),
 			});
 			if (!blueprintResult) {
 				this.notificationService.warn(localize('customMode.surfaceBlueprintTemplateMissing', 'No surface blueprint template found for {0}.', templateId));
 				return;
 			}
+			const scaffoldResult = await scaffoldSurfaceFromBlueprint(this.fileService, workspaceFolder, blueprintResult.blueprint);
+			const verification = await verifySurfaceBlueprint({
+				fileService: this.fileService,
+				workspaceFolder,
+				surfaceId,
+				persistStatus: true,
+			});
+			await this.consoleService.refresh();
 			this.setSurfaceSetupBuilderHandoff(true, {
 				kind: 'surface',
 				templateId,
@@ -4606,6 +4616,12 @@ class ModeShellContribution extends Disposable {
 				blueprintResource: blueprintResult.resource.fsPath,
 				repairAttempts: 0,
 			});
+			this.pushUiRuntimeLog(`[surface-setup:scaffold] created ${scaffoldResult.createdFiles.length} files for ${surfaceId}; verification=${verification.passed ? 'passed' : 'failed'}`);
+			if (verification.passed) {
+				this.notificationService.info(localize('customMode.surfaceScaffoldVerified', 'Scaffolded and verified {0}.', surfaceName));
+			} else {
+				this.notificationService.warn(localize('customMode.surfaceScaffoldNeedsRepair', 'Scaffolded {0}, but blueprint verification found {1} gaps.', surfaceName, verification.gaps.length));
+			}
 			this.showSurfaceScaffoldView(surfaceName, inputText);
 			this.ensureWorkspaceView();
 			await this.ensureEmbeddedChatModel('UI');
@@ -4693,14 +4709,14 @@ class ModeShellContribution extends Disposable {
 			this.syncContextGatheringUi();
 		}
 		this.ensureWorkspaceView();
-		this.renderGoalSurfaceButtons(this.goalConsoleService.getSurfaces());
+		this.renderGoalSurfaceButtons(this.consoleService.getSurfaces());
 		this.routeSelectedSurfacePreview();
 		this.refreshStartCommandHints();
 	}
 
 	private syncGoalSurfaceSwitcher(): void {
-		const state = this.goalConsoleService.getState();
-		const surfaces = this.goalConsoleService.getSurfaces();
+		const state = this.consoleService.getState();
+		const surfaces = this.consoleService.getSurfaces();
 		const goalWorkspaceLoaded = state.status === 'loaded';
 		const hasManifestSurfaces = goalWorkspaceLoaded && surfaces.length > 0;
 		this.uiSurfaceSwitcher.classList.toggle('hidden', !hasManifestSurfaces);
@@ -4747,7 +4763,7 @@ class ModeShellContribution extends Disposable {
 		this.refreshStartCommandHints();
 	}
 
-	private resolveSelectedSurface(surfaces: readonly GoalSurface[], storedSurfaceId: string | undefined): GoalSurface | undefined {
+	private resolveSelectedSurface(surfaces: readonly WorkspaceSurface[], storedSurfaceId: string | undefined): WorkspaceSurface | undefined {
 		if (this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID || this.selectedSurfaceId === ADD_SURFACE_ID || storedSurfaceId === GOAL_OVERVIEW_SURFACE_ID || storedSurfaceId === ADD_SURFACE_ID) {
 			return undefined;
 		}
@@ -4761,7 +4777,7 @@ class ModeShellContribution extends Disposable {
 		return stored;
 	}
 
-	private renderGoalSurfaceButtons(surfaces: readonly GoalSurface[]): void {
+	private renderGoalSurfaceButtons(surfaces: readonly WorkspaceSurface[]): void {
 		const nextButtons = new Map<string, HTMLButtonElement>();
 		const fragment = document.createDocumentFragment();
 
@@ -4833,7 +4849,7 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 
-		const surface = this.goalConsoleService.getSurface(surfaceId);
+		const surface = this.consoleService.getSurface(surfaceId);
 		if (!surface) {
 			return;
 		}
@@ -4843,11 +4859,11 @@ class ModeShellContribution extends Disposable {
 		this.applySurfaceSelection(surfaceId, { contextGathering: false });
 	}
 
-	private getSelectedSurface(): GoalSurface | undefined {
+	private getSelectedSurface(): WorkspaceSurface | undefined {
 		if (!this.selectedSurfaceId || this.selectedSurfaceId === GOAL_OVERVIEW_SURFACE_ID || this.selectedSurfaceId === ADD_SURFACE_ID) {
 			return undefined;
 		}
-		return this.goalConsoleService.getSurface(this.selectedSurfaceId);
+		return this.consoleService.getSurface(this.selectedSurfaceId);
 	}
 
 	private getTargetEmbeddedUiUrl(): string | undefined {
@@ -4941,7 +4957,7 @@ class ModeShellContribution extends Disposable {
 		void this.refreshSurfaceSetupDashboard();
 	}
 
-	private setSurfaceMissingUrlState(surface: GoalSurface | undefined): void {
+	private setSurfaceMissingUrlState(surface: WorkspaceSurface | undefined): void {
 		if (!surface) {
 			this.setSurfaceEmptyState(undefined);
 			return;
@@ -4956,7 +4972,7 @@ class ModeShellContribution extends Disposable {
 		});
 	}
 
-	private setSurfaceServerDownState(surface: GoalSurface, url: string): void {
+	private setSurfaceServerDownState(surface: WorkspaceSurface, url: string): void {
 		this.setSurfaceEmptyState({
 			title: localize('customMode.surfaceServerDownTitle', '{0} preview is not reachable', surface.name),
 			subtitle: surface.devCommand?.trim()
@@ -4966,8 +4982,8 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private setGoalOverviewState(): void {
-		const goal = this.goalConsoleService.getGoal();
-		const surfaces = this.goalConsoleService.getSurfaces();
+		const goal = this.consoleService.getGoal();
+		const surfaces = this.consoleService.getSurfaces();
 		const title = goal?.name
 			? localize('customMode.goalOverviewTitle', 'Goal: {0}', goal.name)
 			: localize('customMode.goalOverviewFallbackTitle', 'Goal Workspace');
@@ -5026,7 +5042,7 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private formatGoalOverviewDescription(): string {
-		const goal = this.goalConsoleService.getGoal();
+		const goal = this.consoleService.getGoal();
 		if (!goal) {
 			return localize('customMode.goalOverviewDescriptionFallback', 'Goal overview');
 		}
@@ -5040,7 +5056,7 @@ class ModeShellContribution extends Disposable {
 		return parts.join('\n');
 	}
 
-	private formatGoalSurfaceDescription(surface: GoalSurface): string {
+	private formatGoalSurfaceDescription(surface: WorkspaceSurface): string {
 		const parts = [surface.name];
 		if (surface.type) {
 			parts.push(localize('customMode.surfaceDescriptionType', 'Type: {0}', surface.type));
@@ -5078,7 +5094,7 @@ class ModeShellContribution extends Disposable {
 		return parts.join('\n');
 	}
 
-	private logSelectedSurfaceRoute(surface: GoalSurface, url: string | undefined): void {
+	private logSelectedSurfaceRoute(surface: WorkspaceSurface, url: string | undefined): void {
 		const key = `${surface.id}:${url ?? ''}`;
 		if (this.lastSurfaceRoutingLogKey === key) {
 			return;
@@ -5100,7 +5116,7 @@ class ModeShellContribution extends Disposable {
 		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
 		const surface = this.getSelectedSurface();
 		const surfaceCommand = surface?.devCommand?.trim();
-		const goalWorkspaceState = this.goalConsoleService.getState();
+		const goalWorkspaceState = this.consoleService.getState();
 
 		if (!hasProject) {
 			this.uiStartSubtitle.textContent = '';
@@ -5180,7 +5196,7 @@ class ModeShellContribution extends Disposable {
 		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
 		const hints = this.lastUiStartHints;
 		const surfaceCommand = this.getSelectedSurface()?.devCommand?.trim();
-		const goalWorkspaceState = this.goalConsoleService.getState();
+		const goalWorkspaceState = this.consoleService.getState();
 		const canUseFallbackScript = goalWorkspaceState.status !== 'loaded';
 		const canStart = hasProject && Boolean(surfaceCommand || (canUseFallbackScript && hints?.primaryRunCommand));
 		const busy = state.phase === 'installing' || state.phase === 'starting';

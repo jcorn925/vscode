@@ -34,7 +34,7 @@ export interface IDefaultProjectService {
 export const IDefaultProjectService = createDecorator<IDefaultProjectService>('defaultProjectService');
 
 const STORAGE_FAILED_REPO_URL = 'custom.defaultProject/failedRepoUrl';
-const FALLBACK_GOAL_WORKSPACE_FOLDER = 'GoalWorkspace';
+const FALLBACK_GOAL_WORKSPACE_FOLDER = 'Console';
 const FALLBACK_GOAL_WORKSPACE_MANIFEST = `{
 \t"goal": {
 \t\t"id": "personal-training-business",

@@ -15,25 +15,25 @@ import { mock, TestContextService } from '../../../../test/common/workbenchTestS
 import {
 	ADD_TRAINING_PACKAGE_WORKFLOW_ID,
 	buildCrossAppWorkflowPlan,
-	createMissingGoalWorkspaceState,
+	createMissingConsoleState,
 	formatCrossAppWorkflowPlanMarkdown,
-	getGoalWorkspaceCrossAppWorkflow,
-	GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER,
-	GOAL_WORKSPACE_IX_OVERLAY_FILE,
-	GOAL_WORKSPACE_MANIFEST,
-	GoalConsoleService,
-	parseGoalWorkspaceManifest,
-	parseGoalWorkspaceManifestText,
-} from '../../../../../../custom/goalWorkspace/GoalConsoleService.js';
+	getCrossAppWorkflow,
+	AGENT_CONTEXT_FOLDER,
+	IX_OVERLAY_FILE,
+	WORKSPACE_MANIFEST,
+	ConsoleService,
+	parseWorkspaceManifest,
+	parseWorkspaceManifestText,
+} from '../../../../../../custom/goalWorkspace/ConsoleService.js';
 
-suite('GoalConsoleService', () => {
+suite('ConsoleService', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
 	const workspaceFolder = URI.file('/workspace');
-	const manifestResource = joinPath(workspaceFolder, GOAL_WORKSPACE_MANIFEST);
+	const manifestResource = joinPath(workspaceFolder, WORKSPACE_MANIFEST);
 
 	test('parses goal workspace manifest and normalizes surface metadata', () => {
-		const state = parseGoalWorkspaceManifestText(JSON.stringify({
+		const state = parseWorkspaceManifestText(JSON.stringify({
 			goal: {
 				id: 'personal-training-business',
 				name: 'Online Personal Training Business',
@@ -99,7 +99,7 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('returns missing fallback state without diagnostics', () => {
-		const state = createMissingGoalWorkspaceState(workspaceFolder, manifestResource);
+		const state = createMissingConsoleState(workspaceFolder, manifestResource);
 		assert.strictEqual(state.status, 'missing');
 		assert.strictEqual(state.workspaceFolder?.toString(), workspaceFolder.toString());
 		assert.strictEqual(state.manifestResource?.toString(), manifestResource.toString());
@@ -108,7 +108,7 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('reports invalid JSON as diagnostics', () => {
-		const state = parseGoalWorkspaceManifestText('{ nope', workspaceFolder, manifestResource);
+		const state = parseWorkspaceManifestText('{ nope', workspaceFolder, manifestResource);
 		assert.strictEqual(state.status, 'invalid');
 		assert.strictEqual(state.workspace, undefined);
 		assert.strictEqual(state.diagnostics.length, 1);
@@ -117,7 +117,7 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('reports schema validation diagnostics', () => {
-		const state = parseGoalWorkspaceManifest({
+		const state = parseWorkspaceManifest({
 			goal: { id: '', name: 42 },
 			surfaces: [
 				{ id: 'booking', name: 'Booking', capabilities: ['booking', ''], ix: { subsystemIds: ['ok'], tags: [42] } },
@@ -141,7 +141,7 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('rejects unsafe workspace paths', () => {
-		const state = parseGoalWorkspaceManifest({
+		const state = parseWorkspaceManifest({
 			goal: { id: 'personal-training-business', name: 'Online Personal Training Business' },
 			surfaces: [
 				{ id: 'absolute', name: 'Absolute', path: '/tmp/app' },
@@ -166,7 +166,7 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('validates local preview urls', () => {
-		const valid = parseGoalWorkspaceManifest({
+		const valid = parseWorkspaceManifest({
 			goal: { id: 'personal-training-business', name: 'Online Personal Training Business' },
 			surfaces: [
 				{ id: 'booking', name: 'Booking', localUrl: 'http://localhost:3001' },
@@ -180,7 +180,7 @@ suite('GoalConsoleService', () => {
 			'https://127.0.0.1:4443/dashboard'
 		]);
 
-		const invalid = parseGoalWorkspaceManifest({
+		const invalid = parseWorkspaceManifest({
 			goal: { id: 'personal-training-business', name: 'Online Personal Training Business' },
 			surfaces: [
 				{ id: 'external', name: 'External', localUrl: 'https://example.com' },
@@ -198,22 +198,22 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('service exposes goal and normalized surfaces', async () => {
-		const fileService = new TestGoalWorkspaceFileService(manifestResource, createManifest('booking', 'Booking'));
-		const service = disposables.add(new GoalConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+		const fileService = new TestConsoleFileService(manifestResource, createManifest('booking', 'Booking'));
+		const service = disposables.add(new ConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
 
 		await service.refresh();
 
 		assert.strictEqual(service.getState().status, 'loaded');
 		assert.strictEqual(service.getGoal()?.id, 'personal-training-business');
-		assert.strictEqual(service.getGoalWorkspace()?.goal.name, 'Online Personal Training Business');
+		assert.strictEqual(service.getWorkspace()?.goal.name, 'Online Personal Training Business');
 		assert.strictEqual(service.getSurfaces().length, 1);
 		assert.strictEqual(service.getSurface('booking')?.localUrl, 'http://localhost:3001');
 		assert.strictEqual(service.getSurface('missing'), undefined);
 	});
 
 	test('service returns empty registry when manifest is absent', async () => {
-		const fileService = new TestGoalWorkspaceFileService(manifestResource);
-		const service = disposables.add(new GoalConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+		const fileService = new TestConsoleFileService(manifestResource);
+		const service = disposables.add(new ConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
 
 		await service.refresh();
 
@@ -224,8 +224,8 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('service returns no-workspace state without workspace folders', async () => {
-		const fileService = new TestGoalWorkspaceFileService(manifestResource, createManifest('booking', 'Booking'));
-		const service = disposables.add(new GoalConsoleService(new TestContextService(testWorkspace()), fileService));
+		const fileService = new TestConsoleFileService(manifestResource, createManifest('booking', 'Booking'));
+		const service = disposables.add(new ConsoleService(new TestContextService(testWorkspace()), fileService));
 
 		await service.refresh();
 
@@ -237,13 +237,13 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('service refreshes surfaces when manifest changes', async () => {
-		const fileService = new TestGoalWorkspaceFileService(manifestResource, createManifest('booking', 'Booking'));
-		const service = disposables.add(new GoalConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+		const fileService = new TestConsoleFileService(manifestResource, createManifest('booking', 'Booking'));
+		const service = disposables.add(new ConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
 
 		await service.refresh();
 		assert.strictEqual(service.getSurface('booking')?.name, 'Booking');
 
-		const changed = Event.toPromise(service.onDidChangeGoalWorkspace);
+		const changed = Event.toPromise(service.onDidChangeWorkspace);
 		fileService.content = createManifest('analytics', 'Analytics');
 		fileService.fireManifestChange(FileChangeType.UPDATED);
 		await changed;
@@ -253,16 +253,16 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('service discovers global and per-surface agent context files', async () => {
-		const fileService = new TestGoalWorkspaceFileService(manifestResource, createManifest('booking', 'Booking'));
+		const fileService = new TestConsoleFileService(manifestResource, createManifest('booking', 'Booking'));
 		fileService.setFile(agentContextResource(workspaceFolder, 'workspace.md'), '# Workspace Context\nShared goal context.');
 		fileService.setFile(agentContextResource(workspaceFolder, 'domain.md'), 'Domain model and vocabulary.');
 		fileService.setFile(agentContextResource(workspaceFolder, 'apps/booking.md'), '# Booking Surface\nLead booking behavior.');
-		const service = disposables.add(new GoalConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+		const service = disposables.add(new ConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
 
 		await service.refresh();
 
 		const context = service.getContext();
-		assert.strictEqual(context.root?.toString(), joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER).toString());
+		assert.strictEqual(context.root?.toString(), joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER).toString());
 		assert.deepStrictEqual(context.globalFiles.map(file => file.relativePath), [
 			'.agent/workspace.md',
 			'.agent/domain.md'
@@ -282,14 +282,14 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('service refreshes context when agent context files change', async () => {
-		const fileService = new TestGoalWorkspaceFileService(manifestResource, createManifest('booking', 'Booking'));
+		const fileService = new TestConsoleFileService(manifestResource, createManifest('booking', 'Booking'));
 		const bookingContextResource = agentContextResource(workspaceFolder, 'apps/booking.md');
-		const service = disposables.add(new GoalConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+		const service = disposables.add(new ConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
 
 		await service.refresh();
 		assert.strictEqual(service.getSurfaceContext('booking')?.files.length, 0);
 
-		const changed = Event.toPromise(service.onDidChangeGoalWorkspace);
+		const changed = Event.toPromise(service.onDidChangeWorkspace);
 		fileService.setFile(bookingContextResource, '# Booking Context');
 		fileService.fireFileChange(bookingContextResource, FileChangeType.ADDED);
 		await changed;
@@ -298,13 +298,13 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('service reads Ix surface overlay and resolves affected surfaces', async () => {
-		const fileService = new TestGoalWorkspaceFileService(manifestResource, createManifest('booking', 'Booking', {
+		const fileService = new TestConsoleFileService(manifestResource, createManifest('booking', 'Booking', {
 			ix: {
 				subsystems: ['Declared Booking Subsystem'],
 				subsystemIds: ['declared-booking']
 			}
 		}));
-		fileService.setFile(agentContextResource(workspaceFolder, GOAL_WORKSPACE_IX_OVERLAY_FILE), JSON.stringify({
+		fileService.setFile(agentContextResource(workspaceFolder, IX_OVERLAY_FILE), JSON.stringify({
 			generatedAt: '2026-06-29T00:00:00.000Z',
 			command: 'ix subsystems --list --detailed --sort importance --format json',
 			discoveredSubsystems: [
@@ -314,7 +314,7 @@ suite('GoalConsoleService', () => {
 				{ surfaceId: 'booking', subsystemIds: ['ix-booking'], subsystemLabels: ['Booking UI'], matchReason: 'heuristic name/path match' }
 			]
 		}));
-		const service = disposables.add(new GoalConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+		const service = disposables.add(new ConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
 
 		await service.refresh();
 
@@ -326,14 +326,14 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('builds add-training-package cross-app workflow plan from surface capabilities', async () => {
-		const fileService = new TestGoalWorkspaceFileService(manifestResource, createPersonalTrainingManifest());
+		const fileService = new TestConsoleFileService(manifestResource, createPersonalTrainingManifest());
 		fileService.setFile(agentContextResource(workspaceFolder, 'workspace.md'), '# Workspace Context\nRun an online personal training business.');
 		fileService.setFile(agentContextResource(workspaceFolder, 'domain.md'), '# Domain Context\nTrainingPackage, Lead, Booking, SubscriptionPlan, Campaign.');
 		fileService.setFile(agentContextResource(workspaceFolder, 'events.md'), '# Event Context\nbooking.started and subscription.started carry packageId.');
 		fileService.setFile(agentContextResource(workspaceFolder, 'decisions.md'), '# Decisions\nUse draft status until billing provider IDs exist.');
 		fileService.setFile(agentContextResource(workspaceFolder, 'apps/booking.md'), '# Booking Surface\nOwns package selection and intro-call scheduling.');
 		fileService.setFile(agentContextResource(workspaceFolder, 'apps/analytics.md'), '# Analytics Surface\nSegments conversion and revenue by packageId.');
-		fileService.setFile(agentContextResource(workspaceFolder, GOAL_WORKSPACE_IX_OVERLAY_FILE), JSON.stringify({
+		fileService.setFile(agentContextResource(workspaceFolder, IX_OVERLAY_FILE), JSON.stringify({
 			generatedAt: '2026-06-29T00:00:00.000Z',
 			command: 'ix subsystems --list --detailed --sort importance --format json',
 			discoveredSubsystems: [
@@ -343,7 +343,7 @@ suite('GoalConsoleService', () => {
 				{ surfaceId: 'booking', subsystemIds: ['ix-booking'], subsystemLabels: ['Booking Package Selection'], matchReason: 'heuristic name/path match' }
 			]
 		}));
-		const service = disposables.add(new GoalConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+		const service = disposables.add(new ConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
 
 		await service.refresh();
 		const plan = service.buildCrossAppWorkflowPlan(ADD_TRAINING_PACKAGE_WORKFLOW_ID);
@@ -366,8 +366,8 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('returns no cross-app plan when goal workspace is missing', async () => {
-		const fileService = new TestGoalWorkspaceFileService(manifestResource);
-		const service = disposables.add(new GoalConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+		const fileService = new TestConsoleFileService(manifestResource);
+		const service = disposables.add(new ConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
 
 		await service.refresh();
 
@@ -375,8 +375,8 @@ suite('GoalConsoleService', () => {
 	});
 
 	test('pure plan builder supports package draft overrides', () => {
-		const state = parseGoalWorkspaceManifestText(createPersonalTrainingManifest(), workspaceFolder, manifestResource);
-		const workflow = getGoalWorkspaceCrossAppWorkflow(ADD_TRAINING_PACKAGE_WORKFLOW_ID);
+		const state = parseWorkspaceManifestText(createPersonalTrainingManifest(), workspaceFolder, manifestResource);
+		const workflow = getCrossAppWorkflow(ADD_TRAINING_PACKAGE_WORKFLOW_ID);
 		assert.ok(workflow);
 
 		const plan = buildCrossAppWorkflowPlan(state, workflow, {
@@ -392,7 +392,7 @@ suite('GoalConsoleService', () => {
 	});
 });
 
-class TestGoalWorkspaceFileService extends mock<IFileService>() {
+class TestConsoleFileService extends mock<IFileService>() {
 	private readonly _onDidFilesChange = new Emitter<FileChangesEvent>();
 	override readonly onDidFilesChange = this._onDidFilesChange.event;
 	private readonly files = new Map<string, string>();
@@ -435,7 +435,7 @@ class TestGoalWorkspaceFileService extends mock<IFileService>() {
 
 		return {
 			resource,
-			name: resource.path.split('/').pop() ?? GOAL_WORKSPACE_MANIFEST,
+			name: resource.path.split('/').pop() ?? WORKSPACE_MANIFEST,
 			mtime: 0,
 			ctime: 0,
 			etag: 'test',
@@ -538,5 +538,5 @@ function createPersonalTrainingManifest(): string {
 }
 
 function agentContextResource(workspaceFolder: URI, relativePath: string): URI {
-	return joinPath(workspaceFolder, GOAL_WORKSPACE_AGENT_CONTEXT_FOLDER, ...relativePath.split('/'));
+	return joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER, ...relativePath.split('/'));
 }

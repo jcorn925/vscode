@@ -17,7 +17,7 @@ import { IWorkspaceContextService, WorkbenchState } from '../../vs/platform/work
 import { ITerminalService } from '../../vs/workbench/contrib/terminal/browser/terminal.js';
 import { IDefaultProjectService } from '../devserver/DefaultProjectService.js';
 import { IDevServerService } from '../devserver/DevServerService.js';
-import { IGoalConsoleService } from '../goalWorkspace/GoalConsoleService.js';
+import { IConsoleService } from '../goalWorkspace/ConsoleService.js';
 import type { SetupGuideController, SetupGuideState, SetupGuideStepSnapshot, SetupGuideStepStatus } from '../setup/setupGuideTypes.js';
 import { localize } from '../../vs/nls.js';
 
@@ -69,12 +69,12 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IStorageService private readonly storageService: IStorageService,
-		@IGoalConsoleService private readonly goalConsoleService: IGoalConsoleService,
+		@IConsoleService private readonly consoleService: IConsoleService,
 	) {
 		super();
 
 		this.steps = this.buildSteps();
-		this.deferGoalWorkspaceLaunch = this.goalConsoleService.getState().status === 'loaded';
+		this.deferGoalWorkspaceLaunch = this.consoleService.getState().status === 'loaded';
 
 		if (isWeb) {
 			return;
@@ -83,7 +83,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => void this.scheduleRefresh()));
 		this._register(this.workspaceContextService.onDidChangeWorkbenchState(() => void this.scheduleRefresh()));
 		this._register(this.devServerService.onDidChangeState(() => void this.scheduleRefresh()));
-		this._register(this.goalConsoleService.onDidChangeGoalWorkspace(() => void this.scheduleRefresh()));
+		this._register(this.consoleService.onDidChangeWorkspace(() => void this.scheduleRefresh()));
 
 		void this.refresh();
 	}
@@ -261,7 +261,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 	}
 
 	private getGoalWorkspaceDeferReason(): string | undefined {
-		const goalWorkspaceState = this.goalConsoleService.getState();
+		const goalWorkspaceState = this.consoleService.getState();
 		if (goalWorkspaceState.status !== 'loaded') {
 			return undefined;
 		}
