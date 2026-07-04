@@ -88,7 +88,7 @@ async function upsertManifestSurface(
 		localUrl,
 		devCommand: typeof existing.devCommand === 'string' && existing.devCommand.trim()
 			? existing.devCommand.trim()
-			: `npm run dev --workspace ${appPath}`,
+			: `npm --prefix ${appPath} run dev`,
 		purpose: typeof existing.purpose === 'string' && existing.purpose.trim()
 			? existing.purpose.trim()
 			: `Support ${blueprint.surfaceName} workflows for the goal workspace.`,

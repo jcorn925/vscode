@@ -136,6 +136,8 @@ suite('surfaceBlueprintVerify', () => {
 		assert.strictEqual(scaffold.appPath, 'apps/booking');
 		assert.ok(scaffold.createdFiles.includes('apps/booking/package.json'));
 		assert.ok(scaffold.createdFiles.includes('apps/booking/app/packages/page.tsx'));
+		const manifest = JSON.parse((await fileService.readFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST))).value.toString());
+		assert.strictEqual(manifest.surfaces[0].devCommand, 'npm --prefix apps/booking run dev');
 
 		const result = await verifySurfaceBlueprint({
 			fileService: fileService as unknown as IFileService,
