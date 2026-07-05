@@ -16,7 +16,6 @@ import { ITelemetryService } from '../../../../../platform/telemetry/common/tele
 import { ChatEntitlement, IChatEntitlementService, IChatSentiment } from '../../../../services/chat/common/chatEntitlementService.js';
 import { IChatResponseErrorDetails } from '../../common/chatService/chatService.js';
 import { IChatErrorDetailsPart, IChatResponseViewModel } from '../../common/model/chatViewModel.js';
-import { IChatWidgetService } from '../../browser/chat.js';
 import { ChatQuotaExceededPart } from '../../browser/widget/chatContentParts/chatQuotaExceededPart.js';
 import { getDefaultChatProviderName } from '../../common/chatBranding.js';
 
@@ -35,7 +34,6 @@ function createMockEntitlementService(entitlement: ChatEntitlement): IChatEntitl
 		isInternal: false,
 		sku: undefined,
 		copilotTrackingId: undefined,
-		previewFeaturesDisabled: false,
 		clientByokEnabled: false,
 		hasByokModels: false,
 		onDidChangeSentiment: Event.None,
@@ -87,7 +85,6 @@ suite('ChatQuotaExceededPart', () => {
 	function createWidget(entitlement: ChatEntitlement, errorDetails: IChatResponseErrorDetails): ChatQuotaExceededPart {
 		executedCommands = [];
 
-		const chatWidgetService = {} as IChatWidgetService;
 		const commandService = {
 			executeCommand(id: string) {
 				executedCommands.push(id);
@@ -107,7 +104,6 @@ suite('ChatQuotaExceededPart', () => {
 			element,
 			content,
 			renderer,
-			chatWidgetService,
 			commandService,
 			telemetryService,
 			entitlementService,
@@ -150,7 +146,7 @@ suite('ChatQuotaExceededPart', () => {
 			assert.strictEqual(button.textContent, `Upgrade to ${getDefaultChatProviderName()} Pro`);
 		});
 
-		test('shows "Upgrade" for Pro user with additional_spend_limit_reached', () => {
+		test('shows "Manage Budget" for Pro user with additional_spend_limit_reached', () => {
 			const widget = createWidget(ChatEntitlement.Pro, {
 				message: 'Spend limit reached',
 				isQuotaExceeded: true,
@@ -159,10 +155,10 @@ suite('ChatQuotaExceededPart', () => {
 
 			const button = getPrimaryButton(widget);
 			assert.ok(button);
-			assert.strictEqual(button.textContent, 'Upgrade');
+			assert.strictEqual(button.textContent, 'Manage Budget');
 		});
 
-		test('shows "Upgrade" for ProPlus user with additional_spend_limit_reached', () => {
+		test('shows "Manage Budget" for ProPlus user with additional_spend_limit_reached', () => {
 			const widget = createWidget(ChatEntitlement.ProPlus, {
 				message: 'Spend limit reached',
 				isQuotaExceeded: true,
@@ -171,7 +167,7 @@ suite('ChatQuotaExceededPart', () => {
 
 			const button = getPrimaryButton(widget);
 			assert.ok(button);
-			assert.strictEqual(button.textContent, 'Upgrade');
+			assert.strictEqual(button.textContent, 'Manage Budget');
 		});
 
 		test('shows "Manage Budget" for EDU user without additional_spend_limit_reached', () => {
@@ -215,7 +211,7 @@ suite('ChatQuotaExceededPart', () => {
 			assert.strictEqual(executedCommands[0], 'workbench.action.chat.upgradePlan');
 		});
 
-		test('Pro user with additional_spend_limit_reached clicks "Upgrade" -> upgradePlan', async () => {
+		test('Pro user with additional_spend_limit_reached clicks "Manage Budget" -> manageAdditionalSpend', async () => {
 			const widget = createWidget(ChatEntitlement.Pro, {
 				message: 'Spend limit reached',
 				isQuotaExceeded: true,
@@ -227,7 +223,7 @@ suite('ChatQuotaExceededPart', () => {
 			button.click();
 			await new Promise(r => setTimeout(r, 0));
 
-			assert.strictEqual(executedCommands[0], 'workbench.action.chat.upgradePlan');
+			assert.strictEqual(executedCommands[0], 'workbench.action.chat.manageAdditionalSpend');
 		});
 	});
 });
