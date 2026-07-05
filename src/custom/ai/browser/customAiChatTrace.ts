@@ -3,13 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { VSBuffer } from '../../../vs/base/common/buffer.js';
+import { encodeBase64, VSBuffer } from '../../../vs/base/common/buffer.js';
+import { CancellationToken } from '../../../vs/base/common/cancellation.js';
+import { generateUuid } from '../../../vs/base/common/uuid.js';
 import { dirname, joinPath } from '../../../vs/base/common/resources.js';
 import { URI } from '../../../vs/base/common/uri.js';
 import { IConfigurationService } from '../../../vs/platform/configuration/common/configuration.js';
 import { FileOperationError, FileOperationResult, IFileService } from '../../../vs/platform/files/common/files.js';
 import { createDecorator } from '../../../vs/platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../vs/platform/log/common/log.js';
+import { IRequestService, isSuccess } from '../../../vs/platform/request/common/request.js';
 import { IWorkspaceContextService } from '../../../vs/platform/workspace/common/workspace.js';
 import { AGENT_CONTEXT_FOLDER } from '../../goalWorkspace/ConsoleService.js';
 
@@ -51,6 +54,7 @@ export class CustomAiChatTraceService implements ICustomAiChatTraceService {
 		@IFileService private readonly fileService: IFileService,
 		@ILogService private readonly logService: ILogService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+		@IRequestService private readonly requestService: IRequestService,
 	) { }
 
 	createRun(input: CustomAiChatTraceRunInput): CustomAiChatTraceRun {
@@ -79,6 +83,7 @@ export class CustomAiChatTraceService implements ICustomAiChatTraceService {
 
 		const encoded = `${JSON.stringify(event)}\n`;
 		this.logService.info('[CustomAiTrace]', encoded.trim());
+		this.exportLangfuseEvent(event);
 
 		const traceResource = this.getTraceResource();
 		if (!traceResource) {
@@ -113,6 +118,41 @@ export class CustomAiChatTraceService implements ICustomAiChatTraceService {
 			}
 			throw err;
 		}
+	}
+
+	private exportLangfuseEvent(event: unknown): void {
+		const request = buildLangfuseIngestionRequest(event, this.getLangfuseOptions());
+		if (!request) {
+			return;
+		}
+		void this.requestService.request({
+			type: 'POST',
+			url: `${request.baseUrl}/api/public/ingestion`,
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Basic ${request.authorization}`,
+			},
+			data: JSON.stringify(request.body),
+			timeout: 10_000,
+			callSite: 'customAi.langfuse.ingestion',
+		}, CancellationToken.None).then(context => {
+			if (!isSuccess(context) && context.res.statusCode !== 207) {
+				this.logService.warn('[CustomAiTrace] Langfuse ingestion failed', context.res.statusCode);
+			}
+		}, err => {
+			this.logService.warn('[CustomAiTrace] Langfuse ingestion request failed', err);
+		});
+	}
+
+	private getLangfuseOptions(): LangfuseTraceOptions {
+		return {
+			enabled: this.configurationService.getValue<boolean>('custom.ai.observability.langfuse.enabled') === true,
+			baseUrl: getConfiguredString('custom.ai.observability.langfuse.baseUrl', this.configurationService) || readEnv('LANGFUSE_BASE_URL') || readEnv('LANGFUSE_HOST') || 'http://localhost:3000',
+			publicKey: readEnv('LANGFUSE_PUBLIC_KEY'),
+			secretKey: readEnv('LANGFUSE_SECRET_KEY'),
+			environment: getConfiguredString('custom.ai.observability.langfuse.environment', this.configurationService) || readEnv('LANGFUSE_TRACING_ENVIRONMENT') || 'local',
+			release: readEnv('VSCODE_GIT_COMMIT') || readEnv('GITHUB_SHA'),
+		};
 	}
 }
 
@@ -256,6 +296,134 @@ function sanitizeTraceString(value: string): string {
 
 function errorToTraceMessage(error: unknown): string {
 	return sanitizeTraceString(error instanceof Error ? error.message : String(error));
+}
+
+export interface LangfuseTraceOptions {
+	enabled: boolean;
+	baseUrl: string;
+	publicKey?: string;
+	secretKey?: string;
+	environment: string;
+	release?: string;
+}
+
+export interface LangfuseIngestionRequest {
+	baseUrl: string;
+	authorization: string;
+	body: {
+		batch: unknown[];
+		metadata: Record<string, unknown>;
+	};
+}
+
+export function buildLangfuseIngestionRequest(event: unknown, options: LangfuseTraceOptions): LangfuseIngestionRequest | undefined {
+	if (!options.enabled || !options.publicKey || !options.secretKey) {
+		return undefined;
+	}
+	if (!event || typeof event !== 'object') {
+		return undefined;
+	}
+	const traceEvent = event as Record<string, unknown>;
+	const traceId = typeof traceEvent.runId === 'string' && traceEvent.runId ? traceEvent.runId : undefined;
+	const type = typeof traceEvent.type === 'string' && traceEvent.type ? traceEvent.type : 'custom-ai.event';
+	const timestamp = typeof traceEvent.timestamp === 'string' && traceEvent.timestamp ? traceEvent.timestamp : new Date().toISOString();
+	const baseUrl = options.baseUrl.replace(/\/+$/, '');
+	const commonBody = {
+		traceId,
+		name: type,
+		startTime: timestamp,
+		environment: options.environment,
+		metadata: traceEvent,
+	};
+
+	const batch: unknown[] = [];
+	if (traceId && type === 'chat.request.started') {
+		batch.push({
+			id: generateUuid(),
+			type: 'trace-create',
+			timestamp,
+			body: {
+				id: traceId,
+				timestamp,
+				name: 'goal-workspace.custom-ai.chat',
+				sessionId: typeof traceEvent.requestId === 'string' ? traceEvent.requestId : undefined,
+				release: options.release,
+				environment: options.environment,
+				tags: ['goal-workspace', 'custom-ai'],
+				metadata: traceEvent,
+			},
+		});
+	}
+
+	batch.push({
+		id: generateUuid(),
+		type: 'event-create',
+		timestamp,
+		body: {
+			id: generateUuid(),
+			...commonBody,
+			level: isTraceErrorEvent(type) ? 'ERROR' : 'DEFAULT',
+			statusMessage: typeof traceEvent.error === 'string' ? traceEvent.error : undefined,
+		},
+	});
+
+	const score = traceEventToScore(traceEvent);
+	if (traceId && score) {
+		batch.push({
+			id: generateUuid(),
+			type: 'score-create',
+			timestamp,
+			body: {
+				traceId,
+				name: score.name,
+				value: score.value,
+				dataType: 'BOOLEAN',
+				environment: options.environment,
+				comment: score.comment,
+				metadata: traceEvent,
+			},
+		});
+	}
+
+	return {
+		baseUrl,
+		authorization: encodeBase64(VSBuffer.fromString(`${options.publicKey}:${options.secretKey}`)),
+		body: {
+			batch,
+			metadata: {
+				source: 'goalconsole-custom-ai',
+				sdk: 'custom-ai-chat-trace',
+			},
+		},
+	};
+}
+
+function traceEventToScore(event: Record<string, unknown>): { name: string; value: 0 | 1; comment?: string } | undefined {
+	if (event.type === 'chat.request.completed') {
+		return { name: 'custom-ai.chat.completed', value: 1 };
+	}
+	if (event.type === 'chat.request.failed' || event.type === 'chat.request.cancelled') {
+		return { name: 'custom-ai.chat.completed', value: 0, comment: typeof event.error === 'string' ? event.error : undefined };
+	}
+	if (event.type === 'verify_surface_blueprint.completed') {
+		return { name: 'surface-blueprint.verified', value: event.passed === true ? 1 : 0 };
+	}
+	return undefined;
+}
+
+function isTraceErrorEvent(type: string): boolean {
+	return type.endsWith('.failed') || type.endsWith('.cancelled');
+}
+
+function readEnv(name: string): string | undefined {
+	const globalWithProcess = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
+	const value = globalWithProcess.process?.env?.[name];
+	return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function getConfiguredString(key: string, configurationService: IConfigurationService): string | undefined {
+	const value = configurationService.getValue<string>(key);
+	return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function createTraceRunId(): string {

@@ -121,6 +121,24 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			description: localize('custom.ai.observability.includeContent', 'Include capped prompt/response snippets in Custom AI observability traces. Secrets are still redacted. Disabled by default for privacy.'),
 			scope: ConfigurationScope.APPLICATION,
 		},
+		'custom.ai.observability.langfuse.enabled': {
+			type: 'boolean',
+			default: false,
+			description: localize('custom.ai.observability.langfuse.enabled', 'Export sanitized Custom AI trace events to Langfuse. Requires LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY in the application environment.'),
+			scope: ConfigurationScope.APPLICATION,
+		},
+		'custom.ai.observability.langfuse.baseUrl': {
+			type: 'string',
+			default: '',
+			description: localize('custom.ai.observability.langfuse.baseUrl', 'Optional Langfuse base URL override. When empty, Custom AI uses LANGFUSE_BASE_URL, LANGFUSE_HOST, or http://localhost:3000.'),
+			scope: ConfigurationScope.APPLICATION,
+		},
+		'custom.ai.observability.langfuse.environment': {
+			type: 'string',
+			default: 'local',
+			description: localize('custom.ai.observability.langfuse.environment', 'Environment label attached to Langfuse traces from Custom AI.'),
+			scope: ConfigurationScope.APPLICATION,
+		},
 		'custom.ai.edit.applyMode': {
 			type: 'string',
 			enum: ['review', 'direct'],

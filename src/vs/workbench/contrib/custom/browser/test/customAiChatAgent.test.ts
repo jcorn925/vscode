@@ -19,6 +19,7 @@ import {
 import { validateCustomAiWorkspaceGoalEdit } from '../../../../../../custom/ai/browser/customAiEditFileTool.js';
 import { SurfaceBuilderHandoffState } from '../../../../../../custom/goalWorkspace/surfaceBuilderHandoffState.js';
 import {
+	buildLangfuseIngestionRequest,
 	sanitizeTraceValue,
 	summarizeTraceMessages,
 	summarizeTraceText,
@@ -273,5 +274,63 @@ suite('CustomAiChatAgent', () => {
 		assert.strictEqual(summary.textChars, 20);
 		assert.strictEqual(summary.toolUseCount, 1);
 		assert.strictEqual(summary.toolResultCount, 1);
+	});
+
+	test('Langfuse ingestion payload is disabled until configured', () => {
+		const event = { timestamp: '2026-07-05T00:00:00.000Z', type: 'chat.request.started', runId: 'run-1' };
+
+		assert.strictEqual(buildLangfuseIngestionRequest(event, {
+			enabled: false,
+			baseUrl: 'http://localhost:3000',
+			publicKey: 'pk-lf-test',
+			secretKey: 'sk-lf-test',
+			environment: 'test',
+		}), undefined);
+		assert.strictEqual(buildLangfuseIngestionRequest(event, {
+			enabled: true,
+			baseUrl: 'http://localhost:3000',
+			environment: 'test',
+		}), undefined);
+	});
+
+	test('Langfuse ingestion payload creates trace event and completion score', () => {
+		const started = buildLangfuseIngestionRequest({
+			timestamp: '2026-07-05T00:00:00.000Z',
+			type: 'chat.request.started',
+			runId: 'run-1',
+			requestId: 'request-1',
+			apiKey: 'sk-abcdefghijklmnopqrstuvwxyz',
+		}, {
+			enabled: true,
+			baseUrl: 'http://localhost:3000/',
+			publicKey: 'pk-lf-test',
+			secretKey: 'sk-lf-test',
+			environment: 'test',
+			release: 'abc123',
+		});
+		assert.ok(started);
+		assert.strictEqual(started.baseUrl, 'http://localhost:3000');
+		assert.ok(started.authorization);
+		assert.strictEqual(started.body.batch.length, 2);
+		assert.strictEqual((started.body.batch[0] as { type: string }).type, 'trace-create');
+		assert.strictEqual((started.body.batch[1] as { type: string }).type, 'event-create');
+
+		const completed = buildLangfuseIngestionRequest({
+			timestamp: '2026-07-05T00:00:01.000Z',
+			type: 'verify_surface_blueprint.completed',
+			runId: 'run-1',
+			passed: false,
+			gapCount: 2,
+		}, {
+			enabled: true,
+			baseUrl: 'http://localhost:3000',
+			publicKey: 'pk-lf-test',
+			secretKey: 'sk-lf-test',
+			environment: 'test',
+		});
+		assert.ok(completed);
+		assert.strictEqual(completed.body.batch.length, 2);
+		assert.strictEqual((completed.body.batch[1] as { type: string }).type, 'score-create');
+		assert.strictEqual(((completed.body.batch[1] as { body: { value: number } }).body).value, 0);
 	});
 });

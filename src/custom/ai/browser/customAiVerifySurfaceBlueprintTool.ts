@@ -24,6 +24,7 @@ import { formatSurfaceBlueprintGapReport, verifySurfaceBlueprint } from '../../g
 import { CUSTOM_AI_VERIFY_SURFACE_BLUEPRINT_TOOL_ID, CUSTOM_AI_VERIFY_SURFACE_BLUEPRINT_TOOL_NAME } from '../common/customAiConstants.js';
 import { IIxIntegrationService } from '../../ix/IxIntegrationService.js';
 import { discoverIxSubsystemRegions } from '../../goalWorkspace/surfaceBlueprintIxDiscovery.js';
+import { ICustomAiChatTraceService } from './customAiChatTrace.js';
 
 export const CustomAiVerifySurfaceBlueprintToolData: IToolData = {
 	id: CUSTOM_AI_VERIFY_SURFACE_BLUEPRINT_TOOL_ID,
@@ -53,6 +54,7 @@ export class CustomAiVerifySurfaceBlueprintTool implements IToolImpl {
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@IConsoleService private readonly consoleService: IConsoleService,
 		@IIxIntegrationService private readonly ixIntegrationService: IIxIntegrationService,
+		@ICustomAiChatTraceService private readonly traceService: ICustomAiChatTraceService,
 	) { }
 
 	async prepareToolInvocation(context: IToolInvocationPreparationContext, _token: CancellationToken): Promise<IPreparedToolInvocation | undefined> {
@@ -87,6 +89,13 @@ export class CustomAiVerifySurfaceBlueprintTool implements IToolImpl {
 
 		const surfaceName = this.consoleService.getSurface(surfaceId)?.name ?? surfaceId;
 		SurfaceBlueprintOrchestrator.handleVerificationResult(result, surfaceName);
+		this.traceService.traceEditEvent('verify_surface_blueprint.completed', {
+			surfaceId,
+			surfaceName,
+			passed: result.passed,
+			gapCount: result.gaps.length,
+			statusPath: result.statusPath?.toString(),
+		});
 
 		return {
 			content: [{
