@@ -1,32 +1,34 @@
 ---
 name: ui-tab-design-evaluator
-description: Evaluate whether the VS Code custom goal-workspace UI tab implementation matches the approved Guided Builder design. Use when reviewing, auditing, scoring, or validating code, screenshots, or running UI for `ModeShellContribution`, `custom-mode-ui-surface-setup`, the UI tab landing callout, goal workspace surface generation, brand setup, or surface handoff in this custom VS Code fork.
+description: Evaluate whether the VS Code custom Console workspace UI implementation matches the approved Guided Builder design. Use when reviewing, auditing, scoring, or validating code, screenshots, or running UI for `ModeShellContribution`, `custom-mode-ui-surface-setup`, the workspace landing callout, surface generation, brand setup, or surface handoff in this custom VS Code fork.
 ---
 
 # UI Tab Design Evaluator
 
-Evaluate the implemented UI tab against the approved design direction for the goal-workspace surface builder. This skill is a review workflow: gather evidence, compare against the target design, identify gaps, and produce prioritized findings.
+Evaluate the implemented Console workspace UI against the approved design direction for the surface builder. This skill is a review workflow: gather evidence, compare against the target design, identify gaps, and produce prioritized findings.
+
+Use **name-agnostic Console terminology** in reports: refer to `ConsoleService`, `ConsoleWorkspace`, workspace manifest (`workspace.goal.json`), and the **workspace tab** (folder name in the top bar). Avoid product-specific labels like "GoalConsole" unless quoting user-visible copy.
 
 ## Target Design
 
-The approved direction is a **surface-first Guided Builder** with a clear **no-project landing** and a **single scrollable builder column** when the **GoalWorkspace** tab opens the builder.
+The approved direction is a **surface-first Guided Builder** with a clear **no-project landing** and a **single scrollable builder column** when the **workspace tab** opens the builder.
 
 ### No-project landing (no workspace folder)
 
 When `custom-mode-shell-hasProject` is absent, show a centered callout (`custom-mode-callout`) in the UI preview area:
 
-- Title: **Build your goal workspace**
-- Subtitle explaining goal workspace ties business, brand, and apps together with autosave
+- Title: **Build your workspace**
+- Subtitle explaining the workspace ties business, brand, and apps together with autosave
 - Numbered steps: name business → brand assets → pick/generate surfaces one at a time
 - **Starter surfaces** chip row listing all eight starter names (Marketing Site, Booking, Client Portal, Trainer Admin, Analytics, Content Scheduler, Ads Manager, Subscriptions)
-- Primary CTA: **Open Goal Workspace Example**
+- Primary CTA: **Open workspace example**
 - Callout hidden once a project folder is open (`custom-mode-shell-hasProject`)
 
-### Guided Builder (GoalWorkspace tab)
+### Guided Builder (workspace tab)
 
 Required structure:
 
-- Keep the VS Code-like top workbench navigation: **GoalWorkspace** tab (opens guided builder), **Code** tab, surface tabs when declared, and right utility actions when present.
+- Keep the VS Code-like top workbench navigation: **workspace tab** (folder name; opens guided builder), **Code** tab, surface tabs when declared, and right utility actions when present.
 - Remove the old left progress rail/column entirely.
 - **Do not** use exclusive step tabs, section tab rails, sticky outline nav, or a page hero above the builder form.
 - **Single main column** only: Goal → Brand → Surfaces (no right companion Agent Plan panel in the current design).
@@ -47,7 +49,7 @@ Visual expectations:
 - Brand drop zones use dashed borders and inline image previews when logos are present.
 - Starter surface cards use icon, name, summary, and bullet highlights in a responsive 2-column grid.
 - Text must fit at desktop and narrower workbench widths without clipping or incoherent overlap.
-- macOS: Goal workspace title area must clear traffic lights (adequate top-bar padding / `mac-native` handling).
+- macOS: workspace title area must clear traffic lights (adequate top-bar padding / `mac-native` handling).
 
 ## Anti-patterns (flag as P1)
 
@@ -65,11 +67,11 @@ Visual expectations:
 1. Locate the relevant implementation.
    - Start with `src/vs/workbench/contrib/custom/browser/modeShell.contribution.ts`.
    - Search for `custom-mode-callout`, `createGoalWorkspaceLandingCallout`, `custom-mode-ui-surface-setup`, `custom-mode-ui-surface-brand-dropzone`, `uiSurfaceSetup`, `surface-builder-handoff`, `STARTER_SURFACES`, and `ADD_SURFACE_ID`.
-   - Include CSS embedded in TypeScript and `src/custom/goalWorkspace/goalWorkspaceSurfaceSetup.ts`.
+   - Include CSS embedded in TypeScript, `src/custom/goalWorkspace/ConsoleService.ts`, and `src/custom/goalWorkspace/goalWorkspaceSurfaceSetup.ts`.
 
 2. Inspect the actual UI when feasible.
    - **No project**: verify landing callout copy, steps, surface chips, and CTA.
-   - **With project + GoalWorkspace builder**: verify builder sections, surface grid, and handoff.
+   - **With project + workspace builder**: verify builder sections, surface grid, and handoff.
    - If a running workbench or screenshot is available, inspect it directly.
    - If no runtime is available, evaluate DOM construction, class names, layout CSS, and copy.
 

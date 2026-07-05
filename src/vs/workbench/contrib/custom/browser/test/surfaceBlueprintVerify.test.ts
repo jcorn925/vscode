@@ -60,7 +60,7 @@ suite('surfaceBlueprintVerify', () => {
 		assert.ok(result.gaps.some(gap => gap.kind === 'missing_path'));
 	});
 
-	test('passes when blueprint paths and manifest exist', async () => {
+	test('fails when blueprint paths exist but implementation is only placeholders', async () => {
 		const fileService = new TestBlueprintFileService();
 		const template = loadSurfaceTemplate('booking')!;
 		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'booking', surfaceName: 'Booking' });
@@ -84,7 +84,9 @@ suite('surfaceBlueprintVerify', () => {
 			workspaceFolder,
 			surfaceId: 'booking',
 		});
-		assert.strictEqual(result.passed, true, JSON.stringify(result.gaps));
+		assert.strictEqual(result.passed, false);
+		assert.ok(result.gaps.some(gap => gap.kind === 'thin_implementation'));
+		assert.ok(result.gaps.some(gap => gap.kind === 'missing_workflow_signal' || gap.kind === 'missing_business_terms'));
 	});
 
 	test('persists verified status when persistStatus is true', async () => {
@@ -98,13 +100,7 @@ suite('surfaceBlueprintVerify', () => {
 			entities: [...blueprint.manifest.entities],
 			ixSubsystems: [...blueprint.manifest.ixSubsystems],
 		}));
-		fileService.setFile(joinPath(workspaceFolder, 'apps/booking/package.json'), '{}');
-		fileService.setFile(joinPath(workspaceFolder, 'apps/booking/next.config.ts'), 'export default {}');
-		for (const subsystem of blueprint.subsystems) {
-			for (const path of subsystem.paths) {
-				fileService.setFile(joinPath(workspaceFolder, ...path.split('/')), '// file');
-			}
-		}
+		await scaffoldSurfaceFromBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
 
 		const result = await verifySurfaceBlueprint({
 			fileService: fileService as unknown as IFileService,
@@ -118,6 +114,36 @@ suite('surfaceBlueprintVerify', () => {
 		assert.strictEqual(persisted?.status, 'verified');
 		assert.ok(persisted?.verifiedAt);
 	});
+
+	for (const [templateId, surfaceName] of [
+		['marketing', 'Marketing Site'],
+		['booking', 'Booking'],
+		['client-portal', 'Client Portal'],
+		['trainer-admin', 'Trainer Admin'],
+	] as const) {
+		test(`scaffolds product-useful ${surfaceName}`, async () => {
+			const fileService = new TestBlueprintFileService();
+			const template = loadSurfaceTemplate(templateId)!;
+			const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: templateId, surfaceName });
+			await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+			fileService.setFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST), JSON.stringify({
+				goal: {
+					id: 'personal-training-business',
+					name: 'Online Personal Training Business',
+				},
+				surfaces: [],
+			}));
+
+			await scaffoldSurfaceFromBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+
+			const result = await verifySurfaceBlueprint({
+				fileService: fileService as unknown as IFileService,
+				workspaceFolder,
+				surfaceId: templateId,
+			});
+			assert.strictEqual(result.passed, true, JSON.stringify(result.gaps));
+		});
+	}
 
 	test('scaffolds a runnable baseline from a persisted blueprint', async () => {
 		const fileService = new TestBlueprintFileService();

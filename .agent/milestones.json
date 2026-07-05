@@ -7,14 +7,14 @@
 			"title": "Goal workspace manifest and planning",
 			"description": "Goal workspaces load workspace.goal.json, expose surfaces, and support cross-app workflow planning.",
 			"paths": [
-				"src/custom/goalWorkspace/GoalConsoleService.ts",
+				"src/custom/goalWorkspace/ConsoleService.ts",
 				"src/custom/goalWorkspace/examples/workspace.goal.json",
 				"src/vs/workbench/contrib/custom/browser/goalWorkspace.contribution.ts"
 			],
 			"checks": [
-				{ "type": "fileExists", "path": "src/custom/goalWorkspace/GoalConsoleService.ts" },
+				{ "type": "fileExists", "path": "src/custom/goalWorkspace/ConsoleService.ts" },
 				{ "type": "fileExists", "path": "src/custom/goalWorkspace/examples/workspace.goal.json" },
-				{ "type": "testGrep", "pattern": "goalConsoleService", "script": "scripts/test.sh" }
+				{ "type": "testGrep", "pattern": "ConsoleService", "script": "scripts/test.sh" }
 			]
 		},
 		{

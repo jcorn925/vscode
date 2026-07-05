@@ -11,8 +11,33 @@ function template(
 	summary: string,
 	requiredSubsystems: SurfaceBlueprintTemplate['requiredSubsystems'],
 	manifest: SurfaceBlueprintTemplate['manifest'],
+	acceptance: SurfaceBlueprintTemplate['acceptance'],
 ): SurfaceBlueprintTemplate {
-	return { templateId, surfaceName, summary, requiredSubsystems, manifest };
+	return { templateId, surfaceName, summary, requiredSubsystems, manifest, acceptance };
+}
+
+function acceptance(
+	requiredRoutes: readonly string[],
+	requiredWorkflows: readonly string[],
+	requiredUiSignals: readonly string[],
+	requiredBusinessTerms: readonly string[],
+	minimumFiles = 10,
+	minimumTotalLines = 220,
+	minimumInteractiveControls = 8,
+): SurfaceBlueprintTemplate['acceptance'] {
+	return {
+		requiredRoutes,
+		requiredWorkflows,
+		requiredUiSignals,
+		requiredBusinessTerms,
+		minimumFiles,
+		minimumTotalLines,
+		minimumInteractiveControls,
+	};
+}
+
+function lightAcceptance(surfaceId: string, terms: readonly string[]): SurfaceBlueprintTemplate['acceptance'] {
+	return acceptance(['/'], [surfaceId], terms, terms, 5, 90, 2);
 }
 
 export const SURFACE_BLUEPRINT_TEMPLATE_IDS = [
@@ -46,6 +71,15 @@ export const SURFACE_BLUEPRINT_TEMPLATES: Record<SurfaceBlueprintTemplateId, Sur
 			entities: ['Lead', 'Offer'],
 			ixSubsystems: ['Marketing UI', 'Lead Capture UI'],
 		},
+		acceptance(
+			['/', '/offers', '/contact'],
+			['lead capture', 'offer comparison', 'booking handoff'],
+			['Start training', 'Choose a package', 'Lead form', 'Book a consult'],
+			['lead', 'offer', 'testimonial', 'package', 'booking', 'conversion'],
+			10,
+			220,
+			8,
+		),
 	),
 	booking: template(
 		'booking',
@@ -55,6 +89,7 @@ export const SURFACE_BLUEPRINT_TEMPLATES: Record<SurfaceBlueprintTemplateId, Sur
 			{ id: 'package-selection', label: 'Package Selection UI', kind: 'route', paths: ['apps/booking/app/packages'] },
 			{ id: 'scheduling', label: 'Scheduling UI', kind: 'route', paths: ['apps/booking/app/schedule'] },
 			{ id: 'checkout', label: 'Checkout UI', kind: 'route', paths: ['apps/booking/app/checkout'] },
+			{ id: 'confirmation', label: 'Confirmation UI', kind: 'route', paths: ['apps/booking/app/confirmation'] },
 			{ id: 'intake', label: 'Intake Forms UI', kind: 'route', paths: ['apps/booking/app/intake', 'apps/booking/components/intake'] },
 			{ id: 'booking-layout', label: 'Booking Layout UI', kind: 'component', paths: ['apps/booking/app/layout.tsx'] },
 		],
@@ -64,6 +99,15 @@ export const SURFACE_BLUEPRINT_TEMPLATES: Record<SurfaceBlueprintTemplateId, Sur
 			entities: ['Lead', 'Booking', 'TrainingPackage'],
 			ixSubsystems: ['Package Selection UI', 'Scheduling UI', 'Checkout UI'],
 		},
+		acceptance(
+			['/', '/packages', '/schedule', '/intake', '/checkout', '/confirmation'],
+			['choose package', 'select session time', 'complete intake', 'review checkout', 'see confirmation'],
+			['Package cards', 'Time slots', 'Intake form', 'Payment summary', 'Confirmation'],
+			['package', 'session', 'intake', 'checkout', 'confirmation', 'training'],
+			12,
+			240,
+			12,
+		),
 	),
 	'client-portal': template(
 		'client-portal',
@@ -82,6 +126,15 @@ export const SURFACE_BLUEPRINT_TEMPLATES: Record<SurfaceBlueprintTemplateId, Sur
 			entities: ['Client', 'SessionPlan', 'ProgressEntry'],
 			ixSubsystems: ['Client Dashboard UI', 'Session Plans UI', 'Progress Tracking UI'],
 		},
+		acceptance(
+			['/', '/dashboard', '/plans', '/progress', '/messages', '/account'],
+			['review plan', 'track progress', 'message trainer', 'manage account'],
+			['Client dashboard', 'Session plan', 'Progress tracker', 'Messages', 'Account summary'],
+			['client', 'plan', 'progress', 'message', 'session', 'account'],
+			12,
+			230,
+			10,
+		),
 	),
 	'trainer-admin': template(
 		'trainer-admin',
@@ -99,6 +152,15 @@ export const SURFACE_BLUEPRINT_TEMPLATES: Record<SurfaceBlueprintTemplateId, Sur
 			entities: ['Coach', 'Client', 'Session'],
 			ixSubsystems: ['Client Roster UI', 'Session Management UI', 'Coach Dashboard UI'],
 		},
+		acceptance(
+			['/', '/clients', '/sessions', '/follow-ups'],
+			['review roster', 'manage sessions', 'assign follow-ups', 'monitor operations'],
+			['Client roster', 'Session board', 'Follow-up queue', 'Coach dashboard'],
+			['client', 'session', 'follow-up', 'coach', 'roster', 'operations'],
+			10,
+			220,
+			9,
+		),
 	),
 	analytics: template(
 		'analytics',
@@ -116,6 +178,7 @@ export const SURFACE_BLUEPRINT_TEMPLATES: Record<SurfaceBlueprintTemplateId, Sur
 			entities: ['Metric', 'Campaign', 'Subscription'],
 			ixSubsystems: ['Funnel Dashboard UI', 'Revenue Reporting UI', 'North Star KPI UI'],
 		},
+		lightAcceptance('analytics', ['metric', 'funnel', 'revenue']),
 	),
 	'content-scheduler': template(
 		'content-scheduler',
@@ -133,6 +196,7 @@ export const SURFACE_BLUEPRINT_TEMPLATES: Record<SurfaceBlueprintTemplateId, Sur
 			entities: ['Post', 'Campaign', 'Channel'],
 			ixSubsystems: ['Editorial Calendar UI', 'Campaign Planning UI', 'Post Performance UI'],
 		},
+		lightAcceptance('content scheduler', ['post', 'campaign', 'calendar']),
 	),
 	'ads-manager': template(
 		'ads-manager',
@@ -150,6 +214,7 @@ export const SURFACE_BLUEPRINT_TEMPLATES: Record<SurfaceBlueprintTemplateId, Sur
 			entities: ['AdCampaign', 'Audience', 'Creative'],
 			ixSubsystems: ['Campaign Setup UI', 'Audience Targeting UI', 'Spend Analysis UI'],
 		},
+		lightAcceptance('ads manager', ['campaign', 'audience', 'creative']),
 	),
 	subscriptions: template(
 		'subscriptions',
@@ -167,6 +232,7 @@ export const SURFACE_BLUEPRINT_TEMPLATES: Record<SurfaceBlueprintTemplateId, Sur
 			entities: ['Subscription', 'Plan', 'BillingAccount'],
 			ixSubsystems: ['Plan Management UI', 'Billing Status UI', 'Lifecycle Events UI'],
 		},
+		lightAcceptance('subscriptions', ['subscription', 'plan', 'billing']),
 	),
 	custom: template(
 		'custom',
@@ -184,6 +250,7 @@ export const SURFACE_BLUEPRINT_TEMPLATES: Record<SurfaceBlueprintTemplateId, Sur
 			entities: ['Customer'],
 			ixSubsystems: ['Surface Home UI', 'Primary Flow UI'],
 		},
+		lightAcceptance('surface', ['customer', 'workflow', 'surface']),
 	),
 };
 

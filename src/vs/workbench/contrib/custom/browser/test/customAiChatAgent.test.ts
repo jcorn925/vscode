@@ -16,6 +16,7 @@ import {
 	CUSTOM_AI_PRODUCT_SYSTEM_PROMPT,
 	formatIxContextLines,
 } from '../../../../../../custom/ai/browser/customAiChatAgent.js';
+import { validateCustomAiWorkspaceGoalEdit } from '../../../../../../custom/ai/browser/customAiEditFileTool.js';
 import { SurfaceBuilderHandoffState } from '../../../../../../custom/goalWorkspace/surfaceBuilderHandoffState.js';
 import {
 	sanitizeTraceValue,
@@ -148,6 +149,47 @@ suite('CustomAiChatAgent', () => {
 		assert.match(joined, /Extra user guidance/);
 		assert.match(joined, /editFile/);
 		assert.ok(parts.includes(CUSTOM_AI_EDIT_TOOL_SYSTEM_PROMPT));
+	});
+
+	test('editFile manifest validator rejects schema-breaking workspace.goal.json writes', () => {
+		const manifest = URI.file('/workspace/workspace.goal.json');
+		const valid = JSON.stringify({
+			goal: {
+				id: 'online-personal-training-business',
+				name: 'Online Personal Training Business',
+				description: 'Acquire clients and run coaching operations across workspace surfaces.',
+				northStarMetric: 'active_paid_clients',
+			},
+			surfaces: [{
+				id: 'booking',
+				name: 'Booking',
+				type: 'web-app',
+				path: 'apps/booking',
+				description: 'Let leads book sessions.',
+				devCommand: 'npm --prefix apps/booking run dev',
+				localUrl: 'http://localhost:3001',
+				capabilities: ['package-selection'],
+				events: ['booking.started'],
+				entities: ['Booking'],
+				ixSubsystems: ['Booking UI'],
+			}],
+			shared: {
+				domain: 'packages/domain',
+				events: 'packages/events',
+				workflows: 'workflows',
+			}
+		});
+
+		assert.strictEqual(validateCustomAiWorkspaceGoalEdit(manifest, valid), undefined);
+		assert.match(validateCustomAiWorkspaceGoalEdit(manifest, JSON.stringify({
+			goal: 'Online Personal Training Business',
+			surfaces: []
+		})) ?? '', /goal.*object/);
+		assert.match(validateCustomAiWorkspaceGoalEdit(manifest, JSON.stringify({
+			goal: { id: 'demo', name: 'Demo' },
+			surfaces: { booking: { id: 'booking', name: 'Booking' } }
+		})) ?? '', /surfaces.*array/);
+		assert.strictEqual(validateCustomAiWorkspaceGoalEdit(URI.file('/workspace/notes.json'), '{ nope'), undefined);
 	});
 
 	test('buildCustomAiSystemMessageParts omits edit guidance when tools are disabled', () => {

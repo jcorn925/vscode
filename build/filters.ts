@@ -193,6 +193,7 @@ export const copyrightFilter = Object.freeze<string[]>([
 	'!**/*.provisionprofile',
 	'!build/**/*.init',
 	'!build/darwin/patch-dmg.py',
+	'!scripts/score_goal_workspace.py',
 	'!build/linux/libcxx-fetcher.*',
 	'!build/npm/gyp/custom-headers/**',
 	'!resources/linux/snap/snapcraft.yaml',

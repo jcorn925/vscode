@@ -40,7 +40,10 @@ export async function scaffoldSurfaceFromBlueprint(
 ): Promise<ScaffoldSurfaceFromBlueprintResult> {
 	const appPath = `apps/${blueprint.surfaceId}`;
 	const manifest = await upsertManifestSurface(fileService, workspaceFolder, blueprint, appPath);
-	const files = buildSurfaceFiles(blueprint, appPath, manifest.localUrl);
+	const files = [
+		...buildSurfaceFiles(blueprint, appPath, manifest.localUrl),
+		...buildSharedWorkspaceFiles(blueprint, manifest),
+	];
 	const createdFiles: string[] = [];
 
 	for (const [relativePath, content] of files) {
@@ -54,6 +57,87 @@ export async function scaffoldSurfaceFromBlueprint(
 		localUrl: manifest.localUrl,
 		createdFiles,
 	};
+}
+
+function buildSharedWorkspaceFiles(
+	blueprint: SurfaceBlueprint,
+	manifest: ManifestSurfaceRecord,
+): readonly [string, string][] {
+	const entities = uniqueStrings([...manifest.entities, ...blueprint.acceptance.requiredBusinessTerms]);
+	const events = uniqueStrings([...manifest.events]);
+	const workflows = uniqueStrings([...blueprint.acceptance.requiredWorkflows, ...manifest.capabilities]);
+	const surfaceLabel = manifest.name || blueprint.surfaceName;
+	const now = new Date().toISOString();
+
+	return [
+		['packages/domain/index.ts', [
+			'export const goalWorkspaceDomain = {',
+			`\tsurfaces: ${JSON.stringify([manifest.id])},`,
+			`\tentities: ${JSON.stringify(entities)},`,
+			`\tprimarySurface: '${escapeTsString(manifest.id)}',`,
+			'} as const;',
+			'',
+		].join('\n')],
+		['packages/events/index.ts', [
+			'export const goalWorkspaceEvents = {',
+			`\t${identifierFor(manifest.id)}: ${JSON.stringify(events)},`,
+			'} as const;',
+			'',
+		].join('\n')],
+		[`workflows/${manifest.id}.workflow.md`, [
+			`# ${surfaceLabel} Workflow`,
+			'',
+			`Surface: \`${manifest.id}\``,
+			`App path: \`${manifest.path}\``,
+			`Preview: \`${manifest.localUrl}\``,
+			'',
+			'## Business Workflows',
+			...workflows.map(workflow => `- ${workflow}`),
+			'',
+			'## Domain Entities',
+			...entities.map(entity => `- ${entity}`),
+			'',
+			'## Events',
+			...events.map(event => `- ${event}`),
+			'',
+		].join('\n')],
+		['.agent/workspace-memory.md', [
+			'# Workspace Memory',
+			'',
+			`Updated: ${now}`,
+			'',
+			`- Goal workspace includes the ${surfaceLabel} surface at \`${manifest.path}\`.`,
+			`- Shared domain entities include ${entities.join(', ')}.`,
+			`- Shared events include ${events.join(', ')}.`,
+			`- Surface preview is expected at ${manifest.localUrl}.`,
+			'',
+		].join('\n')],
+		[`.agent/surfaces/${manifest.id}.memory.md`, [
+			`# ${surfaceLabel} Memory`,
+			'',
+			`Updated: ${now}`,
+			'',
+			`- Purpose: ${manifest.purpose}`,
+			`- Capabilities: ${manifest.capabilities.join(', ')}`,
+			`- Ix subsystems: ${manifest.ixSubsystems.join(', ')}`,
+			`- Verification should cover ${workflows.join(', ')}.`,
+			'',
+		].join('\n')],
+		['.agent/ix-surface-map.json', JSON.stringify({
+			generatedAt: now,
+			surfaces: {
+				[manifest.id]: {
+					path: manifest.path,
+					localUrl: manifest.localUrl,
+					ixSubsystems: manifest.ixSubsystems,
+					entrypoints: [
+						`${manifest.path}/app/page.tsx`,
+						`${manifest.path}/lib/workflow.ts`,
+					],
+				},
+			},
+		}, null, '\t') + '\n'],
+	];
 }
 
 async function upsertManifestSurface(
@@ -278,6 +362,11 @@ function buildSurfaceFiles(blueprint: SurfaceBlueprint, appPath: string, localUr
 		].join('\n')],
 	];
 
+	const coreSurfaceFiles = buildCoreSurfaceFiles(blueprint, appPath, localUrl);
+	if (coreSurfaceFiles.length) {
+		return dedupeFiles([...coreSurfaceFiles, ...files]);
+	}
+
 	for (const subsystem of blueprint.subsystems) {
 		for (const path of subsystem.paths) {
 			if (path.endsWith('.tsx') || path.endsWith('.ts')) {
@@ -289,6 +378,340 @@ function buildSurfaceFiles(blueprint: SurfaceBlueprint, appPath: string, localUr
 	}
 
 	return dedupeFiles(files);
+}
+
+function buildCoreSurfaceFiles(blueprint: SurfaceBlueprint, appPath: string, localUrl: string): readonly [string, string][] {
+	switch (blueprint.templateId) {
+		case 'booking':
+			return buildWorkflowSurfaceFiles(blueprint, appPath, localUrl, [
+				{
+					route: '/',
+					headline: 'Booking workspace',
+					summary: 'Guide a prospect from package selection through session scheduling, intake, checkout, and confirmation.',
+					steps: ['Choose a package', 'Select session time', 'Complete intake', 'Review checkout', 'See confirmation'],
+					controls: ['Start booking', 'Compare packages', 'Continue'],
+				},
+				{
+					route: '/packages',
+					headline: 'Package cards',
+					summary: 'Show training packages with pricing, duration, included coaching touchpoints, and booking CTAs.',
+					steps: ['Strength Reset - 8 weeks - $499', 'Mobility Builder - 6 weeks - $349', 'Performance Coaching - 12 weeks - $899'],
+					controls: ['Select Strength Reset', 'Select Mobility Builder', 'Select Performance Coaching'],
+				},
+				{
+					route: '/schedule',
+					headline: 'Time slots',
+					summary: 'Let the lead choose a first consultation session and review coach availability.',
+					steps: ['Tuesday 9:00 AM', 'Wednesday 12:30 PM', 'Friday 4:00 PM'],
+					controls: ['Choose Tuesday', 'Choose Wednesday', 'Choose Friday'],
+				},
+				{
+					route: '/intake',
+					headline: 'Intake form',
+					summary: 'Capture goals, constraints, injuries, preferred schedule, and readiness before checkout.',
+					steps: ['Fitness goal', 'Training history', 'Injury notes', 'Preferred session cadence'],
+					controls: ['Full name', 'Email', 'Primary goal', 'Submit intake'],
+				},
+				{
+					route: '/checkout',
+					headline: 'Payment summary',
+					summary: 'Summarize package, session time, price, cancellation terms, and payment method before booking.',
+					steps: ['Package total $499', 'Due today $99 deposit', 'Cancellation window 24 hours'],
+					controls: ['Card number', 'Apply promo', 'Complete checkout'],
+				},
+				{
+					route: '/confirmation',
+					headline: 'Confirmation',
+					summary: 'Confirm the booking, explain next steps, and send the client into account setup.',
+					steps: ['Booking completed', 'Coach notified', 'Client portal invite queued'],
+					controls: ['Add to calendar', 'Open client portal', 'Send confirmation'],
+				},
+			], ['TrainingPackage', 'Booking', 'Lead', 'booking.started', 'booking.completed']);
+		case 'marketing':
+			return buildWorkflowSurfaceFiles(blueprint, appPath, localUrl, [
+				{
+					route: '/',
+					headline: 'Lead generation home',
+					summary: 'Convert visitors with a clear training promise, proof, package teaser, and booking handoff.',
+					steps: ['Outcome-focused hero', 'Client proof', 'Package preview', 'Book a consult'],
+					controls: ['Start training', 'Choose a package', 'Book a consult'],
+				},
+				{
+					route: '/offers',
+					headline: 'Offer comparison',
+					summary: 'Compare packages, pricing, coaching level, and who each offer is best for.',
+					steps: ['Strength Reset', 'Mobility Builder', 'Performance Coaching'],
+					controls: ['View details', 'Select package', 'Ask a question'],
+				},
+				{
+					route: '/contact',
+					headline: 'Lead form',
+					summary: 'Capture lead information and route qualified prospects into the booking surface.',
+					steps: ['Goal', 'Timeline', 'Budget', 'Preferred contact'],
+					controls: ['Name', 'Email', 'Primary goal', 'Send lead'],
+				},
+			], ['Lead', 'Offer', 'testimonial', 'conversion', 'booking?package=strength-reset']);
+		case 'client-portal':
+			return buildWorkflowSurfaceFiles(blueprint, appPath, localUrl, [
+				{
+					route: '/',
+					headline: 'Client dashboard',
+					summary: 'Give clients a clear home for their plan, next session, progress, messages, and account state.',
+					steps: ['Next session', 'Current plan', 'Weekly progress', 'Trainer message'],
+					controls: ['View plan', 'Log progress', 'Message trainer'],
+				},
+				{
+					route: '/dashboard',
+					headline: 'Client dashboard',
+					summary: 'Surface today\'s actions and upcoming coaching commitments for active clients.',
+					steps: ['Workout due today', 'Nutrition check-in', 'Coach feedback'],
+					controls: ['Mark complete', 'Upload result', 'Request change'],
+				},
+				{
+					route: '/plans',
+					headline: 'Session plan',
+					summary: 'Show the active training plan, session notes, assignments, and package progress.',
+					steps: ['Phase 1 strength', 'Phase 2 conditioning', 'Recovery block'],
+					controls: ['Open session', 'Download plan', 'Ask about plan'],
+				},
+				{
+					route: '/progress',
+					headline: 'Progress tracker',
+					summary: 'Track measurements, milestones, habit streaks, and client-reported outcomes.',
+					steps: ['Weight trend', 'Workout adherence', 'Mobility score'],
+					controls: ['Add measurement', 'Log workout', 'Share progress'],
+				},
+				{
+					route: '/messages',
+					headline: 'Messages',
+					summary: 'Keep trainer and client communication tied to sessions, progress, and account needs.',
+					steps: ['Unread coach note', 'Plan adjustment', 'Session reminder'],
+					controls: ['Reply', 'Attach photo', 'Mark resolved'],
+				},
+				{
+					route: '/account',
+					headline: 'Account summary',
+					summary: 'Show billing status, package renewal date, cancellation policy, and profile settings.',
+					steps: ['Active subscription', 'Renewal date', 'Payment method'],
+					controls: ['Update card', 'Change package', 'Cancel plan'],
+				},
+			], ['Client', 'SessionPlan', 'ProgressEntry', 'client.progress.updated']);
+		case 'trainer-admin':
+			return buildWorkflowSurfaceFiles(blueprint, appPath, localUrl, [
+				{
+					route: '/',
+					headline: 'Coach dashboard',
+					summary: 'Run daily coaching operations across clients, sessions, follow-ups, and revenue risk.',
+					steps: ['Today\'s sessions', 'At-risk clients', 'Follow-up queue', 'Package renewals'],
+					controls: ['Review schedule', 'Create follow-up', 'Open roster'],
+				},
+				{
+					route: '/clients',
+					headline: 'Client roster',
+					summary: 'Review clients by status, package, next session, adherence, and required coach action.',
+					steps: ['Active clients', 'Trial leads', 'Paused accounts'],
+					controls: ['Filter status', 'Open client', 'Assign coach'],
+				},
+				{
+					route: '/roster',
+					headline: 'Client roster',
+					summary: 'Operational roster view for coach ownership, risk level, and plan status.',
+					steps: ['Coach owner', 'Risk score', 'Current phase'],
+					controls: ['Sort by risk', 'Send message', 'Create task'],
+				},
+				{
+					route: '/sessions',
+					headline: 'Session board',
+					summary: 'Manage upcoming sessions, completion state, notes, and reschedule requests.',
+					steps: ['Scheduled', 'Completed', 'Needs notes'],
+					controls: ['Add session', 'Reschedule', 'Complete session'],
+				},
+				{
+					route: '/follow-ups',
+					headline: 'Follow-up queue',
+					summary: 'Assign and close retention, onboarding, missed-session, and renewal follow-ups.',
+					steps: ['Missed check-in', 'Renewal reminder', 'New client onboarding'],
+					controls: ['Assign follow-up', 'Set due date', 'Mark done'],
+				},
+			], ['Coach', 'Client', 'Session', 'followup.created', 'session.scheduled']);
+		default:
+			return [];
+	}
+}
+
+interface WorkflowPageSpec {
+	readonly route: string;
+	readonly headline: string;
+	readonly summary: string;
+	readonly steps: readonly string[];
+	readonly controls: readonly string[];
+}
+
+function buildWorkflowSurfaceFiles(
+	blueprint: SurfaceBlueprint,
+	appPath: string,
+	localUrl: string,
+	pages: readonly WorkflowPageSpec[],
+	domainSignals: readonly string[],
+): readonly [string, string][] {
+	const files: [string, string][] = [
+		[`${appPath}/components/SurfaceNav.tsx`, workflowNavFile(blueprint.surfaceName, pages)],
+		[`${appPath}/components/WorkflowCard.tsx`, workflowCardFile()],
+		[`${appPath}/lib/workflow.ts`, workflowDataFile(blueprint, pages, domainSignals, localUrl)],
+		[`${appPath}/app/globals.css`, workflowCssFile()],
+	];
+	for (const page of pages) {
+		files.push([routeFilePath(appPath, page.route), workflowPageFile(blueprint, page, domainSignals)]);
+	}
+	for (const subsystem of blueprint.subsystems) {
+		for (const path of subsystem.paths) {
+			if (!path.includes('/components/')) {
+				continue;
+			}
+			const componentPath = path.endsWith('.tsx') || path.endsWith('.ts') ? path : `${path}/Checklist.tsx`;
+			files.push([componentPath, workflowSupportComponentFile(subsystem.label, blueprint.surfaceName)]);
+		}
+	}
+	return files;
+}
+
+function routeFilePath(appPath: string, route: string): string {
+	if (route === '/') {
+		return `${appPath}/app/page.tsx`;
+	}
+	return `${appPath}/app/${route.replace(/^\//, '')}/page.tsx`;
+}
+
+function workflowNavFile(surfaceName: string, pages: readonly WorkflowPageSpec[]): string {
+	const links = pages.map(page => `\t\t\t<a href="${page.route}">${escapeTsString(page.headline)}</a>`).join('\n');
+	return [
+		'export function SurfaceNav() {',
+		'\treturn (',
+		'\t\t<nav className="surface-nav" aria-label="Surface workflow">',
+		`\t\t\t<strong>${escapeHtml(surfaceName)}</strong>`,
+		links,
+		'\t\t</nav>',
+		'\t);',
+		'}',
+		'',
+	].join('\n');
+}
+
+function workflowCardFile(): string {
+	return [
+		'export function WorkflowCard({ title, children }: { title: string; children: React.ReactNode }) {',
+		'\treturn (',
+		'\t\t<section className="workflow-card">',
+		'\t\t\t<h2>{title}</h2>',
+		'\t\t\t{children}',
+		'\t\t</section>',
+		'\t);',
+		'}',
+		'',
+	].join('\n');
+}
+
+function workflowDataFile(blueprint: SurfaceBlueprint, pages: readonly WorkflowPageSpec[], domainSignals: readonly string[], localUrl: string): string {
+	return [
+		'export const surfaceWorkflow = {',
+		`\tsurface: '${escapeTsString(blueprint.surfaceName)}',`,
+		`\tlocalUrl: '${escapeTsString(localUrl)}',`,
+		`\tworkflows: ${JSON.stringify(blueprint.acceptance.requiredWorkflows)},`,
+		`\tbusinessTerms: ${JSON.stringify(blueprint.acceptance.requiredBusinessTerms)},`,
+		`\tdomainSignals: ${JSON.stringify(domainSignals)},`,
+		`\troutes: ${JSON.stringify(pages.map(page => page.route))},`,
+		'};',
+		'',
+	].join('\n');
+}
+
+function workflowPageFile(blueprint: SurfaceBlueprint, page: WorkflowPageSpec, domainSignals: readonly string[]): string {
+	const importPrefix = page.route === '/' ? '..' : '../..';
+	const stepItems = page.steps.map(step => `\t\t\t\t\t<li>${escapeHtml(step)}</li>`).join('\n');
+	const signalItems = domainSignals.map(signal => `\t\t\t\t\t<li>${escapeHtml(signal)}</li>`).join('\n');
+	const controlNodes = page.controls.map((control) => {
+		if (/email|name|goal|card|filter|date/i.test(control)) {
+			return `\t\t\t\t\t<label>${escapeHtml(control)}<input aria-label="${escapeHtml(control)}" placeholder="${escapeHtml(control)}" /></label>`;
+		}
+		return `\t\t\t\t\t<button type="button">${escapeHtml(control)}</button>`;
+	}).join('\n');
+	return [
+		`import { SurfaceNav } from '${importPrefix}/components/SurfaceNav';`,
+		`import { WorkflowCard } from '${importPrefix}/components/WorkflowCard';`,
+		`import { surfaceWorkflow } from '${importPrefix}/lib/workflow';`,
+		'',
+		`export default function ${componentNameFromRoute(page.route, blueprint.surfaceId)}() {`,
+		'\treturn (',
+		'\t\t<main className="surface-shell">',
+		'\t\t\t<SurfaceNav />',
+		'\t\t\t<section className="surface-hero">',
+		`\t\t\t\t<p className="eyebrow">${escapeHtml(blueprint.surfaceName)} workflow</p>`,
+		`\t\t\t\t<h1>${escapeHtml(page.headline)}</h1>`,
+		`\t\t\t\t<p>${escapeHtml(page.summary)}</p>`,
+		'\t\t\t</section>',
+		'\t\t\t<div className="surface-grid">',
+		'\t\t\t\t<WorkflowCard title="Workflow steps">',
+		'\t\t\t\t\t<ol>',
+		stepItems,
+		'\t\t\t\t\t</ol>',
+		'\t\t\t\t</WorkflowCard>',
+		'\t\t\t\t<WorkflowCard title="Business context">',
+		'\t\t\t\t\t<ul>',
+		signalItems,
+		'\t\t\t\t\t</ul>',
+		'\t\t\t\t\t<p>{surfaceWorkflow.workflows.join(", ")}</p>',
+		'\t\t\t\t</WorkflowCard>',
+		'\t\t\t\t<WorkflowCard title="Actions">',
+		'\t\t\t\t\t<div className="control-grid">',
+		controlNodes,
+		'\t\t\t\t\t</div>',
+		'\t\t\t\t</WorkflowCard>',
+		'\t\t\t</div>',
+		'\t\t</main>',
+		'\t);',
+		'}',
+		'',
+	].join('\n');
+}
+
+function workflowSupportComponentFile(label: string, surfaceName: string): string {
+	return [
+		`export function ${componentNameFromPath(label)}Checklist() {`,
+		'\treturn (',
+		'\t\t<aside className="workflow-card">',
+		`\t\t\t<h2>${escapeHtml(label)}</h2>`,
+		`\t\t\t<p>${escapeHtml(surfaceName)} support component for product-specific workflow verification.</p>`,
+		'\t\t\t<label>Owner<input aria-label="Owner" placeholder="Owner" /></label>',
+		'\t\t\t<button type="button">Save checklist</button>',
+		'\t\t</aside>',
+		'\t);',
+		'}',
+		'',
+	].join('\n');
+}
+
+function workflowCssFile(): string {
+	return [
+		':root {',
+		'\tcolor-scheme: dark;',
+		'\tfont-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;',
+		'}',
+		'body { margin: 0; background: #0f172a; color: #e5e7eb; }',
+		'a { color: #93c5fd; text-decoration: none; }',
+		'button, input { border: 1px solid #475569; border-radius: 6px; padding: 10px 12px; background: #111827; color: #f8fafc; }',
+		'button { cursor: pointer; background: #2563eb; border-color: #3b82f6; }',
+		'label { display: grid; gap: 6px; color: #cbd5e1; }',
+		'.surface-shell { min-height: 100vh; padding: 32px; display: grid; gap: 24px; }',
+		'.surface-nav { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 16px; }',
+		'.surface-hero { max-width: 920px; border: 1px solid #334155; border-radius: 8px; padding: 28px; background: #111827; }',
+		'.surface-hero h1 { margin: 0 0 12px; font-size: 36px; }',
+		'.eyebrow { color: #38bdf8; text-transform: uppercase; font-size: 12px; letter-spacing: 0; }',
+		'.surface-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }',
+		'.workflow-card { border: 1px solid #334155; border-radius: 8px; padding: 20px; background: #0b1220; }',
+		'.workflow-card h2 { margin-top: 0; font-size: 18px; }',
+		'.control-grid { display: grid; gap: 12px; }',
+		'',
+	].join('\n');
 }
 
 function scaffoldFileForPath(path: string, label: string, surfaceName: string): string {
@@ -346,6 +769,17 @@ function componentNameFromPath(path: string): string {
 	const base = leaf === 'page' || leaf === 'layout' ? path.split('/').filter(Boolean).slice(-2, -1)[0] ?? leaf : leaf;
 	const name = base.replace(/[^a-z0-9]+/gi, ' ').trim().split(/\s+/).map(part => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`).join('');
 	return `${name || 'Surface'}Subsystem`;
+}
+
+function componentNameFromRoute(route: string, surfaceId: string): string {
+	const base = route === '/' ? surfaceId : route.replace(/^\//, '');
+	const name = base.replace(/[^a-z0-9]+/gi, ' ').trim().split(/\s+/).map(part => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`).join('');
+	return `${name || 'Surface'}Page`;
+}
+
+function identifierFor(value: string): string {
+	const identifier = value.replace(/[^a-zA-Z0-9_$]+(.)?/g, (_, next: string | undefined) => next ? next.toUpperCase() : '');
+	return /^[a-zA-Z_$]/.test(identifier) ? identifier : `surface${identifier}`;
 }
 
 function dedupeFiles(files: readonly [string, string][]): readonly [string, string][] {

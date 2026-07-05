@@ -10,7 +10,7 @@ import { WORKSPACE_MANIFEST } from './ConsoleService.js';
 import type { WorkspaceSurface } from './ConsoleService.js';
 import { applyBlueprintVerificationStatus, blueprintResource, readBlueprint } from './surfaceBlueprintService.js';
 import { blueprintSubsystemMatchesIx, type IxSubsystemRegion } from './surfaceIxMatch.js';
-import type { SurfaceBlueprintGap, SurfaceBlueprintVerificationResult } from './surfaceBlueprintTypes.js';
+import type { SurfaceBlueprint, SurfaceBlueprintGap, SurfaceBlueprintVerificationResult } from './surfaceBlueprintTypes.js';
 
 export interface VerifySurfaceBlueprintOptions {
 	readonly fileService: IFileService;
@@ -74,6 +74,7 @@ export async function verifySurfaceBlueprint(options: VerifySurfaceBlueprintOpti
 	}
 
 	gaps.push(...await verifyScaffoldBaseline(fileService, workspaceFolder, surfaceId, manifestSurface));
+	gaps.push(...await verifyAcceptance(fileService, workspaceFolder, blueprint, manifestSurface));
 
 	let ixChecked = false;
 	if (ixSubsystems && ixSubsystems.length > 0) {
@@ -107,6 +108,142 @@ export async function verifySurfaceBlueprint(options: VerifySurfaceBlueprintOpti
 		gaps,
 		ixChecked,
 	};
+}
+
+async function verifyAcceptance(
+	fileService: IFileService,
+	workspaceFolder: URI,
+	blueprint: SurfaceBlueprint,
+	manifestSurface: WorkspaceSurface | undefined,
+): Promise<SurfaceBlueprintGap[]> {
+	const gaps: SurfaceBlueprintGap[] = [];
+	const surfacePath = manifestSurface?.path ?? `apps/${blueprint.surfaceId}`;
+	const acceptance = blueprint.acceptance;
+
+	for (const route of acceptance.requiredRoutes) {
+		const routeFile = joinPath(workspaceFolder, ...routeToPagePath(surfacePath, route).split('/'));
+		if (!(await fileService.exists(routeFile))) {
+			gaps.push({
+				subsystemId: '*',
+				kind: 'missing_required_route',
+				message: `Missing required route ${route} at ${routeToPagePath(surfacePath, route)}`,
+			});
+		}
+	}
+
+	const metrics = await collectSurfaceMetrics(fileService, workspaceFolder, surfacePath);
+	if (metrics.fileCount < acceptance.minimumFiles) {
+		gaps.push({
+			subsystemId: '*',
+			kind: 'thin_implementation',
+			message: `Surface has ${metrics.fileCount} files; expected at least ${acceptance.minimumFiles}`,
+		});
+	}
+	if (metrics.totalLines < acceptance.minimumTotalLines) {
+		gaps.push({
+			subsystemId: '*',
+			kind: 'thin_implementation',
+			message: `Surface has ${metrics.totalLines} lines; expected at least ${acceptance.minimumTotalLines}`,
+		});
+	}
+	if (metrics.interactiveControls < acceptance.minimumInteractiveControls) {
+		gaps.push({
+			subsystemId: '*',
+			kind: 'thin_implementation',
+			message: `Surface has ${metrics.interactiveControls} interactive controls; expected at least ${acceptance.minimumInteractiveControls}`,
+		});
+	}
+
+	for (const signal of acceptance.requiredWorkflows) {
+		if (!includesTerm(metrics.combinedText, signal)) {
+			gaps.push({
+				subsystemId: '*',
+				kind: 'missing_workflow_signal',
+				message: `Surface content missing workflow signal: ${signal}`,
+			});
+		}
+	}
+	for (const signal of acceptance.requiredUiSignals) {
+		if (!includesTerm(metrics.combinedText, signal)) {
+			gaps.push({
+				subsystemId: '*',
+				kind: 'missing_workflow_signal',
+				message: `Surface content missing UI signal: ${signal}`,
+			});
+		}
+	}
+	for (const term of acceptance.requiredBusinessTerms) {
+		if (!includesTerm(metrics.combinedText, term)) {
+			gaps.push({
+				subsystemId: '*',
+				kind: 'missing_business_terms',
+				message: `Surface content missing business term: ${term}`,
+			});
+		}
+	}
+
+	return gaps;
+}
+
+function routeToPagePath(surfacePath: string, route: string): string {
+	const normalizedRoute = route.replace(/^\/+/, '').replace(/\/+$/, '');
+	return normalizedRoute ? `${surfacePath}/app/${normalizedRoute}/page.tsx` : `${surfacePath}/app/page.tsx`;
+}
+
+interface SurfaceMetrics {
+	readonly fileCount: number;
+	readonly totalLines: number;
+	readonly interactiveControls: number;
+	readonly combinedText: string;
+}
+
+async function collectSurfaceMetrics(fileService: IFileService, workspaceFolder: URI, surfacePath: string): Promise<SurfaceMetrics> {
+	const root = joinPath(workspaceFolder, ...surfacePath.split('/'));
+	const files = await collectFiles(fileService, root);
+	let totalLines = 0;
+	let interactiveControls = 0;
+	const text: string[] = [];
+	for (const file of files) {
+		try {
+			const content = (await fileService.readFile(file)).value.toString();
+			totalLines += content.split(/\r?\n/).length;
+			interactiveControls += countInteractiveControls(content);
+			text.push(content);
+		} catch {
+			// Ignore unreadable files; missing content will lower metrics.
+		}
+	}
+	return {
+		fileCount: files.length,
+		totalLines,
+		interactiveControls,
+		combinedText: text.join('\n'),
+	};
+}
+
+async function collectFiles(fileService: IFileService, resource: URI): Promise<URI[]> {
+	if (!(await fileService.exists(resource))) {
+		return [];
+	}
+	const stat = await fileService.resolve(resource);
+	if (!stat.isDirectory) {
+		return [resource];
+	}
+	const children = stat.children ?? [];
+	const result: URI[] = [];
+	for (const child of children) {
+		result.push(...await collectFiles(fileService, child.resource));
+	}
+	return result;
+}
+
+function countInteractiveControls(content: string): number {
+	const matches = content.match(/<(button|input|select|textarea)\b|<a\s+href=/gi);
+	return matches?.length ?? 0;
+}
+
+function includesTerm(content: string, term: string): boolean {
+	return content.toLowerCase().includes(term.toLowerCase());
 }
 
 export function formatSurfaceBlueprintGapReport(result: SurfaceBlueprintVerificationResult): string {

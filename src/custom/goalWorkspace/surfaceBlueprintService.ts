@@ -40,6 +40,15 @@ export function instantiateBlueprintFromTemplate(
 			entities: [...template.manifest.entities],
 			ixSubsystems: [...template.manifest.ixSubsystems],
 		},
+		acceptance: {
+			requiredRoutes: template.acceptance.requiredRoutes.map(route => route.replace(`apps/${template.templateId}`, surfaceAppPrefix)),
+			requiredWorkflows: [...template.acceptance.requiredWorkflows],
+			requiredUiSignals: [...template.acceptance.requiredUiSignals],
+			requiredBusinessTerms: [...template.acceptance.requiredBusinessTerms],
+			minimumFiles: template.acceptance.minimumFiles,
+			minimumTotalLines: template.acceptance.minimumTotalLines,
+			minimumInteractiveControls: template.acceptance.minimumInteractiveControls,
+		},
 		createdAt: now,
 	};
 }
@@ -113,6 +122,7 @@ function parseBlueprint(raw: unknown): SurfaceBlueprint | undefined {
 	}
 	const subsystems = parseSubsystems(raw.subsystems);
 	const manifest = parseManifest(raw.manifest);
+	const acceptance = parseAcceptance(raw.acceptance);
 	if (!subsystems.length || !manifest) {
 		return undefined;
 	}
@@ -124,6 +134,7 @@ function parseBlueprint(raw: unknown): SurfaceBlueprint | undefined {
 		status,
 		subsystems,
 		manifest,
+		acceptance: acceptance ?? defaultAcceptance(surfaceId),
 		createdAt,
 		verifiedAt: optionalString(raw.verifiedAt),
 	};
@@ -165,6 +176,43 @@ function parseManifest(raw: unknown): SurfaceBlueprint['manifest'] | undefined {
 	return { capabilities, events, entities, ixSubsystems };
 }
 
+function parseAcceptance(raw: unknown): SurfaceBlueprint['acceptance'] | undefined {
+	if (!isRecord(raw)) {
+		return undefined;
+	}
+	const requiredRoutes = stringArray(raw.requiredRoutes);
+	const requiredWorkflows = stringArray(raw.requiredWorkflows);
+	const requiredUiSignals = stringArray(raw.requiredUiSignals);
+	const requiredBusinessTerms = stringArray(raw.requiredBusinessTerms);
+	const minimumFiles = numberOr(raw.minimumFiles, 0);
+	const minimumTotalLines = numberOr(raw.minimumTotalLines, 0);
+	const minimumInteractiveControls = numberOr(raw.minimumInteractiveControls, 0);
+	if (!requiredRoutes.length && !requiredWorkflows.length && !requiredUiSignals.length && !requiredBusinessTerms.length) {
+		return undefined;
+	}
+	return {
+		requiredRoutes,
+		requiredWorkflows,
+		requiredUiSignals,
+		requiredBusinessTerms,
+		minimumFiles,
+		minimumTotalLines,
+		minimumInteractiveControls,
+	};
+}
+
+function defaultAcceptance(surfaceId: string): SurfaceBlueprint['acceptance'] {
+	return {
+		requiredRoutes: ['/'],
+		requiredWorkflows: [surfaceId],
+		requiredUiSignals: [surfaceId],
+		requiredBusinessTerms: [surfaceId],
+		minimumFiles: 3,
+		minimumTotalLines: 40,
+		minimumInteractiveControls: 0,
+	};
+}
+
 function isBlueprintStatus(value: unknown): value is SurfaceBlueprint['status'] {
 	return value === 'draft' || value === 'scaffolded' || value === 'verified' || value === 'failed';
 }
@@ -186,4 +234,8 @@ function stringArray(value: unknown): string[] {
 		return [];
 	}
 	return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map(item => item.trim());
+}
+
+function numberOr(value: unknown, fallback: number): number {
+	return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
 }

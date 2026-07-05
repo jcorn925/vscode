@@ -58,11 +58,10 @@ function code() {
 		DISABLE_GIT_EXTENSIONS=""
 	fi
 
-	# Open the repo root by default, but not when the caller passes folder/file paths.
-	OPEN_ARGS=()
-	if [[ $# -eq 0 ]]; then
-		OPEN_ARGS+=(.)
-	else
+	# The unpacked dev Electron shell has no packaged Resources/app. Always pass
+	# the repo root as Electron's app root before any folder/file targets.
+	OPEN_ARGS=(.)
+	if [[ $# -ne 0 ]]; then
 		has_open_target=false
 		for arg in "$@"; do
 			case "$arg" in
@@ -70,9 +69,6 @@ function code() {
 				*) has_open_target=true; break ;;
 			esac
 		done
-		if [[ "$has_open_target" == false ]]; then
-			OPEN_ARGS+=(.)
-		fi
 	fi
 
 	# Launch Code

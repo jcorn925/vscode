@@ -4620,7 +4620,7 @@ class ModeShellContribution extends Disposable {
 			if (verification.passed) {
 				this.notificationService.info(localize('customMode.surfaceScaffoldVerified', 'Scaffolded and verified {0}.', surfaceName));
 			} else {
-				this.notificationService.warn(localize('customMode.surfaceScaffoldNeedsRepair', 'Scaffolded {0}, but blueprint verification found {1} gaps.', surfaceName, verification.gaps.length));
+				this.notificationService.warn(localize('customMode.surfaceScaffoldNeedsRepair', 'Scaffolded {0}, but product verification found {1} gaps.', surfaceName, verification.gaps.length));
 			}
 			this.showSurfaceScaffoldView(surfaceName, inputText);
 			this.ensureWorkspaceView();

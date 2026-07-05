@@ -48,6 +48,10 @@ export const CustomAiEditFileToolData: IToolData = {
 		'  explanation (string, optional) One-sentence rationale shown to the human reviewer.',
 		'',
 		'If the file does not exist it will be created (including any missing parent directories).',
+		'When editing workspace.goal.json, write this schema exactly:',
+		'  { "goal": { "id": "...", "name": "...", "description": "...", "northStarMetric": "..." }, "surfaces": [{ "id": "...", "name": "...", "type": "web-app", "path": "apps/<surface>", "description": "...", "devCommand": "npm --prefix apps/<surface> run dev", "localUrl": "http://localhost:<port>", "capabilities": [], "events": [], "entities": [], "ixSubsystems": [] }], "shared": { "domain": "packages/domain", "events": "packages/events", "workflows": "workflows" } }',
+		'Never put surfaces inside goal, never encode surfaces as an object map, and never replace arrays like capabilities/events/entities with objects.',
+		'Invalid workspace.goal.json writes are rejected before they reach disk.',
 		'By default, edits are written directly so goal-workspace scaffolding creates usable files; configure review mode when human accept/reject is required.',
 	].join('\n'),
 	source: ToolDataSource.Internal,
@@ -114,6 +118,16 @@ export class CustomAiEditFileTool implements IToolImpl {
 		if (!uri) {
 			this._traceService.traceEditEvent('edit_file.failed', { reason: 'unresolvedUri', uri: rawUri });
 			return errorResult(`Could not resolve "${rawUri}" to a workspace file. Pass an absolute path or workspace-relative path.`);
+		}
+
+		const manifestValidationError = validateCustomAiWorkspaceGoalEdit(uri, code);
+		if (manifestValidationError) {
+			this._traceService.traceEditEvent('edit_file.failed', {
+				reason: 'invalidWorkspaceGoalManifest',
+				uri: uri.toString(),
+				error: manifestValidationError,
+			});
+			return errorResult(`Refusing to write invalid workspace.goal.json: ${manifestValidationError}`);
 		}
 
 		const mode = this._resolveMode();
@@ -274,4 +288,65 @@ function errorResult(message: string): IToolResult {
 
 function successResult(message: string): IToolResult {
 	return { content: [{ kind: 'text', value: message }] };
+}
+
+export function validateCustomAiWorkspaceGoalEdit(uri: URI, code: string): string | undefined {
+	if (!uri.path.endsWith('/workspace.goal.json')) {
+		return undefined;
+	}
+
+	let raw: unknown;
+	try {
+		raw = JSON.parse(code);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return `manifest must be valid JSON (${message})`;
+	}
+
+	if (!isRecord(raw)) {
+		return 'manifest root must be an object with top-level goal and surfaces fields';
+	}
+	if (!isRecord(raw.goal)) {
+		return 'top-level "goal" must be an object, not a string or array';
+	}
+	if (!isNonEmptyString(raw.goal.id)) {
+		return 'goal.id must be a non-empty string';
+	}
+	if (!isNonEmptyString(raw.goal.name)) {
+		return 'goal.name must be a non-empty string';
+	}
+	if (!Array.isArray(raw.surfaces)) {
+		return 'top-level "surfaces" must be an array; do not nest surfaces under goal or encode them as an object';
+	}
+
+	for (let i = 0; i < raw.surfaces.length; i++) {
+		const surface = raw.surfaces[i];
+		if (!isRecord(surface)) {
+			return `surfaces[${i}] must be an object`;
+		}
+		for (const field of ['id', 'name', 'type', 'path'] as const) {
+			if (!isNonEmptyString(surface[field])) {
+				return `surfaces[${i}].${field} must be a non-empty string`;
+			}
+		}
+		for (const field of ['capabilities', 'events', 'entities'] as const) {
+			if (surface[field] !== undefined && !Array.isArray(surface[field])) {
+				return `surfaces[${i}].${field} must be an array when present`;
+			}
+		}
+		const ixValue = surface.ixSubsystems ?? surface.ix;
+		if (ixValue !== undefined && !Array.isArray(ixValue) && !isRecord(ixValue)) {
+			return `surfaces[${i}].ixSubsystems or ix must be an array or object when present`;
+		}
+	}
+
+	return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+	return typeof value === 'string' && value.trim().length > 0;
 }

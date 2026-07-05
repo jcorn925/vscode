@@ -20,6 +20,16 @@ export interface SurfaceBlueprintManifestSpec {
 	readonly ixSubsystems: readonly string[];
 }
 
+export interface SurfaceBlueprintAcceptanceSpec {
+	readonly requiredRoutes: readonly string[];
+	readonly requiredWorkflows: readonly string[];
+	readonly requiredUiSignals: readonly string[];
+	readonly requiredBusinessTerms: readonly string[];
+	readonly minimumFiles: number;
+	readonly minimumTotalLines: number;
+	readonly minimumInteractiveControls: number;
+}
+
 export type SurfaceBlueprintStatus = 'draft' | 'scaffolded' | 'verified' | 'failed';
 
 export interface SurfaceBlueprint {
@@ -30,6 +40,7 @@ export interface SurfaceBlueprint {
 	status: SurfaceBlueprintStatus;
 	readonly subsystems: readonly SurfaceSubsystemSpec[];
 	readonly manifest: SurfaceBlueprintManifestSpec;
+	readonly acceptance: SurfaceBlueprintAcceptanceSpec;
 	readonly createdAt: string;
 	verifiedAt?: string;
 }
@@ -40,6 +51,7 @@ export interface SurfaceBlueprintTemplate {
 	readonly summary: string;
 	readonly requiredSubsystems: readonly SurfaceSubsystemSpec[];
 	readonly manifest: SurfaceBlueprintManifestSpec;
+	readonly acceptance: SurfaceBlueprintAcceptanceSpec;
 }
 
 export type SurfaceBlueprintGapKind =
@@ -49,6 +61,10 @@ export type SurfaceBlueprintGapKind =
 	| 'missing_manifest_field'
 	| 'missing_path'
 	| 'missing_scaffold_file'
+	| 'missing_required_route'
+	| 'thin_implementation'
+	| 'missing_workflow_signal'
+	| 'missing_business_terms'
 	| 'ix_unavailable'
 	| 'ix_no_match';
 
