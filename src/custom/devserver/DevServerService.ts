@@ -13,6 +13,7 @@ import { InstantiationType, registerSingleton } from '../../vs/platform/instanti
 import { IFileService } from '../../vs/platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../vs/platform/workspace/common/workspace.js';
 import { ITerminalInstance, ITerminalService } from '../../vs/workbench/contrib/terminal/browser/terminal.js';
+import { killProcessListeningOnPort, parsePortFromLocalUrl } from './surfaceDevPortUtils.js';
 
 export type DevServerPackageManager = 'npm' | 'yarn' | 'pnpm';
 
@@ -235,6 +236,8 @@ export class DevServerService extends Disposable implements IDevServerService {
 		// real width.
 		await this.waitForReasonableTerminalWidth(instance);
 
+		await this.freePortBeforeStart(inferredUrl);
+
 		// Inject the start command exactly once for this session.
 		instance.sendText(fullCommand, true);
 
@@ -275,6 +278,7 @@ export class DevServerService extends Disposable implements IDevServerService {
 		this.lastError = undefined;
 		this.setPhase(commandToRun !== explicitCommand ? 'installing' : 'starting');
 		await this.waitForReasonableTerminalWidth(instance);
+		await this.freePortBeforeStart(preferredUrl, alignedCommand);
 		instance.sendText(commandToRun, true);
 
 		this.started = true;
@@ -479,12 +483,29 @@ export class DevServerService extends Disposable implements IDevServerService {
 	}
 
 	private tryParsePortFromUrl(url: string): number | undefined {
-		const match = /:(\d{2,5})(?:\/|$)/.exec(url);
-		if (!match) {
+		return parsePortFromLocalUrl(url);
+	}
+
+	private parsePortFromCommand(command: string): number | undefined {
+		const portFlag = /\b--port(?:=|\s+)(\d{2,5})\b/i.exec(command) ?? /\s-p\s+(\d{2,5})\b/i.exec(command);
+		if (!portFlag) {
 			return undefined;
 		}
-		const port = Number(match[1]);
+		const port = Number(portFlag[1]);
 		return Number.isFinite(port) ? port : undefined;
+	}
+
+	private async freePortBeforeStart(preferredUrl: string | undefined, command?: string): Promise<void> {
+		const ports = new Set<number>();
+		const urlPort = this.tryParsePortFromUrl(preferredUrl ?? '');
+		if (urlPort) {
+			ports.add(urlPort);
+		}
+		const commandPort = command ? this.parsePortFromCommand(command) : undefined;
+		if (commandPort) {
+			ports.add(commandPort);
+		}
+		await Promise.all([...ports].map(port => killProcessListeningOnPort(port)));
 	}
 
 	private getDevServerTerminalTitle(folder: URI, label?: string): string {

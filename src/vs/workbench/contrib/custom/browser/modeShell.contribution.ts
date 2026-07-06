@@ -23,6 +23,7 @@ import { IContextKeyService, type IScopedContextKeyService } from '../../../../p
 import { IInstantiationService, type ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
 import { DevServerState, DevServerSuggestedCommands, IDevServerService } from '../../../../../custom/devserver/DevServerService.js';
+import { collectUniqueSurfacePorts, freeSurfacePorts, killProcessListeningOnPort, parsePortFromLocalUrl } from '../../../../../custom/devserver/surfaceDevPortUtils.js';
 import { IDefaultProjectService } from '../../../../../custom/devserver/DefaultProjectService.js';
 import { IModeService, Mode } from '../../../../../custom/mode/ModeService.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
@@ -330,6 +331,7 @@ class ModeShellContribution extends Disposable {
 	private lastSurfaceRoutingLogKey: string | undefined;
 	private lastUiStartHints: DevServerSuggestedCommands | undefined;
 	private autoStartAppAttempted = false;
+	private surfacePortsFreedAtStartup = false;
 	private startAllSurfacesInProgress = false;
 	private readonly startedSurfaceServers = new Set<string>();
 	private readonly startingSurfaceServers = new Set<string>();
@@ -3799,7 +3801,10 @@ class ModeShellContribution extends Disposable {
 		this.updateMode(this.modeService.getMode());
 		this.syncContextGatheringUi();
 		this._register(this.modeService.onDidChange(mode => this.updateMode(mode)));
-		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.updateProjectState()));
+		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => {
+			this.surfacePortsFreedAtStartup = false;
+			this.updateProjectState();
+		}));
 		this._register(this.consoleService.onDidChangeWorkspace(() => {
 			this.syncGoalSurfaceSwitcher();
 			void this.refreshSurfaceSetupDashboard();
@@ -5425,8 +5430,44 @@ class ModeShellContribution extends Disposable {
 
 		this.renderGoalSurfaceButtons(surfaces);
 		this.routeSelectedSurfacePreview();
+		void this.freeWorkspaceSurfacePortsAtStartup(surfaces);
 		this.refreshStartCommandHints();
 		this.refreshUiChatTabsAndSession();
+	}
+
+	private async freeWorkspaceSurfacePortsAtStartup(surfaces: readonly WorkspaceSurface[]): Promise<void> {
+		if (this.surfacePortsFreedAtStartup) {
+			return;
+		}
+		this.surfacePortsFreedAtStartup = true;
+		const ports = collectUniqueSurfacePorts(surfaces);
+		if (!ports.length) {
+			return;
+		}
+		await freeSurfacePorts(ports);
+		this.pushUiRuntimeLog(`[surface-ports] freed ports before startup: ${ports.join(', ')}`);
+	}
+
+	private async freeSurfacePortForLaunch(preferredUrl: string | undefined, command: string): Promise<void> {
+		const ports = new Set<number>();
+		const urlPort = parsePortFromLocalUrl(preferredUrl);
+		if (urlPort) {
+			ports.add(urlPort);
+		}
+		const commandPort = this.parsePortFromCommand(command);
+		if (commandPort) {
+			ports.add(commandPort);
+		}
+		await Promise.all([...ports].map(port => killProcessListeningOnPort(port)));
+	}
+
+	private parsePortFromCommand(command: string): number | undefined {
+		const portFlag = /\b--port(?:=|\s+)(\d{2,5})\b/i.exec(command) ?? /\s-p\s+(\d{2,5})\b/i.exec(command);
+		if (!portFlag) {
+			return undefined;
+		}
+		const port = Number(portFlag[1]);
+		return Number.isFinite(port) ? port : undefined;
 	}
 
 	private resolveSelectedSurface(surfaces: readonly WorkspaceSurface[], storedSurfaceId: string | undefined): WorkspaceSurface | undefined {
@@ -6243,6 +6284,7 @@ class ModeShellContribution extends Disposable {
 
 		this.startAllSurfacesInProgress = true;
 		this.updateStartAppControl();
+		await freeSurfacePorts(collectUniqueSurfacePorts(surfaces));
 		const pending = [...surfaces];
 		const started: string[] = [];
 		const failed: string[] = [];
@@ -6318,6 +6360,7 @@ class ModeShellContribution extends Disposable {
 		const existing = this.terminalService.instances.find(instance => instance.title === title);
 		try {
 			const alignedCommand = this.alignSurfaceCommandToPreferredPort(command, preferredUrl);
+			await this.freeSurfacePortForLaunch(preferredUrl, alignedCommand);
 			const terminal = existing ?? await this.terminalService.createTerminal({
 				cwd: workspaceFolder,
 				config: isWindows ? undefined : { executable: '/bin/bash' }

@@ -120,6 +120,10 @@ suite('surfaceBlueprintVerify', () => {
 		['booking', 'Booking'],
 		['client-portal', 'Client Portal'],
 		['trainer-admin', 'Trainer Admin'],
+		['analytics', 'Analytics'],
+		['content-scheduler', 'Content Scheduler'],
+		['ads-manager', 'Ads Manager'],
+		['subscriptions', 'Subscriptions'],
 	] as const) {
 		test(`scaffolds product-useful ${surfaceName}`, async () => {
 			const fileService = new TestBlueprintFileService();

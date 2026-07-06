@@ -606,6 +606,193 @@ function buildCoreSurfaceFiles(blueprint: SurfaceBlueprint, appPath: string, loc
 					controls: ['Assign follow-up', 'Set due date', 'Mark done'],
 				},
 			], ['Coach', 'Client', 'Session', 'followup.created', 'session.scheduled']);
+		case 'analytics':
+			return buildWorkflowSurfaceFiles(blueprint, appPath, localUrl, [
+				{
+					route: '/',
+					headline: 'Analytics home',
+					summary: 'Monitor conversion, retention, revenue, and north-star KPIs across the training business.',
+					steps: ['Funnel conversion', 'Revenue trend', 'Retention cohorts', 'North star KPI'],
+					controls: ['Filter date range', 'Export report', 'Open funnel'],
+				},
+				{
+					route: '/funnel',
+					headline: 'Funnel dashboard',
+					summary: 'Track lead-to-booking conversion across marketing, booking, and client activation stages.',
+					steps: ['Landing visits', 'Lead capture', 'Booking started', 'Booking completed'],
+					controls: ['View funnel', 'Compare periods', 'Drill into stage'],
+				},
+				{
+					route: '/dashboard',
+					headline: 'Funnel dashboard',
+					summary: 'Executive view of funnel health, campaign attribution, and conversion drop-offs.',
+					steps: ['Top of funnel', 'Qualified leads', 'Booked sessions', 'Activated clients'],
+					controls: ['Filter campaign', 'Segment audience', 'Share dashboard'],
+				},
+				{
+					route: '/revenue',
+					headline: 'Revenue reporting',
+					summary: 'Report package revenue, recurring subscriptions, and coach utilization impact.',
+					steps: ['Monthly recurring revenue', 'Package revenue', 'Refund rate', 'Average order value'],
+					controls: ['Download CSV', 'Filter package', 'Compare month'],
+				},
+				{
+					route: '/kpi',
+					headline: 'North star KPI',
+					summary: 'Track the primary growth metric and supporting indicators for the training business.',
+					steps: ['Active paid clients', 'Retention rate', 'Session completion', 'Coach capacity'],
+					controls: ['Set KPI target', 'Add annotation', 'View trend'],
+				},
+				{
+					route: '/metrics',
+					headline: 'North star KPI',
+					summary: 'Drill into metric definitions, benchmarks, and weekly movement for leadership reviews.',
+					steps: ['Metric definition', 'Current value', 'Weekly delta', 'Owner'],
+					controls: ['Edit metric', 'Pin to dashboard', 'Alert threshold'],
+				},
+				{
+					route: '/reports',
+					headline: 'Analytics reports',
+					summary: 'Export scheduled reports for funnel, revenue, retention, and campaign performance.',
+					steps: ['Weekly funnel report', 'Monthly revenue report', 'Retention cohort export'],
+					controls: ['Schedule report', 'Email report', 'Export PDF'],
+				},
+			], ['Metric', 'Campaign', 'Subscription', 'analytics.report.viewed', 'conversion', 'retention']);
+		case 'content-scheduler':
+			return buildWorkflowSurfaceFiles(blueprint, appPath, localUrl, [
+				{
+					route: '/',
+					headline: 'Content scheduler home',
+					summary: 'Plan campaigns, schedule posts, and review channel performance from one editorial workspace.',
+					steps: ['Editorial calendar', 'Campaign drafts', 'Scheduled posts', 'Performance review'],
+					controls: ['Create campaign', 'Schedule post', 'Open calendar'],
+				},
+				{
+					route: '/calendar',
+					headline: 'Editorial calendar',
+					summary: 'See upcoming posts, campaign launches, and channel cadence across the month.',
+					steps: ['Monday post', 'Wednesday reel', 'Friday newsletter'],
+					controls: ['Add post', 'Move slot', 'Filter channel'],
+				},
+				{
+					route: '/campaigns',
+					headline: 'Campaign planning',
+					summary: 'Define campaign goals, audiences, creative themes, and publishing windows.',
+					steps: ['Spring challenge', 'Referral push', 'New package launch'],
+					controls: ['New campaign', 'Assign owner', 'Set launch date'],
+				},
+				{
+					route: '/compose',
+					headline: 'Post composer',
+					summary: 'Draft post copy, attach media, choose channels, and queue publish times.',
+					steps: ['Hook', 'Body copy', 'Call to action', 'Channel selection'],
+					controls: ['Post title', 'Post body', 'Schedule publish'],
+				},
+				{
+					route: '/posts',
+					headline: 'Post composer',
+					summary: 'Manage draft, scheduled, and published posts with channel-specific previews.',
+					steps: ['Draft queue', 'Scheduled queue', 'Published archive'],
+					controls: ['Edit draft', 'Duplicate post', 'Preview channel'],
+				},
+				{
+					route: '/performance',
+					headline: 'Post performance',
+					summary: 'Review engagement, clicks, leads, and campaign attribution by channel.',
+					steps: ['Impressions', 'Engagement rate', 'Lead clicks', 'Top post'],
+					controls: ['Filter channel', 'Compare campaign', 'Export metrics'],
+				},
+			], ['Post', 'Campaign', 'Channel', 'content.scheduled', 'campaign.created']);
+		case 'ads-manager':
+			return buildWorkflowSurfaceFiles(blueprint, appPath, localUrl, [
+				{
+					route: '/',
+					headline: 'Ads manager home',
+					summary: 'Launch campaigns, test creatives, and monitor spend against booked consult conversions.',
+					steps: ['Active campaigns', 'Audience tests', 'Creative experiments', 'Spend pacing'],
+					controls: ['Create campaign', 'Review spend', 'Open creatives'],
+				},
+				{
+					route: '/campaigns',
+					headline: 'Campaign setup',
+					summary: 'Configure campaign objective, budget, schedule, and conversion destination.',
+					steps: ['Lead generation', 'Booking conversion', 'Retargeting'],
+					controls: ['Campaign name', 'Daily budget', 'Launch campaign'],
+				},
+				{
+					route: '/audience',
+					headline: 'Audience targeting',
+					summary: 'Define lookalike, interest, and retargeting audiences for training offers.',
+					steps: ['Local prospects', 'Website visitors', 'Past leads'],
+					controls: ['Add audience', 'Exclude list', 'Save segment'],
+				},
+				{
+					route: '/creatives',
+					headline: 'Creative testing',
+					summary: 'Compare headlines, images, and offers to improve cost per booked consult.',
+					steps: ['Variant A', 'Variant B', 'Winner selection'],
+					controls: ['Upload creative', 'Start test', 'Pause variant'],
+				},
+				{
+					route: '/spend',
+					headline: 'Spend analysis',
+					summary: 'Track daily spend, pacing, and cost per lead across active campaigns.',
+					steps: ['Spend today', 'Budget remaining', 'Cost per lead'],
+					controls: ['Adjust budget', 'Filter campaign', 'Export spend'],
+				},
+				{
+					route: '/roas',
+					headline: 'Spend analysis',
+					summary: 'Measure return on ad spend against booked packages and subscription revenue.',
+					steps: ['ROAS by campaign', 'Attributed revenue', 'Payback period'],
+					controls: ['Set ROAS target', 'Compare window', 'Share report'],
+				},
+			], ['AdCampaign', 'Audience', 'Creative', 'ad.campaign.launched', 'ad.spend.updated', 'roas']);
+		case 'subscriptions':
+			return buildWorkflowSurfaceFiles(blueprint, appPath, localUrl, [
+				{
+					route: '/',
+					headline: 'Subscriptions home',
+					summary: 'Manage plans, billing status, renewals, and cancellation workflows in one place.',
+					steps: ['Active plans', 'Billing health', 'Upcoming renewals', 'Cancellation queue'],
+					controls: ['Create plan', 'Review billing', 'Open lifecycle'],
+				},
+				{
+					route: '/plans',
+					headline: 'Plan management',
+					summary: 'Configure package tiers, pricing, billing cadence, and included coaching benefits.',
+					steps: ['Starter plan', 'Growth plan', 'Elite plan'],
+					controls: ['Add plan', 'Edit pricing', 'Archive plan'],
+				},
+				{
+					route: '/billing',
+					headline: 'Billing status',
+					summary: 'Review invoices, failed payments, dunning state, and account balances.',
+					steps: ['Paid accounts', 'Past due', 'Failed payment retries'],
+					controls: ['Filter status', 'Retry payment', 'Send invoice'],
+				},
+				{
+					route: '/lifecycle',
+					headline: 'Lifecycle events',
+					summary: 'Track subscription created, upgraded, renewed, paused, and cancelled events.',
+					steps: ['Trial started', 'Upgrade event', 'Renewal event'],
+					controls: ['View timeline', 'Filter event', 'Export events'],
+				},
+				{
+					route: '/events',
+					headline: 'Lifecycle events',
+					summary: 'Operational event feed for billing, renewal, and retention automations.',
+					steps: ['subscription.created', 'subscription.renewed', 'subscription.cancelled'],
+					controls: ['Filter lifecycle', 'Replay event', 'Create webhook'],
+				},
+				{
+					route: '/cancel',
+					headline: 'Cancellation workflow',
+					summary: 'Guide clients through save offers, downgrade options, and exit surveys.',
+					steps: ['Save offer', 'Downgrade option', 'Exit survey'],
+					controls: ['Apply save offer', 'Confirm cancellation', 'Collect reason'],
+				},
+			], ['Subscription', 'Plan', 'BillingAccount', 'subscription.created', 'subscription.cancelled']);
 		default:
 			return [];
 	}
