@@ -1552,7 +1552,7 @@ class ModeShellContribution extends Disposable {
 				background: var(--vscode-toolbar-hoverBackground);
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-starter-card.generated {
+			.monaco-workbench .custom-mode-ui-surface-starter-card.generated:not(.has-preview) {
 				opacity: 0.72;
 			}
 
@@ -1809,29 +1809,62 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card {
-				display: flex;
-				flex-direction: column;
-				align-items: flex-start;
-				gap: 10px;
-				min-height: 168px;
-				padding: 14px 16px;
+				position: relative;
+				display: block;
+				min-height: 200px;
+				padding: 0;
 				border: 1px solid var(--vscode-panel-border);
 				border-radius: 8px;
-				background: var(--vscode-sideBar-background);
+				background: var(--vscode-editor-background);
 				color: inherit;
 				text-align: left;
 				cursor: pointer;
 				font-family: inherit;
+				overflow: hidden;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card:hover {
 				border-color: var(--vscode-focusBorder);
-				background: var(--vscode-list-hoverBackground);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card:focus-visible {
 				outline: 1px solid var(--vscode-focusBorder);
 				outline-offset: 2px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter-card-preview-shell {
+				position: absolute;
+				inset: 0;
+				background: var(--vscode-sideBar-background);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter-card-preview {
+				width: 100%;
+				height: 100%;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter-card-overlay {
+				position: absolute;
+				inset: 0;
+				display: flex;
+				flex-direction: column;
+				justify-content: flex-start;
+				pointer-events: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter-card-overlay-top {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				width: 100%;
+				padding: 10px 12px;
+				background: linear-gradient(
+					180deg,
+					color-mix(in srgb, var(--vscode-editor-background) 94%, transparent) 0%,
+					color-mix(in srgb, var(--vscode-editor-background) 72%, transparent) 55%,
+					transparent 100%
+				);
+				pointer-events: auto;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-header {
@@ -1845,20 +1878,34 @@ class ModeShellContribution extends Disposable {
 				display: flex;
 				align-items: center;
 				justify-content: center;
-				width: 28px;
-				height: 28px;
+				width: 24px;
+				height: 24px;
 				border-radius: 6px;
-				background: var(--vscode-badge-background);
+				background: color-mix(in srgb, var(--vscode-badge-background) 88%, transparent);
 				color: var(--vscode-badge-foreground);
-				font-size: 14px;
+				font-size: 13px;
 				flex: 0 0 auto;
+				box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-title {
+				flex: 1 1 auto;
+				min-width: 0;
 				color: var(--vscode-foreground);
 				font-size: 14px;
 				font-weight: 650;
 				line-height: 1.25;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter-card-summary,
+			.monaco-workbench .custom-mode-ui-surface-starter-card-meta,
+			.monaco-workbench .custom-mode-ui-surface-starter-card-highlights,
+			.monaco-workbench .custom-mode-ui-surface-starter-card-preview-row {
+				display: none;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-summary {
@@ -1877,6 +1924,7 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench .custom-mode-ui-surface-starter-card-status {
 				display: inline-flex;
 				align-items: center;
+				flex: 0 0 auto;
 				padding: 2px 8px;
 				border-radius: 999px;
 				font-size: 11px;
@@ -1884,8 +1932,9 @@ class ModeShellContribution extends Disposable {
 				line-height: 1.4;
 				border: 1px solid var(--vscode-panel-border);
 				color: var(--vscode-descriptionForeground);
-				background: var(--vscode-editorWidget-background);
+				background: color-mix(in srgb, var(--vscode-editorWidget-background) 90%, transparent);
 				max-width: fit-content;
+				backdrop-filter: blur(4px);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-status.created {
@@ -1898,24 +1947,17 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-testing-iconPassed);
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-starter-card-preview {
-				font-size: 11px;
-				line-height: 1.35;
-				display: flex;
-				flex-direction: column;
-				gap: 6px;
-			}
-
 			.monaco-workbench .custom-mode-ui-surface-starter-card-preview a {
 				color: var(--vscode-textLink-foreground);
 				text-decoration: underline;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-preview-frame {
+				display: block;
 				width: 100%;
-				height: 110px;
-				border: 1px solid var(--vscode-panel-border);
-				border-radius: 6px;
+				height: 100%;
+				border: 0;
+				border-radius: 0;
 				background: var(--vscode-editor-background);
 				pointer-events: none;
 			}
@@ -4875,23 +4917,23 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private createStarterSurfaceCard(starter: StarterSurface): HTMLElement {
-		const highlights = $('ul.custom-mode-ui-surface-starter-card-highlights', undefined,
-			...starter.highlights.map(highlight => $('li.custom-mode-ui-surface-starter-card-highlight', undefined, highlight))
-		);
-		const status = $('span.custom-mode-ui-surface-starter-card-status', undefined, localize('customMode.surfaceStarterStatusNotCreated', 'Not created'));
 		const preview = $('div.custom-mode-ui-surface-starter-card-preview');
+		const previewShell = $('div.custom-mode-ui-surface-starter-card-preview-shell', undefined, preview);
+		const status = $('span.custom-mode-ui-surface-starter-card-status', undefined, localize('customMode.surfaceStarterStatusNotCreated', 'Not created'));
+		const overlay = $('div.custom-mode-ui-surface-starter-card-overlay', undefined,
+			$('div.custom-mode-ui-surface-starter-card-overlay-top', undefined,
+				$('div.custom-mode-ui-surface-starter-card-icon.codicon' + ThemeIcon.asCSSSelector(starter.icon)),
+				$('div.custom-mode-ui-surface-starter-card-title', undefined, starter.name),
+				status,
+			),
+		);
 		const card = $('div.custom-mode-ui-surface-starter-card', {
 			role: 'button',
 			tabindex: '0',
 			title: localize('customMode.surfaceStarterTitle', 'Draft a prompt for {0}', starter.name),
 		},
-			$('div.custom-mode-ui-surface-starter-card-header', undefined,
-				$('div.custom-mode-ui-surface-starter-card-icon.codicon' + ThemeIcon.asCSSSelector(starter.icon)),
-				$('div.custom-mode-ui-surface-starter-card-title', undefined, starter.name),
-			),
-			$('div.custom-mode-ui-surface-starter-card-summary', undefined, starter.summary),
-			$('div.custom-mode-ui-surface-starter-card-meta', undefined, status, preview),
-			highlights,
+			previewShell,
+			overlay,
 		);
 		this._register(addDisposableListener(card, 'click', () => void this.beginSurfaceHandoff({
 			templateId: starter.id,
@@ -4943,6 +4985,7 @@ class ModeShellContribution extends Disposable {
 				continue;
 			}
 			target.card.classList.toggle('generated', row.created);
+			target.card.classList.toggle('has-preview', Boolean(row.runningUrl));
 			target.status.classList.remove('created', 'running');
 			if (!row.created) {
 				target.status.textContent = localize('customMode.surfaceStarterStatusNotCreated', 'Not created');
@@ -4953,7 +4996,6 @@ class ModeShellContribution extends Disposable {
 			if (row.runningUrl && row.surface) {
 				target.status.textContent = localize('customMode.surfaceStarterStatusRunning', 'Running');
 				target.status.classList.add('running');
-				const surfaceId = row.surface.id;
 				const previewFrame = isWeb
 					? $('iframe.custom-mode-ui-surface-starter-card-preview-frame', {
 						src: row.runningUrl,
@@ -4968,22 +5010,7 @@ class ModeShellContribution extends Disposable {
 					(previewFrame as HTMLIFrameElement).setAttribute('sandbox', 'allow-scripts allow-forms allow-modals allow-same-origin allow-popups');
 					(previewFrame as HTMLIFrameElement).setAttribute('referrerpolicy', 'no-referrer');
 				}
-				const previewLink = $('a', {
-					href: row.runningUrl,
-					title: localize('customMode.surfaceStarterPreviewTitle', 'Open preview for {0}', row.surface.name),
-				}, row.runningUrl) as HTMLAnchorElement;
-				previewLink.addEventListener('click', event => {
-					event.preventDefault();
-					event.stopPropagation();
-					this.selectGoalSurface(surfaceId);
-				});
-				target.preview.replaceChildren(
-					previewFrame,
-					$('div.custom-mode-ui-surface-starter-card-preview-row', undefined,
-						document.createTextNode(localize('customMode.surfaceStarterPreviewLabel', 'Preview: ')),
-						previewLink,
-					),
-				);
+				target.preview.replaceChildren(previewFrame);
 				continue;
 			}
 
