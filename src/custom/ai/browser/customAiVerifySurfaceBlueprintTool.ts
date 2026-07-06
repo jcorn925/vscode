@@ -94,7 +94,6 @@ export class CustomAiVerifySurfaceBlueprintTool implements IToolImpl {
 			surfaceName,
 			passed: result.passed,
 			gapCount: result.gaps.length,
-			statusPath: result.statusPath?.toString(),
 		});
 
 		return {

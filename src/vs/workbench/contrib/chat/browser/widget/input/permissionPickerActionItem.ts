@@ -28,7 +28,7 @@ import { IOpenerService } from '../../../../../../platform/opener/common/opener.
 import { URI } from '../../../../../../base/common/uri.js';
 import { IStorageService } from '../../../../../../platform/storage/common/storage.js';
 import { maybeConfirmElevatedPermissionLevel } from '../../../common/chatPermissionWarnings.js';
-import { AgentSandboxEnabledSettingValue, AgentSandboxEnabledValue, AgentSandboxSettingId, isAgentSandboxEnabledValue } from '../../../../../../platform/sandbox/common/settings.js';
+import { AgentSandboxEnabledSettingValue, AgentSandboxSettingId, isAgentSandboxEnabledValue } from '../../../../../../platform/sandbox/common/settings.js';
 
 export interface IExtensionPermissionState {
 	/** Stable identifier for the contributing chat session type, used to namespace action ids. */
@@ -186,13 +186,6 @@ export class PermissionPickerActionItem extends ChatInputPickerActionViewItem {
 				}
 				const currentLevel = delegate.currentPermissionLevel.get();
 				const policyRestricted = isAutoApprovePolicyRestricted();
-				const sandboxToggleEnabled = this.isSandboxToggleAvailable();
-				const setSandboxEnabled = async (enableSandbox: boolean) => {
-					const target: AgentSandboxEnabledValue = enableSandbox ? AgentSandboxEnabledValue.On : AgentSandboxEnabledValue.Off;
-					if (this.isSandboxingEnabled() !== enableSandbox) {
-						await configurationService.updateValue(getSandboxEnabledSettingId(), target);
-					}
-				};
 				const levels = delegate.availableLevels ?? DEFAULT_PERMISSION_LEVELS;
 				const actions: IActionWidgetDropdownAction[] = levels.map(level => {
 					const meta = getPermissionLevelMeta(level);
@@ -200,18 +193,6 @@ export class PermissionPickerActionItem extends ChatInputPickerActionViewItem {
 					const hover = disabledByPolicy
 						? localize('permissions.policyDescription', "Disabled by enterprise policy")
 						: delegate.getPermissionLevelHover?.(level, meta) ?? meta.description;
-
-					// The Default level carries an inline toggle that controls whether
-					// terminal commands run inside a sandbox. The toggle is gated behind
-					// an experimental setting.
-					const inlineToggle = sandboxToggleEnabled && level === ChatPermissionLevel.Default
-						? {
-							label: localize('permissions.default.sandbox.toggle', "Sandboxing for terminal"),
-							title: localize('permissions.default.sandbox.toggle.title', "Run terminal commands inside a sandbox that restricts file system and network access"),
-							checked: this.isSandboxingEnabled(),
-							onChange: (checked: boolean) => { void setSandboxEnabled(checked); },
-						}
-						: undefined;
 
 					return {
 						...action,

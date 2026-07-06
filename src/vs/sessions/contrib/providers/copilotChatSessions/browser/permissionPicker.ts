@@ -243,40 +243,12 @@ export class PermissionPicker extends Disposable {
 					icon: meta.icon,
 					checked: this._currentLevel === level,
 				},
-				label: localize('permissions.default', "Default Approvals"),
-				detail: localize('permissions.default.subtext', "Uses your configured settings"),
-				disabled: false,
-			},
-			{
-				kind: ActionListItemKind.Action,
-				group: { kind: ActionListItemKind.Header, title: '', icon: Codicon.warning },
-				item: {
-					level: ChatPermissionLevel.AutoApprove,
-					label: localize('permissions.autoApprove', "Bypass Approvals"),
-					icon: Codicon.warning,
-					checked: this._currentLevel === ChatPermissionLevel.AutoApprove,
-				},
-				label: localize('permissions.autoApprove', "Bypass Approvals"),
-				detail: localize('permissions.autoApprove.subtext', "All tool calls are auto-approved"),
-				disabled: policyRestricted,
-			},
-			{
-				kind: ActionListItemKind.Action,
-				group: { kind: ActionListItemKind.Header, title: '', icon: Codicon.rocket },
-				item: {
-					level: ChatPermissionLevel.Autopilot,
-					label: localize('permissions.autopilot', "Autopilot (Preview)"),
-					icon: Codicon.rocket,
-					checked: this._currentLevel === ChatPermissionLevel.Autopilot,
-				},
-				label: localize('permissions.autopilot', "Autopilot (Preview)"),
-				detail: localize('permissions.autopilot.subtext', "Autonomously iterates from start to finish"),
-				hover: {
-					content: localize('permissions.autopilot.description', "Auto-approve all tool calls and continue until the task is done. Autopilot may increase costs."),
-				},
-				disabled: policyRestricted,
-			},
-		];
+				label: meta.label,
+				detail: meta.detail,
+				disabled,
+				hover: hover ? { content: hover } : undefined,
+			};
+		});
 
 		items.push({
 			kind: ActionListItemKind.Separator,

@@ -1,6 +1,7 @@
 # Langfuse Observability
 
 GoalConsole can mirror sanitized Custom AI trace events to Langfuse while continuing to write local JSONL traces under `.agent/observability/custom-ai-chat.jsonl`.
+The Langfuse export uses a trace + observation hierarchy so model rounds and tool calls are visible as first-class observations.
 
 ## Start Langfuse Locally
 
@@ -47,15 +48,22 @@ Then enable this setting:
 
 ## What Gets Traced
 
-The integration exports the same sanitized events as the local JSONL trace stream:
+The integration exports the same sanitized events as the local JSONL trace stream and maps them to Langfuse-native objects:
 
-- chat request start, completion, failure, and cancellation
-- model request rounds
-- tool-call detection, start, completion, and failure
+- `trace-create` for request lifecycle plus upserts for trace input/output summaries
+- `generation-create` for each `chat.model.request.completed` round (name: `chat.model.request`)
+- `span-create` / `span-update` pairs for tool call lifecycle (`chat.tool_call.*`)
+- `event-create` for the original sanitized event stream (for raw timeline debugging)
 - `editFile` start, direct writes, review proposals, and validation failures
 - `verifySurfaceBlueprint` completion with pass/fail and gap count
 
-Successful chat completions and surface-blueprint verification results are also attached as Langfuse boolean scores.
+Trace/session metadata is populated with best-practice defaults:
+
+- trace name: `goal-workspace.custom-ai.chat`
+- session id: prefers `sessionResource` (falls back to request id)
+- tags: `goal-workspace`, `custom-ai`, and model tag when available (`model:<id>`)
+
+Successful chat completions and surface-blueprint verification results are attached as Langfuse boolean scores.
 
 ## Dogfood Acceptance Check
 

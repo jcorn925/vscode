@@ -47,6 +47,15 @@ interface StepMutable {
 	readonly autoFixLabel: string | undefined;
 }
 
+interface SurfaceLaunchTarget {
+	readonly id: string;
+	readonly name: string;
+	readonly appPath: string;
+	readonly appFolder: URI;
+	readonly devCommand: string | undefined;
+	readonly localUrl: string | undefined;
+}
+
 export class AppLaunchGuideService extends Disposable implements IAppLaunchGuideService {
 	readonly _serviceBrand: undefined;
 
@@ -59,6 +68,8 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 	private refreshInFlight: Promise<void> | undefined;
 	private lastHintsInstallCommand: string | undefined;
 	private lastWorkspaceFolder: URI | undefined;
+	private lastSurfaceTargets: readonly SurfaceLaunchTarget[] = [];
+	private lastSurfaceInstallCommand: string | undefined;
 	private deferGoalWorkspaceLaunch = false;
 
 	constructor(
@@ -192,7 +203,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 			{
 				id: 'workspace',
 				label: localize('appLaunchGuide.workspace.label', 'Project folder'),
-				description: localize('appLaunchGuide.workspace.description', 'Open a folder that exists on disk so the dev server can run.'),
+				description: localize('appLaunchGuide.workspace.description', 'Open a workspace folder that exists on disk so app dev servers can run.'),
 				status: 'pending',
 				detail: '',
 				manualHint: localize('appLaunchGuide.workspace.manual', 'Use File → Open Folder or click Create Default Project on the UI tab.'),
@@ -202,20 +213,20 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 			{
 				id: 'package-json',
 				label: localize('appLaunchGuide.packageJson.label', 'package.json'),
-				description: localize('appLaunchGuide.packageJson.description', 'The open folder root needs a package.json for the app server.'),
+				description: localize('appLaunchGuide.packageJson.description', 'Each app folder needs a package.json for its dev server.'),
 				status: 'pending',
 				detail: '',
-				manualHint: localize('appLaunchGuide.packageJson.manual', 'Open a JavaScript/TypeScript project folder, or scaffold one:\n  npm init -y'),
+				manualHint: localize('appLaunchGuide.packageJson.manual', 'For each app surface folder, create package.json (or scaffold the app):\n  npm init -y'),
 				canAutoFix: false,
 				autoFixLabel: undefined,
 			},
 			{
 				id: 'dev-script',
 				label: localize('appLaunchGuide.devScript.label', 'Dev script'),
-				description: localize('appLaunchGuide.devScript.description', 'package.json needs a dev, start, or web script to launch the localhost server.'),
+				description: localize('appLaunchGuide.devScript.description', 'Each app package.json needs a dev, start, or web script to launch localhost.'),
 				status: 'pending',
 				detail: '',
-				manualHint: localize('appLaunchGuide.devScript.manual', 'Add a script to package.json, for example:\n  "scripts": { "dev": "next dev" }'),
+				manualHint: localize('appLaunchGuide.devScript.manual', 'Add app scripts to package.json, for example:\n  "scripts": { "dev": "next dev" }'),
 				canAutoFix: false,
 				autoFixLabel: undefined,
 			},
@@ -225,7 +236,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 				description: localize('appLaunchGuide.dependencies.description', 'node_modules must be installed before the dev server can start.'),
 				status: 'pending',
 				detail: '',
-				manualHint: localize('appLaunchGuide.dependencies.manual', 'In the project folder terminal, run npm install (or pnpm/yarn install).'),
+				manualHint: localize('appLaunchGuide.dependencies.manual', 'In a workspace terminal, run the install command shown above for each app (or run your workspace install).'),
 				canAutoFix: true,
 				autoFixLabel: localize('appLaunchGuide.dependencies.auto', 'Install dependencies'),
 			},
@@ -253,6 +264,9 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 			this.skipAllSteps(deferReason);
 			return;
 		}
+
+		this.lastSurfaceTargets = this.getSurfaceLaunchTargets();
+		this.lastSurfaceInstallCommand = undefined;
 		await this.probeWorkspace();
 		await this.probePackageJson();
 		await this.probeDevScript();
@@ -262,7 +276,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 
 	private getGoalWorkspaceDeferReason(): string | undefined {
 		const goalWorkspaceState = this.consoleService.getState();
-		if (goalWorkspaceState.status !== 'loaded') {
+		if (goalWorkspaceState.status !== 'loaded' || goalWorkspaceState.workspace?.surfaces?.length) {
 			return undefined;
 		}
 
@@ -279,6 +293,8 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		}
 		this.lastWorkspaceFolder = undefined;
 		this.lastHintsInstallCommand = undefined;
+		this.lastSurfaceTargets = [];
+		this.lastSurfaceInstallCommand = undefined;
 	}
 
 	private async probeWorkspace(): Promise<void> {
@@ -310,6 +326,24 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 			step.detail = localize('appLaunchGuide.packageJson.waitWorkspace', 'Open a project folder first.');
 			return;
 		}
+
+		if (this.lastSurfaceTargets.length > 0) {
+			let present = 0;
+			for (const target of this.lastSurfaceTargets) {
+				if (await this.fileService.exists(joinPath(target.appFolder, 'package.json'))) {
+					present++;
+				}
+			}
+			if (present === this.lastSurfaceTargets.length) {
+				step.status = 'success';
+				step.detail = localize('appLaunchGuide.packageJson.surface.all', 'All {0} surface app folders contain package.json.', String(this.lastSurfaceTargets.length));
+			} else {
+				step.status = 'error';
+				step.detail = localize('appLaunchGuide.packageJson.surface.partial', '{0}/{1} surface app folders contain package.json.', String(present), String(this.lastSurfaceTargets.length));
+			}
+			return;
+		}
+
 		const packageJsonUri = joinPath(this.lastWorkspaceFolder, 'package.json');
 		if (!(await this.fileService.exists(packageJsonUri))) {
 			step.status = 'error';
@@ -328,6 +362,19 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 			step.detail = localize('appLaunchGuide.devScript.waitPackage', 'Add package.json first.');
 			return;
 		}
+
+		if (this.lastSurfaceTargets.length > 0) {
+			const runnable = this.lastSurfaceTargets.filter(target => Boolean(target.devCommand?.trim()));
+			if (runnable.length === this.lastSurfaceTargets.length) {
+				step.status = 'success';
+				step.detail = localize('appLaunchGuide.devScript.surface.all', 'All surface apps define a dev command in workspace.goal.json.');
+			} else {
+				step.status = 'error';
+				step.detail = localize('appLaunchGuide.devScript.surface.partial', '{0}/{1} surfaces define devCommand.', String(runnable.length), String(this.lastSurfaceTargets.length));
+			}
+			return;
+		}
+
 		const hints = await this.devServerService.getSuggestedStartCommands();
 		this.lastHintsInstallCommand = hints?.installCommand;
 		if (!hints?.primaryRunCommand) {
@@ -347,6 +394,33 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 			step.detail = localize('appLaunchGuide.dependencies.waitScript', 'Add a runnable app script before installing dependencies.');
 			return;
 		}
+
+		if (this.lastSurfaceTargets.length > 0) {
+			let installed = 0;
+			let installCommand: string | undefined;
+			for (const target of this.lastSurfaceTargets) {
+				const hasAppNodeModules = await this.fileService.exists(joinPath(target.appFolder, 'node_modules'));
+				const hasWorkspaceNodeModules = await this.fileService.exists(joinPath(this.lastWorkspaceFolder, 'node_modules'));
+				if (hasAppNodeModules || hasWorkspaceNodeModules) {
+					installed++;
+				}
+				if (!installCommand) {
+					installCommand = this.surfaceInstallCommand(target);
+				}
+			}
+			this.lastSurfaceInstallCommand = installCommand;
+			if (installed === this.lastSurfaceTargets.length) {
+				step.status = 'success';
+				step.detail = localize('appLaunchGuide.dependencies.surface.all', 'Dependencies are installed for all {0} surface apps.', String(this.lastSurfaceTargets.length));
+				return;
+			}
+			step.status = 'warning';
+			step.detail = installCommand
+				? localize('appLaunchGuide.dependencies.surface.partial', '{0}/{1} surfaces appear installed. Run {2} to install dependencies.', String(installed), String(this.lastSurfaceTargets.length), installCommand)
+				: localize('appLaunchGuide.dependencies.surface.partialNoCommand', '{0}/{1} surfaces appear installed.', String(installed), String(this.lastSurfaceTargets.length));
+			return;
+		}
+
 		const hints = await this.devServerService.getSuggestedStartCommands();
 		if (!hints) {
 			step.status = 'pending';
@@ -374,6 +448,32 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		if (depsStep?.status !== 'success' && depsStep?.status !== 'warning') {
 			step.status = 'pending';
 			step.detail = localize('appLaunchGuide.devServer.waitDeps', 'Install dependencies first.');
+			return;
+		}
+
+		if (this.lastSurfaceTargets.length > 0) {
+			const activeUrl = this.devServerService.getActiveUrl();
+			if (activeUrl) {
+				step.status = 'success';
+				step.detail = localize('appLaunchGuide.devServer.surface.active', 'Serving at {0}', activeUrl);
+				return;
+			}
+			for (const target of this.lastSurfaceTargets) {
+				if (!target.localUrl) {
+					continue;
+				}
+				const reachable = await this.devServerService.findRunningDevServerUrl(target.localUrl);
+				if (reachable) {
+					step.status = 'success';
+					step.detail = localize('appLaunchGuide.devServer.surface.reachable', 'Surface app reachable at {0}', reachable);
+					return;
+				}
+			}
+			const firstUrl = this.lastSurfaceTargets.find(target => !!target.localUrl)?.localUrl;
+			step.status = 'warning';
+			step.detail = firstUrl
+				? localize('appLaunchGuide.devServer.surface.notReachable', 'No surface app is listening yet (expected one such as {0}).', firstUrl)
+				: localize('appLaunchGuide.devServer.surface.notStarted', 'No surface app server has started yet.');
 			return;
 		}
 
@@ -425,6 +525,18 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 	}
 
 	private async fixDependencies(): Promise<void> {
+		if (this.lastSurfaceTargets.length > 0 && this.lastWorkspaceFolder) {
+			const installCommand = this.lastSurfaceInstallCommand ?? this.surfaceInstallCommand(this.lastSurfaceTargets[0]);
+			if (!installCommand) {
+				throw new Error(localize('appLaunchGuide.dependencies.noCommand', 'No install command available for this project.'));
+			}
+			const exitCode = await this.runHiddenCommand(this.lastWorkspaceFolder, installCommand, 600_000);
+			if (exitCode !== 0) {
+				throw new Error(localize('appLaunchGuide.dependencies.failed', 'Dependency install failed (exit {0}).', String(exitCode)));
+			}
+			return;
+		}
+
 		const folder = this.lastWorkspaceFolder;
 		const installCommand = this.lastHintsInstallCommand;
 		if (!folder || !installCommand) {
@@ -437,11 +549,65 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 	}
 
 	private async fixDevServer(): Promise<void> {
+		if (this.lastSurfaceTargets.length > 0) {
+			const launchTarget = this.lastSurfaceTargets.find(target => !!target.devCommand?.trim());
+			if (!launchTarget?.devCommand) {
+				throw new Error(localize('appLaunchGuide.devServer.startFailed', 'Could not start the dev server.'));
+			}
+			const url = await this.devServerService.ensureRunningWithCommand(launchTarget.devCommand, launchTarget.localUrl, launchTarget.name);
+			if (!url) {
+				const state = this.devServerService.getState();
+				throw new Error(state.lastError ?? localize('appLaunchGuide.devServer.startFailed', 'Could not start the dev server.'));
+			}
+			return;
+		}
+
 		const url = await this.devServerService.ensureRunning();
 		if (!url) {
 			const state = this.devServerService.getState();
 			throw new Error(state.lastError ?? localize('appLaunchGuide.devServer.startFailed', 'Could not start the dev server.'));
 		}
+	}
+
+	private getSurfaceLaunchTargets(): readonly SurfaceLaunchTarget[] {
+		const state = this.consoleService.getState();
+		const workspaceFolder = state.workspaceFolder;
+		const surfaces = state.workspace?.surfaces ?? [];
+		if (!workspaceFolder || state.status !== 'loaded' || surfaces.length === 0) {
+			return [];
+		}
+		return surfaces.map(surface => {
+			const appPath = (surface.path?.trim() || `apps/${surface.id}`).replace(/^\/+/, '');
+			return {
+				id: surface.id,
+				name: surface.name,
+				appPath,
+				appFolder: joinPath(workspaceFolder, ...appPath.split('/').filter(Boolean)),
+				devCommand: surface.devCommand?.trim() || undefined,
+				localUrl: surface.localUrl?.trim() || undefined
+			};
+		});
+	}
+
+	private surfaceInstallCommand(target: SurfaceLaunchTarget): string | undefined {
+		const command = target.devCommand ?? '';
+		const appPath = target.appPath;
+		if (/\bnpm\s+--prefix\s+\S+/i.test(command)) {
+			return `npm install --prefix ${appPath}`;
+		}
+		if (/\bnpm\b.*--workspace\s+\S+/i.test(command)) {
+			return `npm install --workspace ${appPath}`;
+		}
+		if (/\bpnpm\b.*--filter\s+\S+/i.test(command)) {
+			return `pnpm install --filter ${appPath}`;
+		}
+		if (/\byarn\b.*\bworkspace\s+\S+/i.test(command)) {
+			return `yarn workspace ${appPath} install`;
+		}
+		if (/\byarn\b.*--cwd\s+\S+/i.test(command)) {
+			return `yarn --cwd ${appPath} install`;
+		}
+		return `npm install --prefix ${appPath}`;
 	}
 
 	private async runHiddenCommand(cwd: URI, commandLine: string, timeoutMs: number): Promise<number> {

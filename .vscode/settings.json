@@ -215,5 +215,6 @@
 		".github/skills/.local": true,
 		".agents/skills/.local": true,
 		".claude/skills/.local": true,
-	}
+	},
+	"custom.ai.observability.langfuse.baseUrl": "https://us.cloud.langfuse.com"
 }

@@ -49,6 +49,7 @@ export class ChatQuotaExceededPart extends Disposable implements IChatContentPar
 		dom.append(messageContainer, markdownContent.element);
 
 		let primaryButtonLabel: string | undefined;
+		const isAdditionalSpendLimitReached = errorDetails.code === 'additional_spend_limit_reached';
 		if (isAdditionalSpendLimitReached) {
 			primaryButtonLabel = localize('upgradePlan', "Upgrade");
 		} else {

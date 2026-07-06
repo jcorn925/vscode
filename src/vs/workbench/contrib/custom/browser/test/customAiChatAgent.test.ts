@@ -299,6 +299,7 @@ suite('CustomAiChatAgent', () => {
 			type: 'chat.request.started',
 			runId: 'run-1',
 			requestId: 'request-1',
+			sessionResource: 'vscode-chat:///session/abc',
 			apiKey: 'sk-abcdefghijklmnopqrstuvwxyz',
 		}, {
 			enabled: true,
@@ -314,6 +315,7 @@ suite('CustomAiChatAgent', () => {
 		assert.strictEqual(started.body.batch.length, 2);
 		assert.strictEqual((started.body.batch[0] as { type: string }).type, 'trace-create');
 		assert.strictEqual((started.body.batch[1] as { type: string }).type, 'event-create');
+		assert.strictEqual(((started.body.batch[0] as { body: { sessionId?: string } }).body).sessionId, 'vscode-chat:///session/abc');
 
 		const completed = buildLangfuseIngestionRequest({
 			timestamp: '2026-07-05T00:00:01.000Z',
@@ -332,5 +334,69 @@ suite('CustomAiChatAgent', () => {
 		assert.strictEqual(completed.body.batch.length, 2);
 		assert.strictEqual((completed.body.batch[1] as { type: string }).type, 'score-create');
 		assert.strictEqual(((completed.body.batch[1] as { body: { value: number } }).body).value, 0);
+	});
+
+	test('Langfuse ingestion payload maps model rounds to generations and tool calls to spans', () => {
+		const generation = buildLangfuseIngestionRequest({
+			timestamp: '2026-07-05T00:00:01.000Z',
+			type: 'chat.model.request.completed',
+			runId: 'run-1',
+			round: 2,
+			modelId: 'customAi:openaiCompatible:gpt-4o-mini',
+			startedAt: '2026-07-05T00:00:00.500Z',
+			durationMs: 500,
+			messageSummary: {
+				messageCount: 3,
+				textChars: 120,
+			},
+			roundResponseChars: 42,
+		}, {
+			enabled: true,
+			baseUrl: 'http://localhost:3000',
+			publicKey: 'pk-lf-test',
+			secretKey: 'sk-lf-test',
+			environment: 'test',
+		});
+
+		assert.ok(generation);
+		assert.strictEqual(generation.body.batch.length, 2);
+		assert.strictEqual((generation.body.batch[0] as { type: string }).type, 'generation-create');
+		assert.strictEqual(((generation.body.batch[0] as { body: { name: string } }).body).name, 'chat.model.request');
+		assert.strictEqual(((generation.body.batch[0] as { body: { model?: string } }).body).model, 'customAi:openaiCompatible:gpt-4o-mini');
+
+		const toolStart = buildLangfuseIngestionRequest({
+			timestamp: '2026-07-05T00:00:02.000Z',
+			type: 'chat.tool_call.started',
+			runId: 'run-1',
+			toolCallId: 'call-123',
+			toolName: 'editFile',
+			parameters: { uri: 'workspace.goal.json' },
+		}, {
+			enabled: true,
+			baseUrl: 'http://localhost:3000',
+			publicKey: 'pk-lf-test',
+			secretKey: 'sk-lf-test',
+			environment: 'test',
+		});
+		assert.ok(toolStart);
+		assert.strictEqual((toolStart.body.batch[0] as { type: string }).type, 'span-create');
+
+		const toolFinish = buildLangfuseIngestionRequest({
+			timestamp: '2026-07-05T00:00:02.500Z',
+			type: 'chat.tool_call.completed',
+			runId: 'run-1',
+			toolCallId: 'call-123',
+			toolName: 'editFile',
+			durationMs: 500,
+			resultTextChars: 98,
+		}, {
+			enabled: true,
+			baseUrl: 'http://localhost:3000',
+			publicKey: 'pk-lf-test',
+			secretKey: 'sk-lf-test',
+			environment: 'test',
+		});
+		assert.ok(toolFinish);
+		assert.strictEqual((toolFinish.body.batch[0] as { type: string }).type, 'span-update');
 	});
 });

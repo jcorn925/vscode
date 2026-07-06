@@ -251,7 +251,7 @@ const mostRecentResponseClassName = 'chat-most-recent-response';
 
 export function shouldHideChatUserIdentity(username: string, sessionResource: URI, isResponse: boolean, isSessionsWindow: boolean, isSystemInitiatedRequest: boolean): boolean {
 	const sessionType = getChatSessionType(sessionResource);
-	return username === COPILOT_USERNAME ||
+	return isDefaultChatAgentUsername(username) ||
 		(isResponse && isAgentHostCopilotSessionType(sessionType)) ||
 		isSessionsWindow ||
 		isSystemInitiatedRequest;

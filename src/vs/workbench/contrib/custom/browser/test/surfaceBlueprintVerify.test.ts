@@ -163,7 +163,7 @@ suite('surfaceBlueprintVerify', () => {
 		assert.ok(scaffold.createdFiles.includes('apps/booking/package.json'));
 		assert.ok(scaffold.createdFiles.includes('apps/booking/app/packages/page.tsx'));
 		const manifest = JSON.parse((await fileService.readFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST))).value.toString());
-		assert.strictEqual(manifest.surfaces[0].devCommand, 'npm --prefix apps/booking run dev');
+		assert.strictEqual(manifest.surfaces[0].devCommand, 'npm run dev --prefix apps/booking -- --port 3001');
 
 		const result = await verifySurfaceBlueprint({
 			fileService: fileService as unknown as IFileService,
@@ -174,6 +174,31 @@ suite('surfaceBlueprintVerify', () => {
 		assert.strictEqual(result.passed, true, JSON.stringify(result.gaps));
 		const persisted = await readBlueprint(fileService as unknown as IFileService, blueprintResource(workspaceFolder, 'booking'));
 		assert.strictEqual(persisted?.status, 'verified');
+	});
+
+	test('normalizes legacy surface devCommand patterns to app-local command', async () => {
+		const fileService = new TestBlueprintFileService();
+		const template = loadSurfaceTemplate('booking')!;
+		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'booking', surfaceName: 'Booking' });
+		await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+		fileService.setFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST), JSON.stringify({
+			goal: {
+				id: 'personal-training-business',
+				name: 'Online Personal Training Business',
+			},
+			surfaces: [{
+				id: 'booking',
+				name: 'Booking',
+				type: 'web-app',
+				path: 'apps/booking',
+				localUrl: 'http://localhost:3001',
+				devCommand: 'pnpm --filter booking dev',
+			}],
+		}));
+
+		await scaffoldSurfaceFromBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+		const manifest = JSON.parse((await fileService.readFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST))).value.toString());
+		assert.strictEqual(manifest.surfaces[0].devCommand, 'npm run dev --prefix apps/booking -- --port 3001');
 	});
 
 	test('scaffold repairs legacy root-shaped manifest before verification', async () => {

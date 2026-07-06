@@ -42,6 +42,9 @@ function code() {
 	export VSCODE_CLI=1
 	export ELECTRON_ENABLE_STACK_DUMPING=1
 	export ELECTRON_ENABLE_LOGGING=1
+	export LANGFUSE_SECRET_KEY="${LANGFUSE_SECRET_KEY:-sk-lf-592884c4-f5cd-4330-b0fe-ceed0e99d6b1}"
+	export LANGFUSE_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-pk-lf-348a36b8-0a15-4312-87e8-c02b0e43201b}"
+	export LANGFUSE_BASE_URL="${LANGFUSE_BASE_URL:-https://us.cloud.langfuse.com}"
 	# Parent IDE (Cursor/VS Code) sets ELECTRON_RUN_AS_NODE=1; must clear for GUI launch.
 	unset ELECTRON_RUN_AS_NODE
 

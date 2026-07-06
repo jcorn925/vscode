@@ -9,6 +9,8 @@ import { URI } from '../../vs/base/common/uri.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
 import { WORKSPACE_MANIFEST } from './ConsoleService.js';
 import type { SurfaceBlueprint } from './surfaceBlueprintTypes.js';
+import { upsertWorkflowSpec, workflowCatalogResource } from './workflowCatalogService.js';
+import type { WorkflowSpec } from './workflowCatalogTypes.js';
 
 export interface ScaffoldSurfaceFromBlueprintResult {
 	readonly surfaceId: string;
@@ -50,12 +52,79 @@ export async function scaffoldSurfaceFromBlueprint(
 		await writeWorkspaceFile(fileService, workspaceFolder, relativePath, content);
 		createdFiles.push(relativePath);
 	}
+	const seededWorkflow = buildSeedWorkflowSpec(blueprint, manifest);
+	if (seededWorkflow) {
+		const workflowsRoot = await resolveWorkflowsRoot(fileService, workspaceFolder);
+		await upsertWorkflowSpec(fileService, workflowCatalogResource(workspaceFolder, workflowsRoot), seededWorkflow);
+	}
 
 	return {
 		surfaceId: blueprint.surfaceId,
 		appPath,
 		localUrl: manifest.localUrl,
 		createdFiles,
+	};
+}
+
+async function resolveWorkflowsRoot(fileService: IFileService, workspaceFolder: URI): Promise<string> {
+	try {
+		const raw = JSON.parse((await fileService.readFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST))).value.toString()) as Record<string, unknown>;
+		const shared = isRecord(raw.shared) ? raw.shared : undefined;
+		const workflows = shared && typeof shared.workflows === 'string' ? shared.workflows.trim() : '';
+		return workflows || 'workflows';
+	} catch {
+		return 'workflows';
+	}
+}
+
+function buildSeedWorkflowSpec(blueprint: SurfaceBlueprint, manifest: ManifestSurfaceRecord): WorkflowSpec | undefined {
+	const routeSteps = blueprint.acceptance.requiredRoutes.map((route, index) => ({
+		id: `navigate-${index + 1}`,
+		type: 'navigate' as const,
+		route,
+	}));
+	const uiSignalSteps = blueprint.acceptance.requiredUiSignals.map((signal, index) => ({
+		id: `action-${index + 1}`,
+		type: 'click' as const,
+		target: { text: signal },
+	}));
+	const assertSteps = blueprint.acceptance.requiredWorkflows.slice(0, 2).map((workflow, index) => ({
+		id: `assert-${index + 1}`,
+		type: 'assertText' as const,
+		target: { text: workflow },
+	}));
+
+	if (blueprint.surfaceId !== 'booking') {
+		return {
+			id: `${blueprint.surfaceId}-autoplay`,
+			label: `${manifest.name} workflow`,
+			scope: 'surface',
+			surfaceId: blueprint.surfaceId,
+			source: `template:${blueprint.templateId}`,
+			steps: [{ id: 'ensure-server', type: 'ensureServer' }, ...routeSteps, ...uiSignalSteps, ...assertSteps],
+			events: [...manifest.events],
+			ixBindings: blueprint.manifest.ixSubsystems.slice(0, uiSignalSteps.length).map((label, index) => ({
+				stepId: uiSignalSteps[index]?.id ?? `action-${index + 1}`,
+				subsystemLabel: label,
+			})),
+		};
+	}
+
+	return {
+		id: 'booking-intake',
+		label: 'Booking intake flow',
+		scope: 'surface',
+		surfaceId: 'booking',
+		source: `template:${blueprint.templateId}`,
+		steps: [{ id: 'ensure-server', type: 'ensureServer' }, ...routeSteps, ...uiSignalSteps, ...assertSteps],
+		events: [...manifest.events],
+		ixBindings: [
+			{ stepId: 'pick-package', subsystemLabel: 'Package Selection UI' },
+			{ stepId: 'pick-time', subsystemLabel: 'Scheduling UI' },
+		],
+		fixtures: {
+			leadEmail: 'booking-autoplay@example.com',
+		},
 	};
 }
 
@@ -164,15 +233,18 @@ async function upsertManifestSurface(
 	const localUrl = typeof existing.localUrl === 'string' && existing.localUrl.trim()
 		? existing.localUrl.trim()
 		: nextLocalUrl(surfaces);
+	const surfacePath = typeof existing.path === 'string' && existing.path.trim() ? existing.path.trim() : appPath;
+	const rawDevCommand = typeof existing.devCommand === 'string' && existing.devCommand.trim()
+		? existing.devCommand.trim()
+		: '';
+	const normalizedDevCommand = normalizeSurfaceDevCommand(rawDevCommand, surfacePath);
 	const surface: ManifestSurfaceRecord = {
 		id: blueprint.surfaceId,
 		name: blueprint.surfaceName,
 		type: typeof existing.type === 'string' && existing.type.trim() ? existing.type.trim() : 'web-app',
-		path: typeof existing.path === 'string' && existing.path.trim() ? existing.path.trim() : appPath,
+		path: surfacePath,
 		localUrl,
-		devCommand: typeof existing.devCommand === 'string' && existing.devCommand.trim()
-			? existing.devCommand.trim()
-			: `npm --prefix ${appPath} run dev`,
+		devCommand: withPreferredPort(normalizedDevCommand, localUrl),
 		purpose: typeof existing.purpose === 'string' && existing.purpose.trim()
 			? existing.purpose.trim()
 			: `Support ${blueprint.surfaceName} workflows for the goal workspace.`,
@@ -754,6 +826,51 @@ function nextLocalUrl(surfaces: readonly Record<string, unknown>[]): string {
 		port++;
 	}
 	return `http://localhost:${port}`;
+}
+
+function withPreferredPort(command: string, localUrl: string): string {
+	const portMatch = /localhost:(\d+)/i.exec(localUrl);
+	const port = portMatch ? Number(portMatch[1]) : undefined;
+	if (!port || !Number.isFinite(port)) {
+		return command;
+	}
+	if (/\bPORT=\d{2,5}\b/.test(command) || /\b--port(?:=|\s+)\d{2,5}\b/.test(command) || /\b-p\s+\d{2,5}\b/.test(command)) {
+		return command;
+	}
+	if (/\bnext\s+dev\b/i.test(command)) {
+		return `${command} --port ${port}`;
+	}
+	if (/\b(?:npm|pnpm)\b.*\brun\s+dev\b/i.test(command) || /\byarn\b.*\bdev\b/i.test(command)) {
+		return `${command} -- --port ${port}`;
+	}
+	return command;
+}
+
+function normalizeSurfaceDevCommand(command: string, appPath: string): string {
+	const normalizedPath = appPath.replace(/^\.?\//, '').trim();
+	const canonical = `npm run dev --prefix ${normalizedPath}`;
+	if (!command.trim()) {
+		return canonical;
+	}
+
+	const trimmed = command.trim();
+
+	// Legacy command shapes we can confidently normalize to the surface-local contract.
+	if (/\bpnpm\b.*\b--filter\b/i.test(trimmed) || /\byarn\b\s+workspace\b/i.test(trimmed)) {
+		return canonical;
+	}
+	if (/\bnpm\b.*\b--workspace\b/i.test(trimmed)) {
+		return canonical;
+	}
+	if (/\bnpm\s+--prefix\s+\S+\s+run\s+dev\b/i.test(trimmed)) {
+		return canonical;
+	}
+	if (/\bnpm\s+run\s+dev\b/i.test(trimmed) && /\b--prefix\s+\S+\b/i.test(trimmed)) {
+		return canonical;
+	}
+
+	// Keep unknown custom commands untouched so we do not break bespoke setups.
+	return trimmed;
 }
 
 function routePathFromSubsystem(path: string): string {

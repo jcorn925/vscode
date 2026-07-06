@@ -328,13 +328,9 @@ export function buildLangfuseIngestionRequest(event: unknown, options: LangfuseT
 	const type = typeof traceEvent.type === 'string' && traceEvent.type ? traceEvent.type : 'custom-ai.event';
 	const timestamp = typeof traceEvent.timestamp === 'string' && traceEvent.timestamp ? traceEvent.timestamp : new Date().toISOString();
 	const baseUrl = options.baseUrl.replace(/\/+$/, '');
-	const commonBody = {
-		traceId,
-		name: type,
-		startTime: timestamp,
-		environment: options.environment,
-		metadata: traceEvent,
-	};
+	const sessionId = selectSessionId(traceEvent);
+	const modelTag = typeof traceEvent.modelId === 'string' && traceEvent.modelId ? `model:${traceEvent.modelId}` : undefined;
+	const tags = ['goal-workspace', 'custom-ai', modelTag].filter((value): value is string => Boolean(value));
 
 	const batch: unknown[] = [];
 	if (traceId && type === 'chat.request.started') {
@@ -346,13 +342,101 @@ export function buildLangfuseIngestionRequest(event: unknown, options: LangfuseT
 				id: traceId,
 				timestamp,
 				name: 'goal-workspace.custom-ai.chat',
-				sessionId: typeof traceEvent.requestId === 'string' ? traceEvent.requestId : undefined,
+				sessionId,
 				release: options.release,
 				environment: options.environment,
-				tags: ['goal-workspace', 'custom-ai'],
+				tags,
 				metadata: traceEvent,
 			},
 		});
+	}
+
+	if (traceId && type === 'chat.context.assembled') {
+		batch.push({
+			id: generateUuid(),
+			type: 'trace-create',
+			timestamp,
+			body: {
+				id: traceId,
+				input: normalizeTracePayload(traceEvent.messageSummary),
+				environment: options.environment,
+			},
+		});
+	}
+
+	if (traceId && (type === 'chat.request.completed' || type === 'chat.request.failed' || type === 'chat.request.cancelled')) {
+		batch.push({
+			id: generateUuid(),
+			type: 'trace-create',
+			timestamp,
+			body: {
+				id: traceId,
+				output: normalizeTracePayload(traceEvent.finalMessageSummary),
+				environment: options.environment,
+				metadata: {
+					outcome: type,
+				},
+			},
+		});
+	}
+
+	if (traceId && type === 'chat.model.request.completed') {
+		const round = typeof traceEvent.round === 'number' ? traceEvent.round : 0;
+		batch.push({
+			id: generateUuid(),
+			type: 'generation-create',
+			timestamp,
+			body: {
+				id: createObservationId(traceId, 'generation', String(round)),
+				traceId,
+				name: 'chat.model.request',
+				startTime: pickIsoTime(traceEvent.startedAt, timestamp),
+				endTime: timestamp,
+				model: typeof traceEvent.modelId === 'string' ? traceEvent.modelId : undefined,
+				input: normalizeTracePayload(traceEvent.messageSummary),
+				output: {
+					roundTextChunks: toFiniteNumber(traceEvent.roundTextChunks),
+					roundResponseChars: toFiniteNumber(traceEvent.roundResponseChars),
+					roundToolUses: toFiniteNumber(traceEvent.roundToolUses),
+				},
+				metadata: {
+					round,
+					durationMs: toFiniteNumber(traceEvent.durationMs),
+				},
+				environment: options.environment,
+			},
+		});
+	}
+
+	const toolObservationType = mapToolTraceEventToObservationType(type);
+	if (traceId && toolObservationType) {
+		const toolCallId = typeof traceEvent.toolCallId === 'string' && traceEvent.toolCallId ? traceEvent.toolCallId : undefined;
+		if (toolCallId) {
+			const isStart = toolObservationType === 'span-create';
+			batch.push({
+				id: generateUuid(),
+				type: toolObservationType,
+				timestamp,
+				body: {
+					id: createObservationId(traceId, 'tool', toolCallId),
+					traceId,
+					name: typeof traceEvent.toolName === 'string' ? traceEvent.toolName : 'tool-call',
+					startTime: isStart ? timestamp : undefined,
+					endTime: isStart ? undefined : timestamp,
+					input: isStart ? normalizeTracePayload(traceEvent.parameters) : undefined,
+					output: isStart ? undefined : {
+						error: traceEvent.error === true,
+						resultTextChars: toFiniteNumber(traceEvent.resultTextChars),
+					},
+					statusMessage: typeof traceEvent.error === 'string' ? traceEvent.error : undefined,
+					metadata: {
+						toolId: traceEvent.toolId,
+						durationMs: toFiniteNumber(traceEvent.durationMs),
+					},
+					environment: options.environment,
+				},
+			});
+		}
 	}
 
 	batch.push({
@@ -361,7 +445,11 @@ export function buildLangfuseIngestionRequest(event: unknown, options: LangfuseT
 		timestamp,
 		body: {
 			id: generateUuid(),
-			...commonBody,
+			traceId,
+			name: type,
+			startTime: timestamp,
+			environment: options.environment,
+			metadata: traceEvent,
 			level: isTraceErrorEvent(type) ? 'ERROR' : 'DEFAULT',
 			statusMessage: typeof traceEvent.error === 'string' ? traceEvent.error : undefined,
 		},
@@ -396,6 +484,53 @@ export function buildLangfuseIngestionRequest(event: unknown, options: LangfuseT
 			},
 		},
 	};
+}
+
+function mapToolTraceEventToObservationType(type: string): 'span-create' | 'span-update' | undefined {
+	if (type === 'chat.tool_call.started') {
+		return 'span-create';
+	}
+	if (type === 'chat.tool_call.completed' || type === 'chat.tool_call.failed') {
+		return 'span-update';
+	}
+	return undefined;
+}
+
+function createObservationId(traceId: string, kind: string, suffix: string): string {
+	const normalizedSuffix = suffix.replace(/[^A-Za-z0-9._-]/g, '_');
+	return `${traceId}.${kind}.${normalizedSuffix}`;
+}
+
+function selectSessionId(event: Record<string, unknown>): string | undefined {
+	if (typeof event.sessionResource === 'string' && event.sessionResource) {
+		return event.sessionResource;
+	}
+	if (typeof event.requestId === 'string' && event.requestId) {
+		return event.requestId;
+	}
+	return undefined;
+}
+
+function pickIsoTime(value: unknown, fallback: string): string {
+	return typeof value === 'string' && value ? value : fallback;
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+	return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeTracePayload(value: unknown): unknown {
+	if (!value || typeof value !== 'object') {
+		return value;
+	}
+	const normalized: Record<string, unknown> = {};
+	for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+		if (entry === undefined) {
+			continue;
+		}
+		normalized[key] = entry;
+	}
+	return Object.keys(normalized).length ? normalized : undefined;
 }
 
 function traceEventToScore(event: Record<string, unknown>): { name: string; value: 0 | 1; comment?: string } | undefined {

@@ -223,6 +223,42 @@ export async function saveGoalWorkspaceBuilderFields(
 	await fileService.writeFile(manifestResource, VSBuffer.fromString(JSON.stringify(raw, null, '\t')));
 }
 
+export async function deleteGoalWorkspaceSurface(
+	fileService: IFileService,
+	workspaceFolder: URI,
+	surfaceId: string,
+): Promise<boolean> {
+	const manifestResource = joinPath(workspaceFolder, WORKSPACE_MANIFEST);
+	let raw: Record<string, unknown> = {};
+	try {
+		const content = await fileService.readFile(manifestResource);
+		raw = JSON.parse(content.value.toString()) as Record<string, unknown>;
+		if (!isRecord(raw)) {
+			return false;
+		}
+	} catch {
+		return false;
+	}
+
+	if (!Array.isArray(raw.surfaces)) {
+		return false;
+	}
+
+	const nextSurfaces = raw.surfaces.filter(surface => {
+		if (!isRecord(surface)) {
+			return true;
+		}
+		return surface.id !== surfaceId;
+	});
+	if (nextSurfaces.length === raw.surfaces.length) {
+		return false;
+	}
+
+	raw.surfaces = nextSurfaces;
+	await fileService.writeFile(manifestResource, VSBuffer.fromString(JSON.stringify(raw, null, '\t')));
+	return true;
+}
+
 export function nextSurfaceSetupStep(step: SurfaceSetupStep): SurfaceSetupStep {
 	const index = SURFACE_SETUP_STEPS.indexOf(step);
 	return SURFACE_SETUP_STEPS[Math.min(index + 1, SURFACE_SETUP_STEPS.length - 1)];

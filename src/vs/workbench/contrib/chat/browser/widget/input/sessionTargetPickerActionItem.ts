@@ -11,7 +11,6 @@ import { IDisposable } from '../../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
-import { getDefaultChatProviderName } from '../../../common/chatBranding.js';
 import { MenuItemAction } from '../../../../../../platform/actions/common/actions.js';
 import { IActionWidgetService } from '../../../../../../platform/actionWidget/browser/actionWidget.js';
 import { IActionWidgetDropdownAction, IActionWidgetDropdownActionProvider, IActionWidgetDropdownOptions } from '../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
@@ -259,20 +258,7 @@ export class SessionTypePickerActionItem extends ChatInputPickerActionViewItem {
 			return false;
 		}
 		const entitlement = this.chatEntitlementService.entitlement;
-		return entitlement === ChatEntitlement.Free || entitlement === ChatEntitlement.EDU;
-	}
-
-	private _getUpgradeDescription(): IMarkdownString {
-		return new MarkdownString(
-			localize('chat.sessionTarget.upgradeLink', "[Upgrade](command:workbench.action.chat.upgradePlan)"),
-			{ isTrusted: { enabledCommands: ['workbench.action.chat.upgradePlan'] } }
-		);
-	}
-
-	private _getUpgradeHover(): MarkdownString {
-		const hover = new MarkdownString('', { isTrusted: { enabledCommands: ['workbench.action.chat.upgradePlan'] }, supportThemeIcons: true });
-		hover.appendMarkdown(localize('chat.sessionTarget.upgradeHover', "[Upgrade to {0} Pro](command:workbench.action.chat.upgradePlan) to delegate work to the cloud agent.", getDefaultChatProviderName()));
-		return hover;
+		return entitlement === 5 /* ChatEntitlement.Free */ || entitlement === 10 /* ChatEntitlement.EDU */;
 	}
 
 	protected _getSessionCategory(sessionTypeItem: ISessionTypeItem) {

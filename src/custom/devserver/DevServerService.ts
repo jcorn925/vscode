@@ -44,7 +44,7 @@ export interface IDevServerService {
 	 * or `undefined` if nothing is listening. Intended to be the single source of truth for
 	 * "is the dev server already running?".
 	 */
-	findRunningDevServerUrl(preferredUrl: string | undefined): Promise<string | undefined>;
+	findRunningDevServerUrl(preferredUrl: string | undefined, options?: { allowNearbyPorts?: boolean }): Promise<string | undefined>;
 	/**
 	 * Probes whether a dev server is already listening for the open workspace (e.g. started in an
 	 * external terminal) and, if so, publishes `activeUrl` and `phase: running`.
@@ -267,12 +267,15 @@ export class DevServerService extends Disposable implements IDevServerService {
 		await this.terminalService.revealTerminal(instance, true);
 		this.attachTerminalDataListener(instance);
 
+		const alignedCommand = this.alignCommandToPreferredPort(explicitCommand, preferredUrl);
+		const commandToRun = await this.resolveCommandWithSurfaceInstall(workspaceFolder, alignedCommand);
+
 		this.script = undefined;
-		this.command = explicitCommand;
+		this.command = commandToRun;
 		this.lastError = undefined;
-		this.setPhase('starting');
+		this.setPhase(commandToRun !== explicitCommand ? 'installing' : 'starting');
 		await this.waitForReasonableTerminalWidth(instance);
-		instance.sendText(explicitCommand, true);
+		instance.sendText(commandToRun, true);
 
 		this.started = true;
 		if (preferredUrl) {
@@ -280,9 +283,120 @@ export class DevServerService extends Disposable implements IDevServerService {
 			if (detectedUrl) {
 				this.setActiveUrl(detectedUrl);
 				this.setPhase('running');
+				return this.activeUrl;
 			}
+			// Keep UI flow alive while the process boots; reachability checks will reconcile.
+			return preferredUrl;
 		}
 		return this.activeUrl;
+	}
+
+	private alignCommandToPreferredPort(command: string, preferredUrl: string | undefined): string {
+		const preferredPort = this.tryParsePortFromUrl(preferredUrl ?? '');
+		if (typeof preferredPort !== 'number') {
+			return command;
+		}
+
+		const isScriptRunCommand = /\b(?:npm|pnpm)\b.*\brun\s+dev\b/i.test(command) || /\byarn\b.*\bdev\b/i.test(command);
+		const isDirectNextDev = /\bnext\s+dev\b/i.test(command);
+		if (!isScriptRunCommand && !isDirectNextDev) {
+			return command;
+		}
+
+		const normalized = this.removePortFlags(command, isScriptRunCommand);
+		if (isScriptRunCommand) {
+			return `${normalized} -- --port ${preferredPort}`;
+		}
+		return `${normalized} --port ${preferredPort}`;
+	}
+
+	/**
+	 * Removes explicit port flags so repeated launch attempts don't accumulate
+	 * duplicate `-- --port` or `--port` arguments.
+	 */
+	private removePortFlags(command: string, isScriptRunCommand: boolean): string {
+		let next = command;
+
+		// Remove environment-style port assignment.
+		next = next.replace(/\bPORT=\d{2,5}\b/g, '').trim();
+		// For npm/pnpm/yarn script passthrough, remove any existing `-- --port`.
+		if (isScriptRunCommand) {
+			next = next.replace(/\s+--\s+(?:--\s+)*--port(?:=|\s+)\d{2,5}\b/g, '');
+			next = next.replace(/\s+--\s+(?:--\s+)*-p\s+\d{2,5}\b/g, '');
+			// Also guard malformed repeated separators from prior bad appends.
+			next = next.replace(/\s+--\s*$/g, '');
+		}
+		// Remove direct CLI port flags.
+		next = next.replace(/\s--port(?:=|\s+)\d{2,5}\b/g, '');
+		next = next.replace(/\s-p\s+\d{2,5}\b/g, '');
+
+		return next.replace(/\s{2,}/g, ' ').trim();
+	}
+
+	private async resolveCommandWithSurfaceInstall(workspaceFolder: URI, command: string): Promise<string> {
+		const appPath = this.parseSurfaceAppPath(command);
+		if (!appPath) {
+			return command;
+		}
+
+		const appFolder = joinPath(workspaceFolder, ...appPath.split('/').filter(Boolean));
+		if (await this.fileService.exists(joinPath(appFolder, 'node_modules'))) {
+			return command;
+		}
+
+		const detected = await this.detectPackageJson(appFolder);
+		if (!detected) {
+			return command;
+		}
+		const packageManager = await this.detectPackageManager(detected.folder, detected.packageJson);
+		const installCommand = this.formatSurfaceInstallCommand(packageManager, appPath, command);
+		return `${installCommand} && ${command}`;
+	}
+
+	private parseSurfaceAppPath(command: string): string | undefined {
+		const npmPrefixAfterRun = /\bnpm\s+run\s+\S+\s+--prefix\s+(\S+)/i.exec(command);
+		if (npmPrefixAfterRun) {
+			return npmPrefixAfterRun[1];
+		}
+		const prefixMatch = /\bnpm\s+--prefix\s+(\S+)/i.exec(command);
+		if (prefixMatch) {
+			return prefixMatch[1];
+		}
+		const pnpmDir = /\bpnpm\s+--dir\s+(\S+)/i.exec(command);
+		if (pnpmDir) {
+			return pnpmDir[1];
+		}
+		const yarnCwd = /\byarn\s+--cwd\s+(\S+)/i.exec(command);
+		if (yarnCwd) {
+			return yarnCwd[1];
+		}
+		const workspaceMatch = /--workspace\s+(\S+)/i.exec(command);
+		if (workspaceMatch) {
+			return workspaceMatch[1];
+		}
+		return undefined;
+	}
+
+	private formatSurfaceInstallCommand(pm: DevServerPackageManager, appPath: string, command: string): string {
+		if (/\bnpm\s+--prefix\s+/i.test(command)) {
+			if (pm === 'pnpm') {
+				return `pnpm install --prefix ${appPath}`;
+			}
+			if (pm === 'yarn') {
+				return `yarn --cwd ${appPath} install`;
+			}
+			return `npm install --prefix ${appPath}`;
+		}
+		if (/--workspace\s+/i.test(command)) {
+			if (pm === 'pnpm') {
+				return `pnpm install --filter ${appPath}`;
+			}
+			if (pm === 'yarn') {
+				return `yarn workspace ${appPath} install`;
+			}
+			return `npm install --workspace ${appPath}`;
+		}
+		return pm === 'pnpm' ? `pnpm install --prefix ${appPath}` : pm === 'yarn' ? `yarn --cwd ${appPath} install` : `npm install --prefix ${appPath}`;
 	}
 
 	/**
@@ -314,11 +428,12 @@ export class DevServerService extends Disposable implements IDevServerService {
 		});
 	}
 
-	async findRunningDevServerUrl(preferredUrl: string | undefined): Promise<string | undefined> {
+	async findRunningDevServerUrl(preferredUrl: string | undefined, options?: { allowNearbyPorts?: boolean }): Promise<string | undefined> {
 		if (!preferredUrl) {
 			return undefined;
 		}
-		for (const candidate of this.expandCandidateUrls(preferredUrl)) {
+		const allowNearbyPorts = options?.allowNearbyPorts ?? true;
+		for (const candidate of this.expandCandidateUrls(preferredUrl, allowNearbyPorts)) {
 			if (await this.probeUrl(candidate, 1500)) {
 				return candidate;
 			}
@@ -326,15 +441,21 @@ export class DevServerService extends Disposable implements IDevServerService {
 		return undefined;
 	}
 
-	private expandCandidateUrls(url: string): string[] {
+	private expandCandidateUrls(url: string, allowNearbyPorts: boolean): string[] {
 		const port = this.tryParsePortFromUrl(url);
-		if (typeof port !== 'number') {
+		if (typeof port !== 'number' || !allowNearbyPorts) {
 			return [url];
 		}
 		// Frameworks like Vite/Next.js bump to the next available port if the configured one is
-		// busy, so we probe a small window of ports above the inferred one.
+		// busy. Also probe one lower port to catch fallback from 3001 -> 3000.
 		const replace = (p: number) => url.replace(`:${port}`, `:${p}`);
-		return [replace(port), replace(port + 1), replace(port + 2)];
+		const candidates = [
+			replace(port),
+			replace(port + 1),
+			replace(port + 2),
+			port > 1 ? replace(port - 1) : undefined,
+		].filter((candidate): candidate is string => Boolean(candidate));
+		return Array.from(new Set(candidates));
 	}
 
 	private async probeUrl(url: string, timeoutMs: number): Promise<boolean> {

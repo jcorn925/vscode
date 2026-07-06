@@ -17,6 +17,7 @@ import { instantiateBlueprintFromTemplate, writeBlueprint } from '../../../../..
 import { scaffoldSurfaceFromBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintScaffold.js';
 import { loadSurfaceTemplate } from '../../../../../../custom/goalWorkspace/surfaceBlueprintTemplateRegistry.js';
 import { IIxIntegrationService } from '../../../../../../custom/ix/IxIntegrationService.js';
+import { ICustomAiChatTraceService } from '../../../../../../custom/ai/browser/customAiChatTrace.js';
 
 suite('CustomAiVerifySurfaceBlueprintTool', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -67,12 +68,21 @@ suite('CustomAiVerifySurfaceBlueprintTool', () => {
 		} as IIxIntegrationService;
 	}
 
+	function createTraceService(): ICustomAiChatTraceService {
+		return {
+			_serviceBrand: undefined,
+			createRun: () => ({ event: () => { }, complete: () => { }, fail: () => { }, cancel: () => { } }),
+			traceEditEvent: () => { },
+		};
+	}
+
 	test('returns error when surfaceId is missing', async () => {
 		const tool = new CustomAiVerifySurfaceBlueprintTool(
 			new TestBlueprintFileService() as unknown as IFileService,
 			new TestContextService(),
 			createConsoleService(),
 			createIxService(),
+			createTraceService(),
 		);
 		const result = await tool.invoke({
 			callId: 'test',
@@ -94,6 +104,7 @@ suite('CustomAiVerifySurfaceBlueprintTool', () => {
 			workspaceContextService,
 			createConsoleService(),
 			createIxService(),
+			createTraceService(),
 		);
 		const result = await tool.invoke({
 			callId: 'test',
@@ -133,6 +144,7 @@ suite('CustomAiVerifySurfaceBlueprintTool', () => {
 			workspaceContextService,
 			createConsoleService(),
 			createIxService(),
+			createTraceService(),
 		);
 		const result = await tool.invoke({
 			callId: 'test',
@@ -166,6 +178,7 @@ suite('CustomAiVerifySurfaceBlueprintTool', () => {
 			workspaceContextService,
 			createConsoleService(),
 			createIxService(),
+			createTraceService(),
 		);
 		const result = await tool.invoke({
 			callId: 'test',

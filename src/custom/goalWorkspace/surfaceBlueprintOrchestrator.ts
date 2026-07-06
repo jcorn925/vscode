@@ -28,6 +28,10 @@ export const SurfaceBlueprintOrchestrator = {
 		repairLimitHandler = handler;
 	},
 
+	hasRepairHandlers(): boolean {
+		return repairHandler !== undefined && repairLimitHandler !== undefined;
+	},
+
 	handleVerificationResult(result: SurfaceBlueprintVerificationResult, surfaceName: string): void {
 		const handoff = SurfaceBuilderHandoffState.getActive();
 		if (!handoff || handoff.kind !== 'surface') {

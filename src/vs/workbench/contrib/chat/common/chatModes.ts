@@ -34,7 +34,6 @@ import { equals as arraysEqual } from '../../../../base/common/arrays.js';
 import { isEqual as isURLEquals } from '../../../../base/common/resources.js';
 import { equals as objectEquals } from '../../../../base/common/objects.js';
 import { Delayer } from '../../../../base/common/async.js';
-import { isCancellationError } from '../../../../base/common/errors.js';
 
 
 export const IChatModeService = createDecorator<IChatModeService>('chatModeService');

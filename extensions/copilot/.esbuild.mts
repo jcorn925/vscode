@@ -38,6 +38,9 @@ const baseNodeBuildOptions = {
 		'applicationinsights-native-metrics',
 		'@opentelemetry/instrumentation',
 		'@azure/opentelemetry-instrumentation-azure-sdk',
+		'@opentelemetry/exporter-trace-otlp-proto',
+		'@opentelemetry/exporter-logs-otlp-proto',
+		'@opentelemetry/exporter-metrics-otlp-proto',
 		'electron', // this is for simulation workbench,
 		'sqlite3',
 		'node-pty', // Required by @github/copilot

@@ -462,10 +462,14 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 
 				const toolsEnabled = this._configurationService.getValue<boolean>('custom.ai.tools.enabled') !== false;
 				const tools = toolsEnabled ? this._buildTools(metadata, request) : [];
+				const modelRequestStartedAt = Date.now();
+				const modelRequestStartedIso = new Date(modelRequestStartedAt).toISOString();
 				trace.event('chat.model.request.started', {
 					round,
 					toolsEnabled,
 					toolCount: tools.length,
+					modelId,
+					startedAt: modelRequestStartedIso,
 					messageSummary: summarizeTraceMessages(messages),
 				});
 
@@ -524,6 +528,9 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 				await lmResponse.result;
 				trace.event('chat.model.request.completed', {
 					round,
+					modelId,
+					startedAt: modelRequestStartedIso,
+					durationMs: Date.now() - modelRequestStartedAt,
 					roundTextChunks,
 					roundResponseChars,
 					roundToolUses,
