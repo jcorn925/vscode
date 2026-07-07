@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Personal Training Demo - GoalConsole.ai</title>
+	<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+	<header class="demo-header" aria-label="Demo header">
+		<a class="brand" href="../../ide-purpose/" aria-label="GoalConsole.ai purpose page">
+			<span class="brand-mark" aria-hidden="true"></span>
+			<span>GoalConsole.ai</span>
+		</a>
+		<nav class="top-links" aria-label="Demo links">
+			<a href="../../ide-purpose/">Purpose</a>
+			<a href="https://github.com/jcorn925/vscode">Repository</a>
+		</nav>
+	</header>
+
+	<main>
+		<section class="intro" aria-labelledby="demo-title">
+			<p class="eyebrow">Interactive product demo</p>
+			<h1 id="demo-title">Build a Client Portal surface for a personal training business.</h1>
+			<p>
+				This scripted demo shows the intended GoalConsole.ai flow: load a business goal,
+				choose a proposed surface, build it, verify it, and preview the finished product surface.
+			</p>
+		</section>
+
+		<section class="workbench" aria-label="GoalConsole.ai personal training demo">
+			<div class="titlebar">
+				<div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+				<strong class="workspace-name">GoalConsole.ai</strong>
+				<nav class="tabs" aria-label="Mock workbench tabs">
+					<span class="tab active">Console</span>
+					<span class="tab">Code</span>
+					<span class="tab existing">Marketing Site</span>
+					<span class="tab existing">Booking</span>
+					<span class="tab add">+ Add Surface</span>
+				</nav>
+			</div>
+
+			<div class="demo-layout">
+				<section class="builder" aria-labelledby="builder-title">
+					<div class="section-title">
+						<p class="eyebrow">Goal workspace</p>
+						<h2 id="builder-title">Online Personal Training Business</h2>
+						<p>Acquire clients and run coaching operations across workspace surfaces.</p>
+					</div>
+
+					<div class="goal-summary" aria-label="Workspace goal details">
+						<div>
+							<span>Business</span>
+							<strong>Online Personal Training Business</strong>
+						</div>
+						<div>
+							<span>North-star metric</span>
+							<strong>active_paid_clients</strong>
+						</div>
+					</div>
+
+					<div class="surface-header">
+						<div>
+							<h3>Proposed surfaces</h3>
+							<p>Select a surface, then press Enter or Build Surface.</p>
+						</div>
+						<div class="status-pill" id="demoStatus" aria-live="polite">Ready</div>
+					</div>
+
+					<div class="surface-grid" id="surfaceGrid" aria-label="Proposed surfaces"></div>
+
+					<div class="builder-actions">
+						<button class="primary-action" id="buildButton" type="button">Build Surface</button>
+						<button class="secondary-action" id="replayButton" type="button">Replay</button>
+					</div>
+
+					<section class="build-log" aria-labelledby="build-log-title">
+						<div class="section-row">
+							<h3 id="build-log-title">Build sequence</h3>
+							<span id="stepCount">0 / 4</span>
+						</div>
+						<ol id="buildSteps"></ol>
+					</section>
+				</section>
+
+				<aside class="agent-plan" aria-labelledby="agent-title">
+					<div class="section-title compact">
+						<p class="eyebrow">Agent Plan</p>
+						<h2 id="agent-title">What will be generated</h2>
+						<p>Static demo only: this page is not running an agent.</p>
+					</div>
+
+					<div class="plan-group">
+						<h3>Workspace definition</h3>
+						<ul id="artifactList"></ul>
+					</div>
+
+					<div class="plan-group">
+						<h3>Client Portal contract</h3>
+						<div class="contract-grid">
+							<div>
+								<span>Routes</span>
+								<p>/, /dashboard, /plans, /progress, /messages, /account</p>
+							</div>
+							<div>
+								<span>Workflows</span>
+								<p>review plan, track progress, message trainer, manage account</p>
+							</div>
+							<div>
+								<span>Entities</span>
+								<p>Client, SessionPlan, ProgressEntry</p>
+							</div>
+							<div>
+								<span>Events</span>
+								<p>client.progress.updated</p>
+							</div>
+						</div>
+					</div>
+				</aside>
+			</div>
+
+			<section class="preview" id="preview" aria-labelledby="preview-title" hidden>
+				<div class="preview-header">
+					<div>
+						<p class="eyebrow">Finished surface</p>
+						<h2 id="preview-title">Client Portal preview</h2>
+					</div>
+					<span class="verified">Verified</span>
+				</div>
+
+				<div class="surface-preview-shell">
+					<nav class="surface-nav" aria-label="Client Portal routes">
+						<strong>Client Portal</strong>
+						<a href="#preview">Client dashboard</a>
+						<a href="#preview">Session plan</a>
+						<a href="#preview">Progress tracker</a>
+						<a href="#preview">Messages</a>
+						<a href="#preview">Account summary</a>
+					</nav>
+					<section class="surface-hero">
+						<p class="eyebrow">Client Portal workflow</p>
+						<h3>Client dashboard</h3>
+						<p>Give clients a clear home for their plan, next session, progress, messages, and account state.</p>
+					</section>
+					<div class="preview-grid">
+						<article>
+							<h4>Workflow steps</h4>
+							<ol>
+								<li>Next session</li>
+								<li>Current plan</li>
+								<li>Weekly progress</li>
+								<li>Trainer message</li>
+							</ol>
+						</article>
+						<article>
+							<h4>Business context</h4>
+							<ul>
+								<li>Client</li>
+								<li>SessionPlan</li>
+								<li>ProgressEntry</li>
+								<li>client.progress.updated</li>
+							</ul>
+						</article>
+						<article class="wide">
+							<h4>Actions</h4>
+							<div class="action-grid">
+								<button type="button">View plan</button>
+								<button type="button">Log progress</button>
+								<button type="button">Message trainer</button>
+							</div>
+						</article>
+					</div>
+				</div>
+			</section>
+		</section>
+	</main>
+
+	<script>
+		const surfaces = [
+			{
+				id: 'marketing',
+				name: 'Marketing Site',
+				status: 'Existing',
+				description: 'Convert visitors into leads with offers, proof, and clear calls to action.',
+				items: ['Hero and offer pages', 'Lead capture forms', 'SEO-ready routes']
+			},
+			{
+				id: 'booking',
+				name: 'Booking',
+				status: 'Existing',
+				description: 'Let prospects pick packages, schedule sessions, and pay without leaving the funnel.',
+				items: ['Package selection', 'Calendar scheduling', 'Checkout and intake forms']
+			},
+			{
+				id: 'client-portal',
+				name: 'Client Portal',
+				status: 'Proposed',
+				description: 'Give clients a home for plans, progress, messages, and account management.',
+				items: ['Session plans and notes', 'Progress tracking', 'Secure account access']
+			},
+			{
+				id: 'trainer-admin',
+				name: 'Trainer Admin',
+				status: 'Proposed',
+				description: 'Run clients, sessions, follow-ups, and day-to-day coaching operations.',
+				items: ['Client roster', 'Session management', 'Coach dashboard']
+			}
+		];
+		
+		const artifacts = [
+			{ label: 'workspace.goal.json', meta: 'Goal, brand, and registered surfaces' },
+			{ label: 'apps/client-portal', meta: 'Next.js App Router surface' },
+			{ label: '.agent/surfaces/client-portal.blueprint.json', meta: 'Verified surface contract' },
+			{ label: 'workflows/client-portal.workflow.md', meta: 'Client workflow memory' }
+		];
+		
+		const buildSteps = [
+			{ label: 'Drafting blueprint', detail: 'Routes, workflows, entities, and acceptance criteria are planned.' },
+			{ label: 'Creating app routes', detail: '/, /dashboard, /plans, /progress, /messages, and /account are scaffolded.' },
+			{ label: 'Connecting workflows', detail: 'Client, SessionPlan, ProgressEntry, and client.progress.updated are attached.' },
+			{ label: 'Verifying surface', detail: 'The blueprint contract is checked before the finished preview appears.' }
+		];
+		
+		const surfaceGrid = document.querySelector('#surfaceGrid');
+		const artifactList = document.querySelector('#artifactList');
+		const buildButton = document.querySelector('#buildButton');
+		const replayButton = document.querySelector('#replayButton');
+		const demoStatus = document.querySelector('#demoStatus');
+		const buildStepsList = document.querySelector('#buildSteps');
+		const stepCount = document.querySelector('#stepCount');
+		const preview = document.querySelector('#preview');
+		
+		let selectedSurfaceId = 'client-portal';
+		let isBuilding = false;
+		let timers = [];
+		
+		function renderSurfaces() {
+			surfaceGrid.innerHTML = surfaces.map(surface => `
+				<button
+					class="surface-card ${surface.id === selectedSurfaceId ? 'selected' : ''}"
+					type="button"
+					data-surface-id="${surface.id}"
+					aria-pressed="${surface.id === selectedSurfaceId}"
+				>
+					<span class="surface-card-top">
+						<strong>${surface.name}</strong>
+						<em>${surface.status}</em>
+					</span>
+					<span>${surface.description}</span>
+					<ul>${surface.items.map(item => `<li>${item}</li>`).join('')}</ul>
+				</button>
+			`).join('');
+		
+			for (const button of surfaceGrid.querySelectorAll('button')) {
+				button.addEventListener('click', () => selectSurface(button.dataset.surfaceId));
+				button.addEventListener('keydown', event => {
+					if (event.key === 'Enter') {
+						event.preventDefault();
+						if (button.dataset.surfaceId !== selectedSurfaceId) {
+							selectSurface(button.dataset.surfaceId);
+						}
+						startBuild();
+					}
+				});
+			}
+		}
+		
+		function renderArtifacts(activeIndex = -1) {
+			artifactList.innerHTML = artifacts.map((artifact, index) => `
+				<li class="${index <= activeIndex ? 'complete' : ''}">
+					<span aria-hidden="true">${index <= activeIndex ? '✓' : '○'}</span>
+					<div>
+						<strong>${artifact.label}</strong>
+						<p>${artifact.meta}</p>
+					</div>
+				</li>
+			`).join('');
+		}
+		
+		function renderSteps(activeIndex = -1, complete = false) {
+			buildStepsList.innerHTML = buildSteps.map((step, index) => {
+				const state = complete || index < activeIndex ? 'complete' : index === activeIndex ? 'active' : '';
+				const marker = complete || index < activeIndex ? '✓' : index === activeIndex ? '...' : '○';
+				return `
+					<li class="${state}">
+						<span aria-hidden="true">${marker}</span>
+						<div>
+							<strong>${step.label}</strong>
+							<p>${step.detail}</p>
+						</div>
+					</li>
+				`;
+			}).join('');
+			const completedSteps = complete ? buildSteps.length : Math.max(0, Math.min(activeIndex, buildSteps.length));
+			stepCount.textContent = `${completedSteps} / ${buildSteps.length}`;
+		}
+		
+		function selectSurface(surfaceId) {
+			if (isBuilding) {
+				return;
+			}
+			selectedSurfaceId = surfaceId;
+			renderSurfaces();
+			buildButton.disabled = selectedSurfaceId !== 'client-portal';
+			demoStatus.textContent = selectedSurfaceId === 'client-portal' ? 'Ready' : 'Demo builds Client Portal first';
+		}
+		
+		function clearTimers() {
+			for (const timer of timers) {
+				window.clearTimeout(timer);
+			}
+			timers = [];
+		}
+		
+		function resetDemo() {
+			clearTimers();
+			isBuilding = false;
+			selectedSurfaceId = 'client-portal';
+			demoStatus.textContent = 'Ready';
+			buildButton.disabled = false;
+			buildButton.textContent = 'Build Surface';
+			preview.hidden = true;
+			renderSurfaces();
+			renderArtifacts();
+			renderSteps();
+		
+			const clientPortalCard = surfaceGrid.querySelector('[data-surface-id="client-portal"]');
+			if (clientPortalCard) {
+				clientPortalCard.focus();
+			}
+		}
+		
+		function startBuild() {
+			if (isBuilding || selectedSurfaceId !== 'client-portal') {
+				return;
+			}
+		
+			clearTimers();
+			isBuilding = true;
+			buildButton.disabled = true;
+			buildButton.textContent = 'Building...';
+			preview.hidden = true;
+			demoStatus.textContent = 'Building Client Portal';
+			renderSteps(0);
+			renderArtifacts(-1);
+		
+			buildSteps.forEach((_, index) => {
+				const timer = window.setTimeout(() => {
+					renderSteps(index + 1);
+					renderArtifacts(index);
+					demoStatus.textContent = buildSteps[index].label;
+				}, 650 + index * 850);
+				timers.push(timer);
+			});
+		
+			const finishTimer = window.setTimeout(() => {
+				isBuilding = false;
+				renderSteps(buildSteps.length, true);
+				renderArtifacts(artifacts.length - 1);
+				demoStatus.textContent = 'Verified';
+				buildButton.textContent = 'Build Surface';
+				buildButton.disabled = false;
+				preview.hidden = false;
+				preview.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			}, 650 + buildSteps.length * 850);
+			timers.push(finishTimer);
+		}
+		
+		renderSurfaces();
+		renderArtifacts();
+		renderSteps();
+		
+		buildButton.addEventListener('click', startBuild);
+		replayButton.addEventListener('click', resetDemo);
+	</script>
+</body>
+</html>
