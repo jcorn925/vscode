@@ -15,6 +15,7 @@ import { WorkbenchPhase, registerWorkbenchContribution2 } from '../../../common/
 import { IWorkbenchContribution } from '../../../common/contributions.js';
 import { findRegenerableNodes, findRetryableLeaf, IAgentTaskTreeService } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import type { AgentTaskNode, AgentTaskTree } from '../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
+import { formatNodeDetail, statusIconQuickPick } from '../../../../../custom/agentTaskTree/surfaceTaskTreeUiHelpers.js';
 import '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 
 const CATEGORY = localize2('custom.agentTaskTree.category', 'Agent');
@@ -118,11 +119,12 @@ registerAction2(class extends Action2 {
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const service = accessor.get(IAgentTaskTreeService);
+		const notifications = accessor.get(INotificationService);
 		const tree = await service.loadLatestResumableTaskTree();
 		if (tree) {
 			await service.pauseTaskTree(tree.id);
 		}
-		accessor.get(INotificationService).notify({ severity: Severity.Info, message: localize('custom.agentTaskTree.pause.done', 'Paused current task tree.') });
+		notifications.notify({ severity: Severity.Info, message: localize('custom.agentTaskTree.pause.done', 'Paused current task tree.') });
 	}
 });
 
@@ -138,12 +140,13 @@ registerAction2(class extends Action2 {
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const service = accessor.get(IAgentTaskTreeService);
+		const notifications = accessor.get(INotificationService);
 		const tree = await service.loadLatestResumableTaskTree();
 		const node = tree ? findRetryableLeaf(tree) : undefined;
 		if (tree && node) {
 			await service.retryTask(tree.id, node.id);
 		}
-		accessor.get(INotificationService).notify({ severity: Severity.Info, message: localize('custom.agentTaskTree.retry.done', 'Retried current task if one was selected.') });
+		notifications.notify({ severity: Severity.Info, message: localize('custom.agentTaskTree.retry.done', 'Retried current task if one was selected.') });
 	}
 });
 
@@ -159,12 +162,13 @@ registerAction2(class extends Action2 {
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const service = accessor.get(IAgentTaskTreeService);
+		const notifications = accessor.get(INotificationService);
 		const tree = await service.loadLatestResumableTaskTree();
 		const node = tree ? findRetryableLeaf(tree) : undefined;
 		if (tree && node) {
 			await service.skipTask(tree.id, node.id, localize('custom.agentTaskTree.skip.note', 'Skipped from command palette.'));
 		}
-		accessor.get(INotificationService).notify({ severity: Severity.Info, message: localize('custom.agentTaskTree.skip.done', 'Skipped current task if one was selected.') });
+		notifications.notify({ severity: Severity.Info, message: localize('custom.agentTaskTree.skip.done', 'Skipped current task if one was selected.') });
 	}
 });
 
@@ -226,11 +230,12 @@ registerAction2(class extends Action2 {
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const service = accessor.get(IAgentTaskTreeService);
 		const quickInput = accessor.get(IQuickInputService);
+		const notifications = accessor.get(INotificationService);
 		const tree = await service.loadLatestResumableTaskTree();
 		if (tree) {
 			await showTaskTreeQuickPick(quickInput, tree);
 		} else {
-			accessor.get(INotificationService).notify({ severity: Severity.Info, message: localize('custom.agentTaskTree.show.none', 'No active or paused task tree was found.') });
+			notifications.notify({ severity: Severity.Info, message: localize('custom.agentTaskTree.show.none', 'No active or paused task tree was found.') });
 		}
 	}
 });
@@ -255,37 +260,15 @@ function renderTaskTreeItems(tree: AgentTaskTree): IQuickPickItem[] {
 }
 
 function pushNode(items: IQuickPickItem[], node: AgentTaskNode, depth: number): void {
-	const prefix = depth === 0 ? '' : `${'  '.repeat(depth)}↳ `;
+	const prefix = depth === 0 ? '' : `${'  '.repeat(depth)}-> `;
 	items.push({
-		label: `${prefix}${statusIcon(node.status)} ${node.title}`,
+		label: `${prefix}${statusIconQuickPick(node.status)} ${node.title}`,
 		description: node.status,
 		detail: formatNodeDetail(node),
 	});
 	for (const child of node.children ?? []) {
 		pushNode(items, child, depth + 1);
 	}
-}
-
-function statusIcon(status: AgentTaskNode['status']): string {
-	switch (status) {
-		case 'complete': return '$(pass)';
-		case 'in_progress': return '$(sync~spin)';
-		case 'blocked': return '$(warning)';
-		case 'failed': return '$(error)';
-		case 'skipped': return '$(debug-step-over)';
-		case 'pending':
-		default: return '$(circle-outline)';
-	}
-}
-
-function formatNodeDetail(node: AgentTaskNode): string | undefined {
-	const details = [
-		node.description,
-		node.implementation?.changedFiles?.length ? `Changed: ${node.implementation.changedFiles.join(', ')}` : undefined,
-		node.implementation?.verification ? `Verification: ${node.implementation.verification}` : undefined,
-		node.implementation?.error ? `Error: ${node.implementation.error}` : undefined,
-	].filter((item): item is string => Boolean(item));
-	return details.length ? details.join('  •  ') : undefined;
 }
 
 class AgentTaskTreeResumeContribution extends Disposable implements IWorkbenchContribution {

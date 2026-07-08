@@ -20,6 +20,7 @@ import type {
 	AgentTaskNodeStatus,
 	AgentTaskRunResult,
 	AgentTaskTree,
+	AgentTaskTreeSurfaceMetadata,
 } from './agentTaskTreeTypes.js';
 
 export const AGENT_TASK_TREES_FOLDER = 'task-trees';
@@ -29,9 +30,10 @@ export const IAgentTaskTreeService = createDecorator<IAgentTaskTreeService>('age
 export interface IAgentTaskTreeService {
 	readonly _serviceBrand: undefined;
 	readonly onDidChangeTaskTree: Event<AgentTaskTree | undefined>;
-	generateTaskTree(prompt: string): Promise<AgentTaskTree>;
+	generateTaskTree(prompt: string, metadata?: AgentTaskTreeSurfaceMetadata): Promise<AgentTaskTree>;
 	loadTaskTree(treeId: string): Promise<AgentTaskTree | undefined>;
 	loadLatestResumableTaskTree(): Promise<AgentTaskTree | undefined>;
+	loadLatestTaskTreeForSurface(surfaceId: string): Promise<AgentTaskTree | undefined>;
 	findNextPendingLeaf(tree: AgentTaskTree): AgentTaskNode | undefined;
 	continueNextTask(treeId: string): Promise<AgentTaskRunResult>;
 	resumeTaskTree(treeId: string): Promise<void>;
@@ -60,7 +62,7 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 		this.executor = executor;
 	}
 
-	async generateTaskTree(prompt: string): Promise<AgentTaskTree> {
+	async generateTaskTree(prompt: string, metadata?: AgentTaskTreeSurfaceMetadata): Promise<AgentTaskTree> {
 		const workspaceFolder = this.requireWorkspaceFolder();
 		const now = new Date().toISOString();
 		const tree: AgentTaskTree = deriveParentStatuses({
@@ -72,6 +74,9 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 			status: 'active',
 			roots: createInitialTaskTree(prompt.trim()),
 			cursor: {},
+			surfaceId: metadata?.surfaceId,
+			surfaceName: metadata?.surfaceName,
+			templateId: metadata?.templateId,
 		});
 		await this.writeTaskTree(workspaceFolder, tree);
 		this._onDidChangeTaskTree.fire(tree);
@@ -88,6 +93,16 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 	}
 
 	async loadLatestResumableTaskTree(): Promise<AgentTaskTree | undefined> {
+		return this.loadLatestMatchingTaskTree(tree => tree.status === 'active' || tree.status === 'paused');
+	}
+
+	async loadLatestTaskTreeForSurface(surfaceId: string): Promise<AgentTaskTree | undefined> {
+		return this.loadLatestMatchingTaskTree(tree =>
+			tree.surfaceId === surfaceId
+			&& (tree.status === 'active' || tree.status === 'paused' || tree.status === 'complete'));
+	}
+
+	private async loadLatestMatchingTaskTree(predicate: (tree: AgentTaskTree) => boolean): Promise<AgentTaskTree | undefined> {
 		const workspaceFolder = this.getWorkspaceFolder();
 		if (!workspaceFolder) {
 			return undefined;
@@ -101,7 +116,7 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 			let latest: AgentTaskTree | undefined;
 			for (const file of files) {
 				const tree = await readTaskTree(this.fileService, joinPath(folder, file.name));
-				if (!tree || (tree.status !== 'active' && tree.status !== 'paused')) {
+				if (!tree || !predicate(tree)) {
 					continue;
 				}
 				if (!latest || tree.updatedAt > latest.updatedAt) {
@@ -313,7 +328,22 @@ export function parseTaskTree(raw: unknown): AgentTaskTree | undefined {
 		currentNodeId: optionalString(raw.cursor.currentNodeId),
 		lastCompletedNodeId: optionalString(raw.cursor.lastCompletedNodeId),
 	} : undefined;
-	return deriveParentStatuses({ version: 1, id, prompt, createdAt, updatedAt, status: raw.status, roots, cursor });
+	const surfaceId = optionalString(raw.surfaceId);
+	const surfaceName = optionalString(raw.surfaceName);
+	const templateId = optionalString(raw.templateId);
+	return deriveParentStatuses({
+		version: 1,
+		id,
+		prompt,
+		createdAt,
+		updatedAt,
+		status: raw.status,
+		roots,
+		cursor,
+		surfaceId,
+		surfaceName,
+		templateId,
+	});
 }
 
 export function findNextPendingLeaf(tree: AgentTaskTree): AgentTaskNode | undefined {
@@ -339,6 +369,22 @@ export function findRetryableLeaf(tree: AgentTaskTree): AgentTaskNode | undefine
 
 export function findRegenerableNodes(tree: AgentTaskTree): AgentTaskNode[] {
 	return flattenNodes(tree.roots).filter(node => node.type !== 'leaf' && (node.children?.length ?? 0) > 0);
+}
+
+export function computeTaskTreeProgress(tree: AgentTaskTree): { completed: number; total: number; percent: number } {
+	const leaves = flattenNodes(tree.roots).filter(node => node.type === 'leaf');
+	const total = leaves.length;
+	const completed = leaves.filter(node => node.status === 'complete' || node.status === 'skipped').length;
+	const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
+	return { completed, total, percent };
+}
+
+export function treeHasActiveWork(tree: AgentTaskTree): boolean {
+	if (tree.status === 'active' || tree.status === 'paused' || tree.status === 'failed') {
+		return true;
+	}
+	return flattenNodes(tree.roots).some(node =>
+		node.type === 'leaf' && (node.status === 'blocked' || node.status === 'in_progress' || node.status === 'failed'));
 }
 
 export function deriveParentStatuses(tree: AgentTaskTree): AgentTaskTree {
@@ -448,7 +494,7 @@ function resetNodes(nodes: readonly AgentTaskNode[]): AgentTaskNode[] {
 	}));
 }
 
-function flattenNodes(nodes: readonly AgentTaskNode[]): AgentTaskNode[] {
+export function flattenNodes(nodes: readonly AgentTaskNode[]): AgentTaskNode[] {
 	const result: AgentTaskNode[] = [];
 	for (const node of nodes) {
 		result.push(node);

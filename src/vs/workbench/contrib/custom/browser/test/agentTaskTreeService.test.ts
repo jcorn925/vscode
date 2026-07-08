@@ -140,6 +140,128 @@ suite('agentTaskTreeService', () => {
 		assert.strictEqual(nodes[0].id, 'root-1');
 	});
 
+	test('parses optional surface metadata and remains backward compatible', () => {
+		const withSurface = parseTaskTree({
+			version: 1,
+			id: 'tree-surface',
+			prompt: 'Build surface',
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-02T00:00:00.000Z',
+			status: 'active',
+			surfaceId: 'marketing',
+			surfaceName: 'Marketing Site',
+			templateId: 'marketing',
+			roots: [{
+				id: 'root-1',
+				title: 'Root',
+				type: 'root',
+				status: 'pending',
+				order: 1,
+				children: [{
+					id: 'leaf-1',
+					parentId: 'root-1',
+					title: 'First',
+					type: 'leaf',
+					status: 'pending',
+					order: 1,
+				}],
+			}],
+		});
+		assert.strictEqual(withSurface?.surfaceId, 'marketing');
+		assert.strictEqual(withSurface?.surfaceName, 'Marketing Site');
+		assert.strictEqual(withSurface?.templateId, 'marketing');
+
+		const legacy = parseTaskTree({
+			version: 1,
+			id: 'tree-legacy',
+			prompt: 'Legacy',
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-01T00:00:00.000Z',
+			status: 'active',
+			roots: [{
+				id: 'root-1',
+				title: 'Root',
+				type: 'root',
+				status: 'pending',
+				order: 1,
+				children: [{
+					id: 'leaf-1',
+					parentId: 'root-1',
+					title: 'First',
+					type: 'leaf',
+					status: 'pending',
+					order: 1,
+				}],
+			}],
+		});
+		assert.strictEqual(legacy?.surfaceId, undefined);
+	});
+
+	test('generateTaskTree persists optional surface metadata', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		try {
+			const tree = await service.generateTaskTree('Build marketing surface', {
+				surfaceId: 'marketing',
+				surfaceName: 'Marketing Site',
+				templateId: 'marketing',
+			});
+			assert.strictEqual(tree.surfaceId, 'marketing');
+			const persisted = await service.loadTaskTree(tree.id);
+			assert.strictEqual(persisted?.surfaceName, 'Marketing Site');
+			assert.strictEqual(persisted?.templateId, 'marketing');
+		} finally {
+			service.dispose();
+		}
+	});
+
+	test('loadLatestTaskTreeForSurface returns newest matching tree and ignores others', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		const marketingOld = {
+			...createTree(),
+			id: 'marketing-old',
+			surfaceId: 'marketing',
+			status: 'complete' as const,
+			updatedAt: '2026-01-01T00:00:00.000Z',
+		};
+		const marketingNew = {
+			...createTree(),
+			id: 'marketing-new',
+			surfaceId: 'marketing',
+			status: 'active' as const,
+			updatedAt: '2026-01-03T00:00:00.000Z',
+		};
+		const bookingTree = {
+			...createTree(),
+			id: 'booking-tree',
+			surfaceId: 'booking',
+			status: 'active' as const,
+			updatedAt: '2026-01-04T00:00:00.000Z',
+		};
+		const globalTree = {
+			...createTree(),
+			id: 'global-tree',
+			status: 'active' as const,
+			updatedAt: '2026-01-05T00:00:00.000Z',
+		};
+		await fileService.writeTree(marketingOld);
+		await fileService.writeTree(marketingNew);
+		await fileService.writeTree(bookingTree);
+		await fileService.writeTree(globalTree);
+
+		try {
+			const latestMarketing = await service.loadLatestTaskTreeForSurface('marketing');
+			assert.strictEqual(latestMarketing?.id, 'marketing-new');
+			const latestBooking = await service.loadLatestTaskTreeForSurface('booking');
+			assert.strictEqual(latestBooking?.id, 'booking-tree');
+			const missing = await service.loadLatestTaskTreeForSurface('analytics');
+			assert.strictEqual(missing, undefined);
+		} finally {
+			service.dispose();
+		}
+	});
+
 	test('retry and skip update only the target leaf', async () => {
 		const fileService = new TestFileService();
 		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);

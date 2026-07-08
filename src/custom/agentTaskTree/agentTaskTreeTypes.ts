@@ -34,6 +34,12 @@ export interface AgentTaskNode {
 	implementation?: AgentTaskImplementation;
 }
 
+export interface AgentTaskTreeSurfaceMetadata {
+	readonly surfaceId?: string;
+	readonly surfaceName?: string;
+	readonly templateId?: string;
+}
+
 export interface AgentTaskTree {
 	readonly version: 1;
 	readonly id: string;
@@ -43,6 +49,9 @@ export interface AgentTaskTree {
 	status: AgentTaskTreeStatus;
 	roots: AgentTaskNode[];
 	cursor?: AgentTaskTreeCursor;
+	readonly surfaceId?: string;
+	readonly surfaceName?: string;
+	readonly templateId?: string;
 }
 
 export interface AgentTaskRunResult {

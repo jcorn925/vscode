@@ -103,6 +103,11 @@ import { IWorkflowRunnerService } from '../../../../../custom/goalWorkspace/work
 import { discoverIxSubsystemRegions } from '../../../../../custom/goalWorkspace/surfaceBlueprintIxDiscovery.js';
 import { ICustomAiChatTraceService } from '../../../../../custom/ai/browser/customAiChatTrace.js';
 import { SurfaceFeatureChecklistPanel } from './surfaceFeatureChecklistPanel.js';
+import { SurfaceTaskTreePanel } from './surfaceTaskTreePanel.js';
+import { IAgentTaskTreeService } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
+import '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
+import type { AgentTaskTree } from '../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
+import { resolveDefaultSurfaceMainView, shouldShowSurfaceMainViewToggle, type SurfaceMainView } from '../../../../../custom/agentTaskTree/surfaceMainViewHelpers.js';
 import type { WorkflowSpec, WorkflowStep } from '../../../../../custom/goalWorkspace/workflowCatalogTypes.js';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
@@ -110,6 +115,7 @@ const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
 const STORAGE_CONTEXT_GATHERING_OPEN = 'modeShell.contextGatheringOpen';
 const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
 const STORAGE_ACTIVE_UI_CHAT_SURFACE = 'modeShell.activeUiChatSurface';
+const STORAGE_SURFACE_MAIN_VIEW_PREFIX = 'modeShell.surfaceMainView.';
 const ADD_SURFACE_ID = '__add_surface__';
 
 export async function runSurfaceWorkflowFromModeShell(surfaceId?: string): Promise<boolean> {
@@ -297,6 +303,12 @@ class ModeShellContribution extends Disposable {
 	private readonly uiRuntimeText: HTMLElement;
 	private readonly uiSurfaceSwitcher: HTMLElement;
 	private readonly uiSurfaceLaunchPanel: HTMLElement;
+	private readonly uiSurfaceMainViewToggle: HTMLElement;
+	private readonly uiSurfaceTaskTreePanelRoot: HTMLElement;
+	private readonly uiSurfaceTaskTreeToggleButtons = new Map<SurfaceMainView, HTMLButtonElement>();
+	private surfaceTaskTreePanel: SurfaceTaskTreePanel | undefined;
+	private surfaceMainView: SurfaceMainView = 'taskTree';
+	private selectedSurfaceTaskTree: AgentTaskTree | undefined;
 	private readonly uiSurfaceSetupDashboard: HTMLElement;
 	private uiSurfaceSetupGoalNameInput!: HTMLInputElement;
 	private uiSurfaceSetupGoalDescriptionInput!: HTMLTextAreaElement;
@@ -433,6 +445,7 @@ class ModeShellContribution extends Disposable {
 		@IWorkflowCatalogService private readonly workflowCatalogService: IWorkflowCatalogService,
 		@IWorkflowRunnerService private readonly workflowRunnerService: IWorkflowRunnerService,
 		@ICustomAiChatTraceService private readonly customAiChatTraceService: ICustomAiChatTraceService,
+		@IAgentTaskTreeService private readonly agentTaskTreeService: IAgentTaskTreeService,
 	) {
 		super();
 		ModeShellContribution.activeInstance = this;
@@ -1422,6 +1435,188 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-ui-surface-launch-run:hover {
 				background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-main-view-toggle {
+				display: none;
+				flex: 0 0 auto;
+				gap: 0;
+				padding: 8px 10px 0;
+				align-items: center;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-main-view-toggle:not(.hidden) {
+				display: flex;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-main-view-toggle button {
+				flex: 0 0 auto;
+				height: 28px;
+				padding: 0 12px;
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.24));
+				background: var(--vscode-editorWidget-background);
+				color: var(--vscode-foreground);
+				font-size: 12px;
+				font-weight: 600;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-main-view-toggle button:first-child {
+				border-top-left-radius: 6px;
+				border-bottom-left-radius: 6px;
+				border-right: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-main-view-toggle button:last-child {
+				border-top-right-radius: 6px;
+				border-bottom-right-radius: 6px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-main-view-toggle button.active {
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-task-tree-panel {
+				display: none;
+				flex: 1 1 auto;
+				min-height: 0;
+				overflow: hidden;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-task-tree-panel:not(.hidden) {
+				display: flex;
+				flex-direction: column;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree {
+				display: flex;
+				flex-direction: column;
+				flex: 1 1 auto;
+				min-height: 0;
+				overflow: hidden;
+				padding: 12px 14px;
+				gap: 10px;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-header {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+				flex: 0 0 auto;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-prompt {
+				font-size: 13px;
+				font-weight: 600;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-status {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+				text-transform: uppercase;
+				letter-spacing: 0.04em;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-progress {
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-progress-bar {
+				height: 6px;
+				border-radius: 999px;
+				background: var(--vscode-progressBar-background, var(--vscode-button-background));
+				width: 0%;
+				transition: width 0.2s ease;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-progress-label {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-list {
+				flex: 1 1 auto;
+				min-height: 0;
+				overflow: auto;
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
+				border-radius: 8px;
+				padding: 8px 0;
+				background: var(--vscode-editorWidget-background);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: flex-start;
+				gap: 6px;
+				padding: 6px 8px;
+				font-size: 12px;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-current {
+				background: var(--vscode-list-activeSelectionBackground);
+				color: var(--vscode-list-activeSelectionForeground);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-icon {
+				flex: 0 0 auto;
+				width: 14px;
+				text-align: center;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-title {
+				flex: 1 1 auto;
+				min-width: 0;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-detail {
+				flex: 1 1 100%;
+				padding-left: 20px;
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-actions {
+				flex: 1 1 100%;
+				display: flex;
+				gap: 6px;
+				padding-left: 20px;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-controls {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px;
+				flex: 0 0 auto;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-control,
+			.monaco-workbench .custom-mode-surface-task-tree-inline-action {
+				height: 26px;
+				padding: 0 10px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-button-border, transparent);
+				background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+				color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+				font-size: 12px;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-control:disabled,
+			.monaco-workbench .custom-mode-surface-task-tree-inline-action:disabled {
+				opacity: 0.5;
+				cursor: default;
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-task-tree .custom-mode-ui-frame,
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-task-tree .custom-mode-ui-webview,
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-task-tree .custom-mode-ui-surface-empty {
+				display: none !important;
 			}
 
 			.monaco-workbench .custom-mode-setup.custom-mode-setup-hidden {
@@ -3537,6 +3732,39 @@ class ModeShellContribution extends Disposable {
 		});
 		this._register(addDisposableListener(this.uiSurfaceSwitcher, 'click', event => this.onSurfaceSwitcherClick(event as MouseEvent)));
 		this.uiSurfaceLaunchPanel = $('div.custom-mode-ui-surface-launch-panel.hidden');
+		this.uiSurfaceMainViewToggle = $('div.custom-mode-ui-surface-main-view-toggle.hidden', {
+			role: 'tablist',
+			'aria-label': localize('customMode.surfaceMainViewToggle', 'Surface main view'),
+		});
+		const taskTreeToggleButton = $('button', {
+			type: 'button',
+			role: 'tab',
+			'aria-selected': 'true',
+		}, localize('customMode.surfaceMainViewTaskTree', 'Task Tree')) as HTMLButtonElement;
+		const previewToggleButton = $('button', {
+			type: 'button',
+			role: 'tab',
+			'aria-selected': 'false',
+		}, localize('customMode.surfaceMainViewPreview', 'Preview')) as HTMLButtonElement;
+		this.uiSurfaceTaskTreeToggleButtons.set('taskTree', taskTreeToggleButton);
+		this.uiSurfaceTaskTreeToggleButtons.set('preview', previewToggleButton);
+		this.uiSurfaceMainViewToggle.appendChild(taskTreeToggleButton);
+		this.uiSurfaceMainViewToggle.appendChild(previewToggleButton);
+		this._register(addDisposableListener(taskTreeToggleButton, 'click', () => this.setSurfaceMainView('taskTree')));
+		this._register(addDisposableListener(previewToggleButton, 'click', () => this.setSurfaceMainView('preview')));
+		this.uiSurfaceTaskTreePanelRoot = $('div.custom-mode-ui-surface-task-tree-panel.hidden');
+		this.surfaceTaskTreePanel = this._register(new SurfaceTaskTreePanel(this.uiSurfaceTaskTreePanelRoot, this.agentTaskTreeService));
+		this._register(this.agentTaskTreeService.onDidChangeTaskTree(tree => {
+			if (!tree?.surfaceId || tree.surfaceId !== this.selectedSurfaceId) {
+				return;
+			}
+			this.selectedSurfaceTaskTree = tree;
+			this.surfaceTaskTreePanel?.render(tree);
+			if (!this.getStoredSurfaceMainView(tree.surfaceId)) {
+				this.surfaceMainView = resolveDefaultSurfaceMainView(tree, this.isSelectedSurfacePreviewReachable());
+			}
+			this.syncSurfaceMainView();
+		}));
 		this.uiSurfaceSetupDashboard = this.createSurfaceSetupDashboard();
 		this.uiSurfaceEmptyTitle = $('div.custom-mode-ui-surface-empty-title');
 		this.uiSurfaceEmptySubtitle = $('div.custom-mode-ui-surface-empty-subtitle');
@@ -3546,7 +3774,9 @@ class ModeShellContribution extends Disposable {
 				this.uiSurfaceEmptySubtitle
 			)
 		);
+		this.uiBrowserShell.appendChild(this.uiSurfaceMainViewToggle);
 		this.uiBrowserShell.appendChild(this.uiSurfaceLaunchPanel);
+		this.uiBrowserShell.appendChild(this.uiSurfaceTaskTreePanelRoot);
 		this.uiBrowserShell.appendChild(this.uiSurfaceSetupDashboard);
 		this.uiBrowserShell.appendChild(this.uiSurfaceEmptyState);
 		this.uiBrowserShell.appendChild(this.uiBrowser);
@@ -5142,6 +5372,7 @@ class ModeShellContribution extends Disposable {
 	}): Promise<void> {
 		if (await this.isSurfaceScaffolded(options.surfaceId)) {
 			this.selectGoalSurface(options.surfaceId);
+			await this.loadSelectedSurfaceTaskTree();
 			return;
 		}
 		await this.draftSurfacePrompt(options);
@@ -5262,6 +5493,7 @@ class ModeShellContribution extends Disposable {
 		const { templateId, surfaceId, surfaceName, workflow } = options;
 		const phase: SurfaceHandoffPhase = 'scaffold';
 		const inputText = this.composeSurfaceHandoffInputText({ surfaceName, surfaceId, workflow, phase });
+		await this.ensureSurfaceTaskTree(surfaceId, inputText, { surfaceId, surfaceName, templateId });
 		try {
 			const workspaceFolder = this.getWorkspaceFolderUri();
 			if (!workspaceFolder) {
@@ -5319,6 +5551,8 @@ class ModeShellContribution extends Disposable {
 			}
 			this.uiChatWidget.setInput(inputText);
 			this.uiChatWidget.focusInput();
+			this.selectGoalSurface(surfaceId);
+			this.setSurfaceMainView('taskTree');
 		} catch (e: unknown) {
 			this.pushUiRuntimeLog(`[surface-setup:chat] failed to draft prompt: ${String((e as Error)?.message ?? e)}`);
 		}
@@ -5384,9 +5618,24 @@ class ModeShellContribution extends Disposable {
 		}
 		this.ensureWorkspaceView();
 		this.renderGoalSurfaceButtons(this.consoleService.getSurfaces());
-		this.routeSelectedSurfacePreview();
+		if (surfaceId !== ADD_SURFACE_ID) {
+			const storedView = this.getStoredSurfaceMainView(surfaceId);
+			if (storedView) {
+				this.surfaceMainView = storedView;
+			}
+		}
+		this.refreshSelectedSurfaceTaskTreeAndRoute();
 		this.refreshStartCommandHints();
 		this.setActiveUiChatSurfaceFromSurfaceTab(surfaceId);
+	}
+
+	private refreshSelectedSurfaceTaskTreeAndRoute(): void {
+		void this.loadSelectedSurfaceTaskTree().then(() => {
+			if (this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID && !this.getStoredSurfaceMainView(this.selectedSurfaceId)) {
+				this.surfaceMainView = resolveDefaultSurfaceMainView(this.selectedSurfaceTaskTree, this.isSelectedSurfacePreviewReachable());
+			}
+			this.routeSelectedSurfacePreview();
+		});
 	}
 
 	private syncGoalSurfaceSwitcher(): void {
@@ -5415,7 +5664,7 @@ class ModeShellContribution extends Disposable {
 			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
 			this.uiSurfaceButtons.clear();
 			this.uiSurfaceSwitcher.replaceChildren();
-			this.routeSelectedSurfacePreview();
+			this.refreshSelectedSurfaceTaskTreeAndRoute();
 			this.refreshStartCommandHints();
 			this.refreshUiChatTabsAndSession();
 			return;
@@ -5429,7 +5678,7 @@ class ModeShellContribution extends Disposable {
 		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, this.selectedSurfaceId, StorageScope.WORKSPACE, StorageTarget.USER);
 
 		this.renderGoalSurfaceButtons(surfaces);
-		this.routeSelectedSurfacePreview();
+		this.refreshSelectedSurfaceTaskTreeAndRoute();
 		void this.freeWorkspaceSurfacePortsAtStartup(surfaces);
 		this.refreshStartCommandHints();
 		this.refreshUiChatTabsAndSession();
@@ -5638,7 +5887,6 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 		this.updateSurfaceFeatureChecklistVisibility();
-		this.renderSelectedSurfaceLaunchPanel();
 
 		if (this.contextGatheringOpen) {
 			this.container.classList.add('custom-mode-ui-surface-selected');
@@ -5646,15 +5894,12 @@ class ModeShellContribution extends Disposable {
 				this.setAddSurfaceState();
 				this.clearEmbeddedUiUrl();
 				this.pushUiRuntimeLog('[surface] selected add surface');
-				return;
+			} else {
+				this.setGoalOverviewState();
+				this.clearEmbeddedUiUrl();
+				this.pushUiRuntimeLog('[surface] context gathering open');
 			}
-			this.setGoalOverviewState();
-			this.clearEmbeddedUiUrl();
-			this.pushUiRuntimeLog('[surface] context gathering open');
-			return;
-		}
-
-		if (this.selectedSurfaceId === ADD_SURFACE_ID) {
+		} else if (this.selectedSurfaceId === ADD_SURFACE_ID) {
 			this.contextGatheringOpen = true;
 			this.persistContextGatheringOpen();
 			this.syncContextGatheringUi();
@@ -5662,30 +5907,108 @@ class ModeShellContribution extends Disposable {
 			this.setAddSurfaceState();
 			this.clearEmbeddedUiUrl();
 			this.pushUiRuntimeLog('[surface] selected add surface');
-			return;
+		} else {
+			const surface = this.getSelectedSurface();
+			this.container.classList.toggle('custom-mode-ui-surface-selected', Boolean(surface));
+			if (!surface) {
+				this.setSurfaceEmptyState(undefined);
+			} else {
+				const url = surface.localUrl;
+				if (!url) {
+					this.setSurfaceMissingUrlState(surface);
+					this.clearEmbeddedUiUrl();
+					this.logSelectedSurfaceRoute(surface, undefined);
+				} else {
+					this.setSurfaceEmptyState(undefined);
+					if (!this.embeddedUiShowsUrl(url)) {
+						this.setEmbeddedUiUrl(url);
+					}
+					void this.checkUrlReachable(url);
+					this.logSelectedSurfaceRoute(surface, url);
+				}
+			}
 		}
 
+		this.syncSurfaceMainView();
+	}
+
+	private surfaceMainViewStorageKey(surfaceId: string): string {
+		return `${STORAGE_SURFACE_MAIN_VIEW_PREFIX}${surfaceId}`;
+	}
+
+	private getStoredSurfaceMainView(surfaceId: string): SurfaceMainView | undefined {
+		const stored = this.storageService.get(this.surfaceMainViewStorageKey(surfaceId), StorageScope.WORKSPACE);
+		return stored === 'taskTree' || stored === 'preview' ? stored : undefined;
+	}
+
+	private persistSurfaceMainView(surfaceId: string, view: SurfaceMainView): void {
+		this.storageService.store(this.surfaceMainViewStorageKey(surfaceId), view, StorageScope.WORKSPACE, StorageTarget.USER);
+	}
+
+	private async ensureSurfaceTaskTree(
+		surfaceId: string,
+		prompt: string,
+		metadata: { surfaceId: string; surfaceName: string; templateId: string },
+	): Promise<AgentTaskTree> {
+		const existing = await this.agentTaskTreeService.loadLatestTaskTreeForSurface(surfaceId);
+		if (existing) {
+			this.selectedSurfaceTaskTree = existing;
+			this.surfaceTaskTreePanel?.render(existing);
+			return existing;
+		}
+		const tree = await this.agentTaskTreeService.generateTaskTree(prompt, metadata);
+		this.selectedSurfaceTaskTree = tree;
+		this.surfaceTaskTreePanel?.render(tree);
+		return tree;
+	}
+
+	private async loadSelectedSurfaceTaskTree(): Promise<void> {
+		if (!this.selectedSurfaceId || this.selectedSurfaceId === ADD_SURFACE_ID) {
+			this.selectedSurfaceTaskTree = undefined;
+			this.surfaceTaskTreePanel?.render(undefined);
+			return;
+		}
+		const tree = await this.agentTaskTreeService.loadLatestTaskTreeForSurface(this.selectedSurfaceId);
+		this.selectedSurfaceTaskTree = tree;
+		this.surfaceTaskTreePanel?.render(tree);
+	}
+
+	private isSelectedSurfacePreviewReachable(): boolean {
 		const surface = this.getSelectedSurface();
-		this.container.classList.toggle('custom-mode-ui-surface-selected', Boolean(surface));
-		if (!surface) {
-			this.setSurfaceEmptyState(undefined);
-			return;
+		if (!surface?.localUrl) {
+			return false;
+		}
+		return this.appReachable && this.embeddedUiShowsUrl(surface.localUrl);
+	}
+
+	private setSurfaceMainView(view: SurfaceMainView): void {
+		this.surfaceMainView = view;
+		if (this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID) {
+			this.persistSurfaceMainView(this.selectedSurfaceId, view);
+		}
+		this.syncSurfaceMainView();
+	}
+
+	private syncSurfaceMainView(): void {
+		const showToggle = shouldShowSurfaceMainViewToggle({
+			selectedSurfaceId: this.selectedSurfaceId,
+			addSurfaceId: ADD_SURFACE_ID,
+			contextGatheringOpen: this.contextGatheringOpen,
+		});
+		this.uiSurfaceMainViewToggle.classList.toggle('hidden', !showToggle);
+		for (const [view, button] of this.uiSurfaceTaskTreeToggleButtons) {
+			const active = view === this.surfaceMainView;
+			button.classList.toggle('active', active);
+			button.setAttribute('aria-selected', String(active));
 		}
 
-		const url = surface.localUrl;
-		if (!url) {
-			this.setSurfaceMissingUrlState(surface);
-			this.clearEmbeddedUiUrl();
-			this.logSelectedSurfaceRoute(surface, undefined);
-			return;
+		const showTaskTree = showToggle && this.surfaceMainView === 'taskTree';
+		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-main-view-task-tree', showTaskTree);
+		this.uiSurfaceTaskTreePanelRoot.classList.toggle('hidden', !showTaskTree);
+		if (showTaskTree) {
+			this.surfaceTaskTreePanel?.render(this.selectedSurfaceTaskTree);
 		}
-
-		this.setSurfaceEmptyState(undefined);
-		if (!this.embeddedUiShowsUrl(url)) {
-			this.setEmbeddedUiUrl(url);
-		}
-		void this.checkUrlReachable(url);
-		this.logSelectedSurfaceRoute(surface, url);
+		this.renderSelectedSurfaceLaunchPanel();
 	}
 
 	private updateSurfaceFeatureChecklistVisibility(): void {
@@ -5698,7 +6021,7 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceLaunchPanel.replaceChildren();
 
 		const surface = this.getSelectedSurface();
-		if (!surface || this.contextGatheringOpen) {
+		if (!surface || this.contextGatheringOpen || this.surfaceMainView === 'taskTree') {
 			this.uiSurfaceLaunchPanel.classList.add('hidden');
 			return;
 		}
@@ -7718,6 +8041,10 @@ class ModeShellContribution extends Disposable {
 		// so the user sees the running app without manually refreshing.
 		if (reachable && !wasReachable) {
 			this.reloadEmbeddedUi();
+			if (this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID && !this.getStoredSurfaceMainView(this.selectedSurfaceId)) {
+				this.surfaceMainView = resolveDefaultSurfaceMainView(this.selectedSurfaceTaskTree, true);
+				this.syncSurfaceMainView();
+			}
 		}
 	}
 
