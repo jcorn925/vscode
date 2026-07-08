@@ -432,6 +432,7 @@ import './contrib/custom/browser/appLaunchGuide.contribution.js';
 import './contrib/custom/browser/surfaceFeatureChecklist.contribution.js';
 import './contrib/custom/browser/ix.contribution.js';
 import './contrib/custom/browser/customAi.contribution.js';
+import './contrib/custom/browser/agentTaskTree.contribution.js';
 
 // Code Actions
 import './contrib/codeActions/browser/codeActions.contribution.js';
