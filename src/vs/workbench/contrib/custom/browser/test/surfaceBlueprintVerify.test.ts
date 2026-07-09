@@ -15,6 +15,7 @@ import { scaffoldSurfaceFromBlueprint } from '../../../../../../custom/goalWorks
 import { listSurfaceTemplateIds, loadSurfaceTemplate } from '../../../../../../custom/goalWorkspace/surfaceBlueprintTemplateRegistry.js';
 import { blueprintSubsystemMatchesIx, matchSurfaceToIxSubsystems } from '../../../../../../custom/goalWorkspace/surfaceIxMatch.js';
 import { verifySurfaceBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintVerify.js';
+import type { IIxIntegrationService } from '../../../../../../custom/ix/IxIntegrationService.js';
 
 suite('surfaceBlueprintVerify', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -113,6 +114,63 @@ suite('surfaceBlueprintVerify', () => {
 		const persisted = await readBlueprint(fileService as unknown as IFileService, blueprintResource(workspaceFolder, 'booking'));
 		assert.strictEqual(persisted?.status, 'verified');
 		assert.ok(persisted?.verifiedAt);
+	});
+
+	test('runs Ix subsystem discovery during verification when service is provided', async () => {
+		const fileService = new TestBlueprintFileService();
+		const template = loadSurfaceTemplate('booking')!;
+		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'booking', surfaceName: 'Booking' });
+		await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+		await scaffoldSurfaceFromBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+		let ranIxSubsystems = false;
+		const ix = {
+			ensureIxMappedIfEmpty: async () => ({ statsPreview: 'nodes (12 total)', ranMap: false, statsOk: true }),
+			runJsonQuery: async (args: readonly string[]) => {
+				ranIxSubsystems = args.join(' ') === 'subsystems --list --detailed --sort importance --format json';
+				return {
+					ok: true,
+					raw: '[]',
+					value: {
+						subsystems: blueprint.subsystems.map(subsystem => ({
+							id: `ix-${subsystem.id}`,
+							label: subsystem.label,
+							path: subsystem.paths[0],
+							files: subsystem.paths.map(path => ({ path })),
+						})),
+					},
+				};
+			},
+		} as unknown as IIxIntegrationService;
+
+		const result = await verifySurfaceBlueprint({
+			fileService: fileService as unknown as IFileService,
+			workspaceFolder,
+			surfaceId: 'booking',
+			ixIntegrationService: ix,
+		});
+
+		assert.strictEqual(result.passed, true, JSON.stringify(result.gaps));
+		assert.strictEqual(result.ixChecked, true);
+		assert.strictEqual(ranIxSubsystems, true);
+	});
+
+	test('reports Ix unavailable when requested discovery returns no subsystem regions', async () => {
+		const fileService = new TestBlueprintFileService();
+		const template = loadSurfaceTemplate('booking')!;
+		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'booking', surfaceName: 'Booking' });
+		await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+		await scaffoldSurfaceFromBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+
+		const result = await verifySurfaceBlueprint({
+			fileService: fileService as unknown as IFileService,
+			workspaceFolder,
+			surfaceId: 'booking',
+			ixSubsystems: [],
+		});
+
+		assert.strictEqual(result.passed, false);
+		assert.strictEqual(result.ixChecked, true);
+		assert.ok(result.gaps.some(gap => gap.kind === 'ix_unavailable'));
 	});
 
 	for (const [templateId, surfaceName] of [

@@ -11,6 +11,7 @@ export interface IxSubsystemRegion {
 	readonly name: string;
 	readonly entryPath?: string;
 	readonly memberFiles?: readonly string[];
+	readonly fileCount?: number;
 }
 
 export function normalizeIxText(value: string): string {
@@ -119,6 +120,7 @@ export function toIxSubsystemRegions(
 		name: string;
 		entryPath?: string;
 		memberFiles?: readonly string[];
+		fileCount?: number;
 	}[],
 ): readonly IxSubsystemRegion[] {
 	return subsystems.map(subsystem => ({
@@ -126,5 +128,6 @@ export function toIxSubsystemRegions(
 		name: subsystem.name,
 		entryPath: subsystem.entryPath,
 		memberFiles: subsystem.memberFiles,
+		fileCount: subsystem.fileCount,
 	}));
 }

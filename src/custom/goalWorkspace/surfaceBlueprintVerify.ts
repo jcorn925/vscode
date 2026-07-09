@@ -8,20 +8,23 @@ import { joinPath } from '../../vs/base/common/resources.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
 import { WORKSPACE_MANIFEST } from './ConsoleService.js';
 import type { WorkspaceSurface } from './ConsoleService.js';
+import { discoverIxSubsystemRegions } from './surfaceBlueprintIxDiscovery.js';
 import { applyBlueprintVerificationStatus, blueprintResource, readBlueprint } from './surfaceBlueprintService.js';
 import { blueprintSubsystemMatchesIx, type IxSubsystemRegion } from './surfaceIxMatch.js';
 import type { SurfaceBlueprint, SurfaceBlueprintGap, SurfaceBlueprintVerificationResult } from './surfaceBlueprintTypes.js';
+import type { IIxIntegrationService } from '../ix/IxIntegrationService.js';
 
 export interface VerifySurfaceBlueprintOptions {
 	readonly fileService: IFileService;
 	readonly workspaceFolder: URI;
 	readonly surfaceId: string;
+	readonly ixIntegrationService?: IIxIntegrationService;
 	readonly ixSubsystems?: readonly IxSubsystemRegion[];
 	readonly persistStatus?: boolean;
 }
 
 export async function verifySurfaceBlueprint(options: VerifySurfaceBlueprintOptions): Promise<SurfaceBlueprintVerificationResult> {
-	const { fileService, workspaceFolder, surfaceId, ixSubsystems } = options;
+	const { fileService, workspaceFolder, surfaceId } = options;
 	const gaps: SurfaceBlueprintGap[] = [];
 	const resource = blueprintResource(workspaceFolder, surfaceId);
 	const blueprint = await readBlueprint(fileService, resource);
@@ -76,8 +79,16 @@ export async function verifySurfaceBlueprint(options: VerifySurfaceBlueprintOpti
 	gaps.push(...await verifyScaffoldBaseline(fileService, workspaceFolder, surfaceId, manifestSurface));
 	gaps.push(...await verifyAcceptance(fileService, workspaceFolder, blueprint, manifestSurface));
 
-	let ixChecked = false;
-	if (ixSubsystems && ixSubsystems.length > 0) {
+	const ixSubsystems = await resolveIxSubsystems(options);
+	const ixRequested = options.ixSubsystems !== undefined || options.ixIntegrationService !== undefined;
+	let ixChecked = ixRequested;
+	if (ixRequested && ixSubsystems.length === 0) {
+		gaps.push({
+			subsystemId: '*',
+			kind: 'ix_unavailable',
+			message: 'Ix subsystem discovery returned no regions; run Ix mapping before verifying generated shape accuracy.',
+		});
+	} else if (ixSubsystems.length > 0) {
 		ixChecked = true;
 		const surfacePathPrefix = manifestSurface?.path ?? `apps/${surfaceId}`;
 		const scopedRegions = ixSubsystems.filter(region => regionIsUnderSurface(region, surfacePathPrefix, surfaceId));
@@ -108,6 +119,20 @@ export async function verifySurfaceBlueprint(options: VerifySurfaceBlueprintOpti
 		gaps,
 		ixChecked,
 	};
+}
+
+async function resolveIxSubsystems(options: VerifySurfaceBlueprintOptions): Promise<readonly IxSubsystemRegion[]> {
+	if (options.ixSubsystems !== undefined) {
+		return options.ixSubsystems;
+	}
+	if (!options.ixIntegrationService) {
+		return [];
+	}
+	try {
+		return await discoverIxSubsystemRegions(options.ixIntegrationService, options.workspaceFolder);
+	} catch {
+		return [];
+	}
 }
 
 async function verifyAcceptance(

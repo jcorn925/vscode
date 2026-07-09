@@ -5,6 +5,7 @@
 
 import assert from 'assert';
 import { VSBuffer } from '../../../../../base/common/buffer.js';
+import { joinPath } from '../../../../../base/common/resources.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import type { IFileContent, IFileService, IFileStat } from '../../../../../platform/files/common/files.js';
@@ -19,6 +20,7 @@ import {
 	parseTaskTree,
 	taskTreeResource,
 } from '../../../../../../custom/agentTaskTree/agentTaskTreeService.js';
+import type { IIxIntegrationService } from '../../../../../../custom/ix/IxIntegrationService.js';
 
 suite('agentTaskTreeService', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -285,6 +287,140 @@ suite('agentTaskTreeService', () => {
 			service.dispose();
 		}
 	});
+
+	test('surface Ix validation passes when discovered subsystem matches blueprint shape', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		const tree = createSurfaceTree();
+		await fileService.writeTree(tree);
+		await writeSurfaceValidationFixture(fileService, [
+			'apps/marketing/app/page.tsx',
+			'apps/marketing/app/offers/page.tsx',
+		]);
+
+		try {
+			const validation = await service.validateSurfaceTaskTreeShape('marketing', {
+				command: 'ix subsystems --list --detailed --sort importance --format json',
+				ixSubsystems: [{
+					regionId: 'ix-marketing-home',
+					name: 'Marketing Home Route',
+					entryPath: 'apps/marketing/app/page.tsx',
+					memberFiles: ['apps/marketing/app/page.tsx'],
+					fileCount: 1,
+				}, {
+					regionId: 'ix-marketing-offers',
+					name: 'Marketing Offers Route',
+					entryPath: 'apps/marketing/app/offers/page.tsx',
+					memberFiles: ['apps/marketing/app/offers/page.tsx'],
+					fileCount: 1,
+				}],
+			});
+
+			assert.strictEqual(validation.status, 'passed');
+			assert.strictEqual(validation.gaps.length, 0);
+			const persisted = await service.loadTaskTree(tree.id);
+			assert.strictEqual(persisted?.ixValidation?.status, 'passed');
+			assert.strictEqual(persisted?.roots.some(root => root.title === 'Ix Validation Repair'), false);
+		} finally {
+			service.dispose();
+		}
+	});
+
+	test('surface Ix validation appends repair leaves for generated shape gaps', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		const tree = createSurfaceTree();
+		tree.roots[0].children![0].status = 'complete';
+		await fileService.writeTree(tree);
+		await writeSurfaceValidationFixture(fileService, [
+			'apps/marketing/app/page.tsx',
+			'apps/marketing/app/offers/page.tsx',
+		]);
+
+		try {
+			const validation = await service.validateSurfaceTaskTreeShape('marketing', {
+				command: 'ix subsystems --list --detailed --sort importance --format json',
+				ixSubsystems: [{
+					regionId: 'ix-marketing-home',
+					name: 'Marketing Home Route',
+					entryPath: 'apps/marketing/app/page.tsx',
+					memberFiles: ['apps/marketing/app/page.tsx'],
+					fileCount: 1,
+				}],
+			});
+
+			assert.strictEqual(validation.status, 'gaps');
+			assert.ok(validation.gaps.some(gap => gap.kind === 'missing_region' && gap.expectedLabel === 'Marketing Offers Route'));
+			const persisted = await service.loadTaskTree(tree.id);
+			assert.strictEqual(findNode(persisted!, 'leaf-1')?.status, 'complete');
+			const repairRoot = persisted?.roots.find(root => root.title === 'Ix Validation Repair');
+			assert.ok(repairRoot);
+			assert.ok(repairRoot.children?.some(child => child.status === 'pending' && /Marketing Offers Route/.test(child.title)));
+			assert.strictEqual(persisted?.status, 'active');
+
+			await service.validateSurfaceTaskTreeShape('marketing', {
+				command: 'ix subsystems --list --detailed --sort importance --format json',
+				ixSubsystems: [],
+			});
+			const rerun = await service.loadTaskTree(tree.id);
+			assert.strictEqual(rerun?.roots.filter(root => root.title === 'Ix Validation Repair').length, 1);
+		} finally {
+			service.dispose();
+		}
+	});
+
+	test('surface Ix validation maps surface path before discovering subsystems when Ix service is supplied', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		const tree = createSurfaceTree();
+		await fileService.writeTree(tree);
+		await writeSurfaceValidationFixture(fileService, [
+			'apps/marketing/app/page.tsx',
+			'apps/marketing/app/offers/page.tsx',
+		]);
+		const calls: string[] = [];
+		const ix = {
+			mapPath: async (_cwd: URI, relativePath: string) => {
+				calls.push(`map:${relativePath}`);
+				return { ok: true, raw: '', command: `ix map --all-items ${relativePath}` };
+			},
+			ensureIxMappedIfEmpty: async () => ({ statsPreview: '', ranMap: false, statsOk: true }),
+			runJsonQuery: async (args: readonly string[]) => {
+				calls.push(args.join(' '));
+				return {
+					ok: true,
+					raw: '{}',
+					value: {
+						subsystems: [{
+							id: 'ix-marketing-home',
+							label: 'Marketing Home Route',
+							path: 'apps/marketing/app/page.tsx',
+							files: ['apps/marketing/app/page.tsx'],
+							fileCount: 1,
+						}, {
+							id: 'ix-marketing-offers',
+							label: 'Marketing Offers Route',
+							path: 'apps/marketing/app/offers/page.tsx',
+							files: ['apps/marketing/app/offers/page.tsx'],
+							fileCount: 1,
+						}],
+					},
+				};
+			},
+		} as unknown as IIxIntegrationService;
+
+		try {
+			const validation = await service.validateSurfaceTaskTreeShape('marketing', { ixIntegrationService: ix });
+
+			assert.strictEqual(validation.status, 'passed');
+			assert.deepStrictEqual(calls, [
+				'map:apps/marketing',
+				'subsystems --list --detailed --sort importance --format json',
+			]);
+		} finally {
+			service.dispose();
+		}
+	});
 });
 
 const workspaceFolder = URI.file('/workspace');
@@ -319,6 +455,72 @@ function createTree(): AgentTaskTree {
 		}],
 		cursor: {},
 	};
+}
+
+function createSurfaceTree(): AgentTaskTree {
+	return {
+		...createTree(),
+		id: 'marketing-tree',
+		prompt: 'Build marketing surface',
+		surfaceId: 'marketing',
+		surfaceName: 'Marketing Site',
+		templateId: 'marketing',
+		roots: [{
+			id: 'root-1',
+			title: 'Root',
+			type: 'root',
+			status: 'pending',
+			order: 1,
+			children: [
+				{ id: 'leaf-1', parentId: 'root-1', title: 'Build home route', description: 'Implement apps/marketing/app/page.tsx.', type: 'leaf', status: 'pending', order: 1 },
+			],
+		}],
+	};
+}
+
+async function writeSurfaceValidationFixture(fileService: TestFileService, files: readonly string[]): Promise<void> {
+	await fileService.writeFile(joinPath(workspaceFolder, 'workspace.goal.json'), VSBuffer.fromString(JSON.stringify({
+		goal: { id: 'personal-training-business', name: 'Online Personal Training Business' },
+		surfaces: [{
+			id: 'marketing',
+			name: 'Marketing Site',
+			path: 'apps/marketing',
+			capabilities: ['Lead generation'],
+			events: [],
+			entities: [],
+			ixSubsystems: [],
+		}],
+	})));
+	await fileService.writeFile(joinPath(workspaceFolder, '.agent/surfaces/marketing.blueprint.json'), VSBuffer.fromString(JSON.stringify({
+		version: 1,
+		surfaceId: 'marketing',
+		surfaceName: 'Marketing Site',
+		templateId: 'marketing',
+		status: 'scaffolded',
+		createdAt: '2026-01-01T00:00:00.000Z',
+		subsystems: [
+			{ id: 'home-route', label: 'Marketing Home Route', kind: 'route', paths: ['apps/marketing/app/page.tsx'], minFiles: 1 },
+			{ id: 'offers-route', label: 'Marketing Offers Route', kind: 'route', paths: ['apps/marketing/app/offers/page.tsx'], minFiles: 1 },
+		],
+		manifest: {
+			capabilities: ['Lead generation'],
+			events: [],
+			entities: [],
+			ixSubsystems: [],
+		},
+		acceptance: {
+			requiredRoutes: ['/'],
+			requiredWorkflows: ['marketing'],
+			requiredUiSignals: ['marketing'],
+			requiredBusinessTerms: ['marketing'],
+			minimumFiles: 1,
+			minimumTotalLines: 1,
+			minimumInteractiveControls: 0,
+		},
+	})));
+	for (const file of files) {
+		await fileService.writeFile(joinPath(workspaceFolder, file), VSBuffer.fromString('// generated'));
+	}
 }
 
 function blockingExecutor(message: string): AgentTaskExecutor {

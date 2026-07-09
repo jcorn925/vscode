@@ -1043,10 +1043,10 @@ function normalizeSurfaceDevCommand(command: string, appPath: string): string {
 	const trimmed = command.trim();
 
 	// Legacy command shapes we can confidently normalize to the surface-local contract.
-	if (/\bpnpm\b.*\b--filter\b/i.test(trimmed) || /\byarn\b\s+workspace\b/i.test(trimmed)) {
+	if (/\bpnpm\b.*--filter\b/i.test(trimmed) || /\byarn\b\s+workspace\b/i.test(trimmed)) {
 		return canonical;
 	}
-	if (/\bnpm\b.*\b--workspace\b/i.test(trimmed)) {
+	if (/\bnpm\b.*--workspace\b/i.test(trimmed)) {
 		return canonical;
 	}
 	if (/\bnpm\s+--prefix\s+\S+\s+run\s+dev\b/i.test(trimmed)) {

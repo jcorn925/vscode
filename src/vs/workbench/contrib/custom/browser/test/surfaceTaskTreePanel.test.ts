@@ -109,6 +109,18 @@ class TestAgentTaskTreeService {
 		return createTree();
 	}
 
+	async validateSurfaceTaskTreeShape(): Promise<NonNullable<AgentTaskTree['ixValidation']>> {
+		return {
+			status: 'passed',
+			ranAt: '2026-01-01T00:00:00.000Z',
+			surfacePath: 'apps/marketing',
+			command: 'ix subsystems --list --detailed --sort importance --format json',
+			subsystemCount: 1,
+			matchedCount: 1,
+			gaps: [],
+		};
+	}
+
 	async continueNextTask(): Promise<never> {
 		this.continueCount++;
 		throw new Error('not implemented');

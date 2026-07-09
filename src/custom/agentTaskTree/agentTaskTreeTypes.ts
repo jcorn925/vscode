@@ -40,6 +40,30 @@ export interface AgentTaskTreeSurfaceMetadata {
 	readonly templateId?: string;
 }
 
+export type AgentTaskTreeIxValidationStatus = 'passed' | 'gaps' | 'unavailable';
+export type AgentTaskTreeIxValidationGapKind = 'missing_region' | 'missing_path' | 'thin_region' | 'unexpected_region';
+
+export interface AgentTaskTreeIxValidationGap {
+	readonly id: string;
+	readonly kind: AgentTaskTreeIxValidationGapKind;
+	readonly expectedId?: string;
+	readonly expectedLabel: string;
+	readonly expectedPaths: readonly string[];
+	readonly matchedRegionId?: string;
+	readonly matchedRegionLabel?: string;
+	readonly message: string;
+}
+
+export interface AgentTaskTreeIxValidation {
+	readonly status: AgentTaskTreeIxValidationStatus;
+	readonly ranAt: string;
+	readonly surfacePath: string;
+	readonly command: string;
+	readonly subsystemCount: number;
+	readonly matchedCount: number;
+	readonly gaps: readonly AgentTaskTreeIxValidationGap[];
+}
+
 export interface AgentTaskTree {
 	readonly version: 1;
 	readonly id: string;
@@ -52,6 +76,7 @@ export interface AgentTaskTree {
 	readonly surfaceId?: string;
 	readonly surfaceName?: string;
 	readonly templateId?: string;
+	readonly ixValidation?: AgentTaskTreeIxValidation;
 }
 
 export interface AgentTaskRunResult {
@@ -70,4 +95,3 @@ export interface AgentTaskExecutionResult {
 export interface AgentTaskExecutor {
 	executeTask(tree: AgentTaskTree, task: AgentTaskNode): Promise<AgentTaskExecutionResult>;
 }
-

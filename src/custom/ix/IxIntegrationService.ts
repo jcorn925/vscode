@@ -65,6 +65,7 @@ export interface IIxIntegrationService {
 	restart(): Promise<void>;
 	installOrResolve(): Promise<void>;
 	openDocs(): Promise<void>;
+	mapPath(cwd: URI, relativePath: string, timeoutMs?: number): Promise<{ ok: true; raw: string; command: string } | { ok: false; error: string; raw: string; command: string; exitCode: number }>;
 	runJsonQuery(args: readonly string[], cwd?: URI, timeoutMs?: number): Promise<{ ok: true; value: unknown; raw: string } | { ok: false; error: string; raw: string; exitCode: number }>;
 	/**
 	 * Ensures the Ix Docker backend on port 8090 is reachable, running `ix docker start` when needed.
@@ -758,6 +759,32 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 		const mapped = await this.runCommand(cwd, `${this.quoteIx(ixBin)} map --all-items .`, 600_000, { ui: 'none' });
 		return { statsPreview, ranMap: mapped.exitCode === 0, statsOk: mapped.exitCode === 0 };
+	}
+
+	async mapPath(cwd: URI, relativePath: string, timeoutMs: number = 600_000): Promise<{ ok: true; raw: string; command: string } | { ok: false; error: string; raw: string; command: string; exitCode: number }> {
+		const ixBin = await this.resolveIxBinary(cwd);
+		const commandPath = relativePath.trim() || '.';
+		const command = ixBin ? `${this.quoteIx(ixBin)} map --all-items ${this.quoteShellArg(commandPath)}` : `ix map --all-items ${this.quoteShellArg(commandPath)}`;
+		if (isWeb) {
+			return { ok: false, error: 'Ix is not available on web.', raw: '', command, exitCode: 1 };
+		}
+		if (!ixBin) {
+			return { ok: false, error: 'Could not resolve ix CLI binary.', raw: '', command, exitCode: 1 };
+		}
+		if (!await this.ensureIxBackendReady(cwd)) {
+			return {
+				ok: false,
+				error: localize('ix.error.backendUnreachable', 'Ix backend is not reachable on port 8090.'),
+				raw: '',
+				command,
+				exitCode: 1,
+			};
+		}
+		const { exitCode, output } = await this.runCommand(cwd, command, timeoutMs, { ui: 'none' });
+		if (exitCode !== 0) {
+			return { ok: false, error: tailOutput(output) || `ix exited with code ${exitCode}`, raw: output, command, exitCode };
+		}
+		return { ok: true, raw: output, command };
 	}
 
 	async runJsonQuery(args: readonly string[], cwd?: URI, timeoutMs: number = 60_000): Promise<{ ok: true; value: unknown; raw: string } | { ok: false; error: string; raw: string; exitCode: number }> {

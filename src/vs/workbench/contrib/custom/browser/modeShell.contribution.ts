@@ -5507,7 +5507,21 @@ class ModeShellContribution extends Disposable {
 			});
 			const creationResult = await orchestrator.createSurface(surfaceId, workflow);
 			const verification = creationResult.verification;
+			let ixGapCount: number | undefined;
+			try {
+				const ixValidation = await this.agentTaskTreeService.validateSurfaceTaskTreeShape(surfaceId, {
+					ixIntegrationService: this.ixIntegrationService,
+				});
+				ixGapCount = ixValidation.gaps.length;
+			} catch (error) {
+				this.pushUiRuntimeLog(`[surface-setup:ix-validation] skipped for ${surfaceId}: ${String((error as Error)?.message ?? error)}`);
+			}
 			await this.consoleService.refresh();
+			const refreshedTaskTree = await this.agentTaskTreeService.loadLatestTaskTreeForSurface(surfaceId);
+			if (refreshedTaskTree) {
+				this.selectedSurfaceTaskTree = refreshedTaskTree;
+				this.surfaceTaskTreePanel?.render(refreshedTaskTree);
+			}
 			void this.refreshStarterSurfaceCardStatuses();
 			void this.surfaceFeatureChecklistService.refresh();
 			this.setSurfaceSetupBuilderHandoff(true, {
@@ -5521,7 +5535,7 @@ class ModeShellContribution extends Disposable {
 				blueprintResource: creationResult.blueprintResource.fsPath,
 				repairAttempts: 0,
 			});
-			this.pushUiRuntimeLog(`[surface-setup:scaffold] created ${creationResult.scaffoldResult.createdFiles.length} files for ${surfaceId}; verification=${verification.passed ? 'passed' : 'failed'}; repairs=${creationResult.repairAttempts}`);
+			this.pushUiRuntimeLog(`[surface-setup:scaffold] created ${creationResult.scaffoldResult.createdFiles.length} files for ${surfaceId}; verification=${verification.passed ? 'passed' : 'failed'}; repairs=${creationResult.repairAttempts}; ixGaps=${ixGapCount ?? 'skipped'}`);
 			if (verification.passed) {
 				this.notificationService.info(localize('customMode.surfaceScaffoldVerified', 'Scaffolded and verified {0}.', surfaceName));
 			} else {

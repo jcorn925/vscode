@@ -28,6 +28,7 @@ function parseIxSubsystemRegions(json: unknown): readonly {
 	name: string;
 	entryPath?: string;
 	memberFiles?: readonly string[];
+	fileCount?: number;
 }[] {
 	const regions = regionRecords(json);
 	const out: {
@@ -35,16 +36,18 @@ function parseIxSubsystemRegions(json: unknown): readonly {
 		name: string;
 		entryPath?: string;
 		memberFiles?: readonly string[];
+		fileCount?: number;
 	}[] = [];
 	for (const region of regions) {
 		const name = textField(region.name) ?? textField(region.label) ?? textField(region.title);
 		if (!name) {
 			continue;
 		}
-		const regionId = textField(region.region_id) ?? textField(region.regionId) ?? name;
-		const entryPath = textField(region.entry_path) ?? textField(region.entryPath);
+		const regionId = textField(region.region_id) ?? textField(region.regionId) ?? textField(region.id) ?? name;
+		const entryPath = textField(region.entry_path) ?? textField(region.entryPath) ?? textField(region.path);
 		const memberFiles = parseMemberFilePaths(region);
-		out.push({ regionId, name, entryPath, memberFiles });
+		const fileCount = numberField(region.file_count) ?? numberField(region.fileCount);
+		out.push({ regionId, name, entryPath, memberFiles, fileCount });
 	}
 	return out;
 }
@@ -82,4 +85,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function textField(value: unknown): string | undefined {
 	return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function numberField(value: unknown): number | undefined {
+	return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }

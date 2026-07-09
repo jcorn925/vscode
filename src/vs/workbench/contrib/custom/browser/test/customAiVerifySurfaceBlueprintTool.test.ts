@@ -61,6 +61,7 @@ suite('CustomAiVerifySurfaceBlueprintTool', () => {
 			restart: async () => { },
 			installOrResolve: async () => { },
 			openDocs: async () => { },
+			mapPath: async () => ({ ok: true, raw: '', command: 'ix map --all-items .' }),
 			runJsonQuery: async () => ({ ok: true, value: { regions: [] }, raw: '{}' }),
 			prepareForDiscovery: async () => true,
 			ensureIxBackendReady: async () => true,

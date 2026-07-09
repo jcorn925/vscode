@@ -12,7 +12,11 @@ import { IFileService } from '../../vs/platform/files/common/files.js';
 import { createDecorator } from '../../vs/platform/instantiation/common/instantiation.js';
 import { InstantiationType, registerSingleton } from '../../vs/platform/instantiation/common/extensions.js';
 import { IWorkspaceContextService } from '../../vs/platform/workspace/common/workspace.js';
-import { AGENT_CONTEXT_FOLDER } from '../goalWorkspace/ConsoleService.js';
+import { AGENT_CONTEXT_FOLDER, WORKSPACE_MANIFEST } from '../goalWorkspace/ConsoleService.js';
+import { discoverIxSubsystemRegions } from '../goalWorkspace/surfaceBlueprintIxDiscovery.js';
+import type { IxSubsystemRegion } from '../goalWorkspace/surfaceIxMatch.js';
+import type { IIxIntegrationService } from '../ix/IxIntegrationService.js';
+import { appendIxValidationRepairLeaves, buildAgentTaskTreeIxValidation } from './agentTaskTreeIxValidation.js';
 import type {
 	AgentTaskExecutionResult,
 	AgentTaskExecutor,
@@ -20,6 +24,8 @@ import type {
 	AgentTaskNodeStatus,
 	AgentTaskRunResult,
 	AgentTaskTree,
+	AgentTaskTreeIxValidation,
+	AgentTaskTreeIxValidationGap,
 	AgentTaskTreeSurfaceMetadata,
 } from './agentTaskTreeTypes.js';
 
@@ -35,12 +41,19 @@ export interface IAgentTaskTreeService {
 	loadLatestResumableTaskTree(): Promise<AgentTaskTree | undefined>;
 	loadLatestTaskTreeForSurface(surfaceId: string): Promise<AgentTaskTree | undefined>;
 	findNextPendingLeaf(tree: AgentTaskTree): AgentTaskNode | undefined;
+	validateSurfaceTaskTreeShape(surfaceId: string, options: ValidateSurfaceTaskTreeShapeOptions): Promise<AgentTaskTreeIxValidation>;
 	continueNextTask(treeId: string): Promise<AgentTaskRunResult>;
 	resumeTaskTree(treeId: string): Promise<void>;
 	pauseTaskTree(treeId: string): Promise<void>;
 	retryTask(treeId: string, nodeId: string): Promise<void>;
 	skipTask(treeId: string, nodeId: string, notes?: string): Promise<void>;
 	regenerateBranch(treeId: string, nodeId: string): Promise<void>;
+}
+
+export interface ValidateSurfaceTaskTreeShapeOptions {
+	readonly ixIntegrationService?: IIxIntegrationService;
+	readonly ixSubsystems?: readonly IxSubsystemRegion[];
+	readonly command?: string;
 }
 
 export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeService {
@@ -131,6 +144,37 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 
 	findNextPendingLeaf(tree: AgentTaskTree): AgentTaskNode | undefined {
 		return findNextPendingLeaf(tree);
+	}
+
+	async validateSurfaceTaskTreeShape(surfaceId: string, options: ValidateSurfaceTaskTreeShapeOptions): Promise<AgentTaskTreeIxValidation> {
+		const workspaceFolder = this.requireWorkspaceFolder();
+		const tree = await this.loadLatestTaskTreeForSurface(surfaceId);
+		if (!tree) {
+			throw new Error(`No task tree was found for surface ${surfaceId}.`);
+		}
+		const surfacePath = tree.surfaceId ? await readSurfacePathFromManifest(this.fileService, workspaceFolder, tree.surfaceId) : `apps/${surfaceId}`;
+		let command = options.command ?? 'ix subsystems --list --detailed --sort importance --format json';
+		let ixSubsystems = options.ixSubsystems;
+		if (options.ixIntegrationService) {
+			const mapped = await options.ixIntegrationService.mapPath(workspaceFolder, surfacePath);
+			command = `${mapped.command}; ${command}`;
+			ixSubsystems = await discoverIxSubsystemRegions(options.ixIntegrationService, workspaceFolder);
+		}
+		const validation = await buildAgentTaskTreeIxValidation({
+			fileService: this.fileService,
+			workspaceFolder,
+			tree,
+			surfaceId,
+			ixSubsystems: ixSubsystems ?? [],
+			command,
+		});
+		const updated = deriveParentStatuses({
+			...appendIxValidationRepairLeaves(tree, validation),
+			updatedAt: new Date().toISOString(),
+		});
+		await this.writeTaskTree(workspaceFolder, updated);
+		this._onDidChangeTaskTree.fire(updated);
+		return validation;
 	}
 
 	async continueNextTask(treeId: string): Promise<AgentTaskRunResult> {
@@ -331,6 +375,7 @@ export function parseTaskTree(raw: unknown): AgentTaskTree | undefined {
 	const surfaceId = optionalString(raw.surfaceId);
 	const surfaceName = optionalString(raw.surfaceName);
 	const templateId = optionalString(raw.templateId);
+	const ixValidation = parseIxValidation(raw.ixValidation);
 	return deriveParentStatuses({
 		version: 1,
 		id,
@@ -343,6 +388,7 @@ export function parseTaskTree(raw: unknown): AgentTaskTree | undefined {
 		surfaceId,
 		surfaceName,
 		templateId,
+		ixValidation,
 	});
 }
 
@@ -550,6 +596,58 @@ function parseImplementation(raw: unknown): AgentTaskNode['implementation'] {
 	};
 }
 
+function parseIxValidation(raw: unknown): AgentTaskTree['ixValidation'] {
+	if (!isRecord(raw) || !isIxValidationStatus(raw.status)) {
+		return undefined;
+	}
+	const ranAt = optionalString(raw.ranAt);
+	const surfacePath = optionalString(raw.surfacePath);
+	const command = optionalString(raw.command);
+	const subsystemCount = numberOr(raw.subsystemCount, -1);
+	const matchedCount = numberOr(raw.matchedCount, -1);
+	if (!ranAt || !surfacePath || !command || subsystemCount < 0 || matchedCount < 0) {
+		return undefined;
+	}
+	return {
+		status: raw.status,
+		ranAt,
+		surfacePath,
+		command,
+		subsystemCount,
+		matchedCount,
+		gaps: parseIxValidationGaps(raw.gaps),
+	};
+}
+
+function parseIxValidationGaps(raw: unknown): AgentTaskTreeIxValidationGap[] {
+	if (!Array.isArray(raw)) {
+		return [];
+	}
+	const gaps: AgentTaskTreeIxValidationGap[] = [];
+	for (const item of raw) {
+		if (!isRecord(item) || !isIxValidationGapKind(item.kind)) {
+			continue;
+		}
+		const id = optionalString(item.id);
+		const expectedLabel = optionalString(item.expectedLabel);
+		const message = optionalString(item.message);
+		if (!id || !expectedLabel || !message) {
+			continue;
+		}
+		gaps.push({
+			id,
+			kind: item.kind,
+			expectedId: optionalString(item.expectedId),
+			expectedLabel,
+			expectedPaths: stringArray(item.expectedPaths) ?? [],
+			matchedRegionId: optionalString(item.matchedRegionId),
+			matchedRegionLabel: optionalString(item.matchedRegionLabel),
+			message,
+		});
+	}
+	return gaps;
+}
+
 function createInitialTaskTree(prompt: string): AgentTaskNode[] {
 	const slug = slugify(prompt).slice(0, 40) || 'feature';
 	let order = 1;
@@ -619,6 +717,14 @@ function isNodeType(value: unknown): value is AgentTaskNode['type'] {
 	return value === 'root' || value === 'branch' || value === 'leaf';
 }
 
+function isIxValidationStatus(value: unknown): value is NonNullable<AgentTaskTree['ixValidation']>['status'] {
+	return value === 'passed' || value === 'gaps' || value === 'unavailable';
+}
+
+function isIxValidationGapKind(value: unknown): value is AgentTaskTreeIxValidationGap['kind'] {
+	return value === 'missing_region' || value === 'missing_path' || value === 'thin_region' || value === 'unexpected_region';
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -633,6 +739,25 @@ function stringArray(value: unknown): string[] | undefined {
 	}
 	const result = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map(item => item.trim());
 	return result.length ? result : undefined;
+}
+
+function numberOr(value: unknown, fallback: number): number {
+	return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+async function readSurfacePathFromManifest(fileService: IFileService, workspaceFolder: URI, surfaceId: string): Promise<string> {
+	try {
+		const raw = JSON.parse((await fileService.readFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST))).value.toString());
+		const surfaces = Array.isArray(raw?.surfaces) ? raw.surfaces : [];
+		for (const surface of surfaces) {
+			if (surface?.id === surfaceId && typeof surface.path === 'string' && surface.path.trim()) {
+				return surface.path.trim();
+			}
+		}
+	} catch {
+		// Fall back to convention below.
+	}
+	return `apps/${surfaceId}`;
 }
 
 registerSingleton(IAgentTaskTreeService, AgentTaskTreeService, InstantiationType.Delayed);
