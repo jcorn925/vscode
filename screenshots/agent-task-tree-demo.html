@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Agent Task Tree — Marketing Site</title>
+<style>
+  :root {
+    --bg: #1e1e1e;
+    --sidebar: #252526;
+    --panel: #2d2d2d;
+    --widget: #252526;
+    --border: rgba(128,128,128,0.24);
+    --fg: #cccccc;
+    --muted: #9d9d9d;
+    --accent: #0078d4;
+    --accent-fg: #ffffff;
+    --selection: #094771;
+    --selection-fg: #ffffff;
+    --button: #0e639c;
+    --button-fg: #ffffff;
+    --progress: #3794ff;
+    --complete: #89d185;
+    --in-progress: #75beff;
+    --pending: #858585;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .titlebar {
+    height: 28px;
+    background: #323233;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    font-size: 12px;
+    color: #ccc;
+    border-bottom: 1px solid #111;
+  }
+  .workbench { flex: 1; display: flex; min-height: 0; }
+  .activity { width: 48px; background: #333333; border-right: 1px solid #111; }
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .tabs {
+    display: flex; gap: 0; background: var(--sidebar); border-bottom: 1px solid var(--border);
+    padding: 0 8px; height: 35px; align-items: end;
+  }
+  .tab {
+    padding: 6px 14px; font-size: 12px; color: var(--muted); border-bottom: 2px solid transparent;
+  }
+  .tab.active { color: var(--fg); border-bottom-color: var(--accent); background: var(--bg); }
+  .surface-switcher {
+    display: flex; gap: 4px; padding: 8px 10px; background: var(--sidebar); border-bottom: 1px solid var(--border);
+  }
+  .surface-btn {
+    padding: 6px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent;
+    color: var(--muted); font-size: 12px; font-weight: 600; cursor: default;
+  }
+  .surface-btn.active { color: var(--fg); border-bottom-color: var(--accent); }
+  .view-toggle {
+    display: flex; gap: 4px; padding: 8px 10px; background: var(--widget); border-bottom: 1px solid var(--border);
+  }
+  .view-toggle button {
+    padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border); background: transparent;
+    color: var(--muted); font-size: 11px; cursor: default;
+  }
+  .view-toggle button.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  .content { flex: 1; display: flex; min-height: 0; }
+  .panel {
+    flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 12px 14px; gap: 10px;
+    background: var(--bg);
+  }
+  .prompt { font-size: 13px; font-weight: 600; }
+  .status { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .progress-wrap { display: flex; flex-direction: column; gap: 4px; }
+  .progress-bar-bg { height: 6px; border-radius: 999px; background: #3c3c3c; overflow: hidden; }
+  .progress-bar { height: 100%; width: 40%; background: var(--progress); border-radius: 999px; }
+  .progress-label { font-size: 11px; color: var(--muted); }
+  .tree-list {
+    flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 0; background: var(--widget);
+  }
+  .node {
+    display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; padding: 6px 8px; font-size: 12px;
+  }
+  .node.current { background: var(--selection); color: var(--selection-fg); }
+  .icon { width: 14px; text-align: center; flex: 0 0 auto; }
+  .title { flex: 1 1 auto; font-weight: 600; min-width: 0; }
+  .detail {
+    flex: 1 1 100%; padding-left: 20px; font-size: 11px; color: var(--muted);
+  }
+  .node.current .detail { color: #b8d4ea; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+  .controls button {
+    height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid transparent;
+    background: var(--button); color: var(--button-fg); font-size: 12px; cursor: default;
+  }
+  .controls button:disabled { opacity: 0.5; }
+  .chat {
+    width: 360px; border-left: 1px solid var(--border); background: var(--sidebar);
+    display: flex; flex-direction: column;
+  }
+  .chat-header { padding: 10px 12px; font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--border); }
+  .chat-body { flex: 1; padding: 12px; font-size: 12px; color: var(--muted); }
+  .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; background: #3c3c3c; margin-left: 8px; }
+</style>
+</head>
+<body>
+<div class="titlebar">GoalConsole.ai — figma-workspace</div>
+<div class="workbench">
+  <div class="activity"></div>
+  <div class="main">
+    <div class="tabs">
+      <div class="tab active">Console</div>
+      <div class="tab">Process</div>
+      <div class="tab">Code</div>
+    </div>
+    <div class="surface-switcher">
+      <button class="surface-btn active">Marketing Site</button>
+      <button class="surface-btn">Booking</button>
+      <button class="surface-btn">Analytics Dashboard</button>
+      <button class="surface-btn">+ Add Surface</button>
+    </div>
+    <div class="view-toggle">
+      <button class="active">Task Tree</button>
+      <button>Preview</button>
+    </div>
+    <div class="content">
+      <div class="panel">
+        <div class="prompt">Build the Marketing Site surface with lead capture and offer display</div>
+        <div class="status">active <span class="badge">Marketing Site</span></div>
+        <div class="progress-wrap">
+          <div class="progress-bar-bg"><div class="progress-bar"></div></div>
+          <div class="progress-label">40% complete (2/5 tasks)</div>
+        </div>
+        <div class="tree-list">
+          <div class="node" style="padding-left:8px"><span class="icon" style="color:var(--in-progress)">◐</span><span class="title">Feature Planning</span></div>
+          <div class="node" style="padding-left:24px"><span class="icon" style="color:var(--complete)">✓</span><span class="title">Define implementation contract</span><div class="detail">Changed: apps/marketing/src/app/page.tsx • Verification: Contract reviewed</div></div>
+          <div class="node" style="padding-left:24px"><span class="icon" style="color:var(--complete)">✓</span><span class="title">Map integration points</span><div class="detail">Changed: workspace.goal.json • Verification: Integration map complete</div></div>
+          <div class="node" style="padding-left:8px"><span class="icon" style="color:var(--in-progress)">◐</span><span class="title">Core Implementation</span></div>
+          <div class="node current" style="padding-left:24px"><span class="icon" style="color:var(--in-progress)">↻</span><span class="title">Build core implementation</span><div class="detail">Build the Marketing Site surface with lead capture and offer display</div></div>
+          <div class="node" style="padding-left:24px"><span class="icon" style="color:var(--pending)">○</span><span class="title">Wire services and lifecycle</span></div>
+          <div class="node" style="padding-left:8px"><span class="icon" style="color:var(--pending)">○</span><span class="title">UI Integration</span></div>
+          <div class="node" style="padding-left:24px"><span class="icon" style="color:var(--pending)">○</span><span class="title">Wire commands</span></div>
+        </div>
+        <div class="controls">
+          <button disabled>Resume</button>
+          <button>Continue Next</button>
+          <button>Pause</button>
+          <button disabled>Retry</button>
+          <button disabled>Skip</button>
+        </div>
+      </div>
+      <div class="chat">
+        <div class="chat-header">Custom AI</div>
+        <div class="chat-body">Task tree loaded for Marketing Site. Continue Next runs the current leaf through the agent loop.</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

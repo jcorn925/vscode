@@ -1,0 +1,15 @@
+[15:21:42] Synchronizing built-in extensions...
+[15:21:42] You can manage built-in extensions with the [36m--builtin[39m flag
+[15:21:42] [34m[marketplace][39m ms-vscode.js-debug-companion@1.1.3 [32m✔︎[39m
+[15:21:42] [34m[marketplace][39m ms-vscode.js-debug@1.117.0 [32m✔︎[39m
+[15:21:42] [34m[marketplace][39m ms-vscode.vscode-js-profile-table@1.0.10 [32m✔︎[39m
+Debugger listening on ws://127.0.0.1:56751/225df464-9424-4a43-898c-cfc7fbe8f411
+For help, see: https://nodejs.org/learn/getting-started/debugging
+
+DevTools listening on ws://127.0.0.1:56749/devtools/browser/d76aeb0b-b936-45d7-aa21-475cef1ab6db
+[90m[main 2026-07-08T22:21:43.022Z][0m StorageMainService: creating application shared storage
+[90m[main 2026-07-08T22:21:43.111Z][0m [CSS_DEV] DONE, 400 css modules (84ms)
+[90m[main 2026-07-08T22:21:43.201Z][0m update#setState disabled
+[90m[main 2026-07-08T22:21:43.227Z][0m [shared storage] Creating shared storage database at '/tmp/code-oss-dev/20260708-152142-141/shared-data/sharedStorage/state.vscdb' (wasCreated: true)
+[90m[main 2026-07-08T22:21:43.227Z][0m [shared storage] Initializing fallback application storage (path: /tmp/code-oss-dev/20260708-152142-141/user-data/User/globalStorage/state.vscdb)
+[90m[main 2026-07-08T22:21:43.230Z][0m [shared storage] Fallback application storage initialized with 3 items

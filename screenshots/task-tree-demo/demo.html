@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Surface Task Tree Demo</title>
+  <style>
+    :root {
+      --bg: #1e1e1e;
+      --panel: #252526;
+      --border: rgba(128, 128, 128, 0.24);
+      --fg: #cccccc;
+      --muted: #9da5b4;
+      --accent: #0e639c;
+      --accent-fg: #ffffff;
+      --selection: rgba(14, 99, 156, 0.35);
+      --progress: #3794ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: var(--fg);
+      padding: 24px;
+    }
+    .frame {
+      max-width: 1180px;
+      margin: 0 auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--bg);
+      box-shadow: 0 24px 80px rgba(0,0,0,0.45);
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      background: #2d2d2d;
+    }
+    .console-btn, .tab {
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .console-btn { color: var(--muted); }
+    .tab { background: transparent; color: var(--muted); }
+    .tab.active { background: var(--accent); color: var(--accent-fg); }
+    .tabs { display: flex; gap: 6px; margin-left: 8px; }
+    .main {
+      display: grid;
+      grid-template-columns: 280px 1fr 320px;
+      min-height: 680px;
+    }
+    .checklist, .chat {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 14px;
+      font-size: 12px;
+    }
+    .chat { border-right: 0; border-left: 1px solid var(--border); }
+    .center {
+      display: flex;
+      flex-direction: column;
+      min-height: 680px;
+      background: var(--bg);
+    }
+    .toggle {
+      display: flex;
+      padding: 10px 12px 0;
+      gap: 0;
+    }
+    .toggle button {
+      height: 28px;
+      padding: 0 12px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--fg);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: default;
+    }
+    .toggle button:first-child {
+      border-top-left-radius: 6px;
+      border-bottom-left-radius: 6px;
+      border-right: 0;
+      background: var(--accent);
+      color: var(--accent-fg);
+    }
+    .toggle button:last-child {
+      border-top-right-radius: 6px;
+      border-bottom-right-radius: 6px;
+    }
+    .task-tree {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      padding: 12px 14px;
+      gap: 10px;
+    }
+    .prompt { font-size: 13px; font-weight: 600; }
+    .status { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .progress-bar {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--progress);
+      width: 33%;
+    }
+    .progress-label { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .list {
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      overflow: auto;
+      padding: 8px 0;
+    }
+    .node {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+    .node.current { background: var(--selection); }
+    .icon { width: 14px; text-align: center; }
+    .title { font-weight: 600; flex: 1; }
+    .detail {
+      flex: 1 1 100%;
+      padding-left: 20px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .controls button {
+      height: 26px;
+      padding: 0 10px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      background: #3a3d41;
+      color: var(--fg);
+      font-size: 12px;
+    }
+    .controls button:disabled { opacity: 0.5; }
+    h3 { margin: 0 0 8px; font-size: 13px; }
+    .muted { color: var(--muted); line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="topbar">
+      <div class="console-btn">Console</div>
+      <div class="tabs">
+        <div class="tab active">Marketing Site</div>
+        <div class="tab">Booking</div>
+        <div class="tab">Analytics Dashboard</div>
+      </div>
+    </div>
+    <div class="main">
+      <aside class="checklist">
+        <h3>Surface features</h3>
+        <div class="muted">Platform and workspace readiness for surface creation.</div>
+        <div class="muted" style="margin-top:10px;">6/12 checks passing</div>
+      </aside>
+      <section class="center">
+        <div class="toggle">
+          <button>Task Tree</button>
+          <button>Preview</button>
+        </div>
+        <div class="task-tree">
+          <div>
+            <div class="prompt">Create a Marketing Site surface for this goal workspace focused on public acquisition, offers, lead capture, and conversion tracking.</div>
+            <div class="status">active</div>
+            <div class="progress-bar"></div>
+            <div class="progress-label">33% complete (1/3 tasks)</div>
+          </div>
+          <div class="list">
+            <div class="node"><span class="icon">~</span><span class="title">Feature Planning</span></div>
+            <div class="node"><span class="icon">[x]</span><span class="title">Define implementation contract</span><div class="detail">Changed: apps/marketing/package.json • Verification: passed</div></div>
+            <div class="node current"><span class="icon">~</span><span class="title">Map integration points</span></div>
+            <div class="node"><span class="icon">-</span><span class="title">Define verification strategy</span></div>
+            <div class="node"><span class="icon">-</span><span class="title">Core Implementation</span></div>
+            <div class="node" style="padding-left:24px"><span class="icon">-</span><span class="title">Build core implementation</span></div>
+          </div>
+          <div class="controls">
+            <button disabled>Resume</button>
+            <button>Continue Next</button>
+            <button>Pause</button>
+            <button disabled>Retry</button>
+            <button disabled>Skip</button>
+          </div>
+        </div>
+      </section>
+      <aside class="chat">
+        <h3>AI chat</h3>
+        <div class="muted">Surface handoff and scaffold guidance appear here while the task tree tracks build progress in the main panel.</div>
+      </aside>
+    </div>
+  </div>
+</body>
+</html>

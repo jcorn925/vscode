@@ -216,5 +216,6 @@
 		".agents/skills/.local": true,
 		".claude/skills/.local": true,
 	},
-	"custom.ai.observability.langfuse.baseUrl": "https://us.cloud.langfuse.com"
+	"custom.ai.observability.langfuse.baseUrl": "https://us.cloud.langfuse.com",
+	"js/ts.tsserver.experimental.useBundledNode": true
 }

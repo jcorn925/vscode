@@ -1,0 +1,75 @@
+{
+	"version": 1,
+	"id": "20260708152000-marketing-surface",
+	"prompt": "Create a Marketing Site surface for this goal workspace focused on public acquisition, offers, lead capture, and conversion tracking.",
+	"createdAt": "2026-07-08T22:00:00.000Z",
+	"updatedAt": "2026-07-08T22:05:00.000Z",
+	"status": "active",
+	"surfaceId": "marketing",
+	"surfaceName": "Marketing Site",
+	"templateId": "marketing",
+	"roots": [
+		{
+			"id": "marketing-planning",
+			"title": "Feature Planning",
+			"type": "root",
+			"status": "in_progress",
+			"order": 1,
+			"children": [
+				{
+					"id": "marketing-define-contract",
+					"parentId": "marketing-planning",
+					"title": "Define implementation contract",
+					"type": "leaf",
+					"status": "complete",
+					"order": 1,
+					"implementation": {
+						"completedAt": "2026-07-08T22:01:00.000Z",
+						"changedFiles": ["apps/marketing/package.json"],
+						"verification": "passed"
+					}
+				},
+				{
+					"id": "marketing-map-integration",
+					"parentId": "marketing-planning",
+					"title": "Map integration points",
+					"type": "leaf",
+					"status": "in_progress",
+					"order": 2,
+					"implementation": {
+						"startedAt": "2026-07-08T22:05:00.000Z"
+					}
+				},
+				{
+					"id": "marketing-define-tests",
+					"parentId": "marketing-planning",
+					"title": "Define verification strategy",
+					"type": "leaf",
+					"status": "pending",
+					"order": 3
+				}
+			]
+		},
+		{
+			"id": "marketing-core",
+			"title": "Core Implementation",
+			"type": "root",
+			"status": "pending",
+			"order": 2,
+			"children": [
+				{
+					"id": "marketing-build-core",
+					"parentId": "marketing-core",
+					"title": "Build core implementation",
+					"type": "leaf",
+					"status": "pending",
+					"order": 1
+				}
+			]
+		}
+	],
+	"cursor": {
+		"currentNodeId": "marketing-map-integration",
+		"lastCompletedNodeId": "marketing-define-contract"
+	}
+}

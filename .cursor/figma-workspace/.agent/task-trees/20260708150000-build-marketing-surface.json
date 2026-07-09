@@ -1,0 +1,103 @@
+{
+	"version": 1,
+	"id": "20260708150000-build-marketing-surface",
+	"prompt": "Build the Marketing Site surface with lead capture and offer display",
+	"createdAt": "2026-07-08T15:00:00.000Z",
+	"updatedAt": "2026-07-08T15:10:00.000Z",
+	"status": "active",
+	"surfaceId": "marketing",
+	"surfaceName": "Marketing Site",
+	"templateId": "marketing",
+	"cursor": {
+		"currentNodeId": "build-marketing-surface-build-core",
+		"lastCompletedNodeId": "build-marketing-surface-map-integration"
+	},
+	"roots": [
+		{
+			"id": "build-marketing-surface-planning",
+			"title": "Feature Planning",
+			"type": "root",
+			"status": "in_progress",
+			"order": 1,
+			"children": [
+				{
+					"id": "build-marketing-surface-define-contract",
+					"parentId": "build-marketing-surface-planning",
+					"title": "Define implementation contract",
+					"description": "Identify files, interfaces, data flow, edge cases, and acceptance checks.",
+					"type": "leaf",
+					"status": "complete",
+					"order": 2,
+					"implementation": {
+						"startedAt": "2026-07-08T15:01:00.000Z",
+						"completedAt": "2026-07-08T15:02:00.000Z",
+						"changedFiles": ["apps/marketing/src/app/page.tsx"],
+						"verification": "Contract reviewed",
+						"notes": "Mapped hero, offers, and lead form."
+					}
+				},
+				{
+					"id": "build-marketing-surface-map-integration",
+					"parentId": "build-marketing-surface-planning",
+					"title": "Map integration points",
+					"description": "List workbench commands, services, storage locations, and UI surfaces.",
+					"type": "leaf",
+					"status": "complete",
+					"order": 3,
+					"implementation": {
+						"startedAt": "2026-07-08T15:03:00.000Z",
+						"completedAt": "2026-07-08T15:04:00.000Z",
+						"changedFiles": ["workspace.goal.json"],
+						"verification": "Integration map complete"
+					}
+				}
+			]
+		},
+		{
+			"id": "build-marketing-surface-core",
+			"title": "Core Implementation",
+			"type": "root",
+			"status": "in_progress",
+			"order": 4,
+			"children": [
+				{
+					"id": "build-marketing-surface-build-core",
+					"parentId": "build-marketing-surface-core",
+					"title": "Build core implementation",
+					"description": "Build the Marketing Site surface with lead capture and offer display",
+					"type": "leaf",
+					"status": "in_progress",
+					"order": 5,
+					"implementation": {
+						"startedAt": "2026-07-08T15:10:00.000Z"
+					}
+				},
+				{
+					"id": "build-marketing-surface-wire-services",
+					"parentId": "build-marketing-surface-core",
+					"title": "Wire services and lifecycle",
+					"type": "leaf",
+					"status": "pending",
+					"order": 6
+				}
+			]
+		},
+		{
+			"id": "build-marketing-surface-ui",
+			"title": "UI Integration",
+			"type": "root",
+			"status": "pending",
+			"order": 7,
+			"children": [
+				{
+					"id": "build-marketing-surface-wire-commands",
+					"parentId": "build-marketing-surface-ui",
+					"title": "Wire commands",
+					"type": "leaf",
+					"status": "pending",
+					"order": 8
+				}
+			]
+		}
+	]
+}
