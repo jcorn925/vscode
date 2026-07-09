@@ -25,12 +25,12 @@ export class SurfaceFeatureChecklistPanel extends Disposable {
 	private readonly listEl: HTMLElement;
 	private readonly refreshButton: HTMLButtonElement;
 	private readonly playButton: HTMLButtonElement;
-	private collapsed = false;
 
 	constructor(
 		private readonly root: HTMLElement,
 		private readonly service: ISurfaceFeatureChecklistService,
 		private readonly onPlay?: (surfaceId?: string, stepId?: string) => void,
+		private readonly onHide?: () => void,
 	) {
 		super();
 
@@ -43,8 +43,8 @@ export class SurfaceFeatureChecklistPanel extends Disposable {
 		this.actionsEl = $('div.custom-mode-surface-feature-checklist-actions');
 		const toggleButton = $('button.custom-mode-surface-feature-checklist-toggle', {
 			type: 'button',
-			'aria-label': localize('surfaceFeatureChecklist.collapse', 'Collapse checklist'),
-			title: localize('surfaceFeatureChecklist.collapse', 'Collapse checklist'),
+			'aria-label': localize('surfaceFeatureChecklist.hide', 'Hide checklist'),
+			title: localize('surfaceFeatureChecklist.hide', 'Hide checklist'),
 		}, '\u2212') as HTMLButtonElement;
 		this.refreshButton = $('button.custom-mode-surface-feature-checklist-refresh', {
 			type: 'button',
@@ -64,16 +64,7 @@ export class SurfaceFeatureChecklistPanel extends Disposable {
 
 		this._register(addDisposableListener(this.refreshButton, 'click', () => void this.service.refresh()));
 		this._register(addDisposableListener(this.playButton, 'click', () => this.onPlay?.()));
-		this._register(addDisposableListener(toggleButton, 'click', () => {
-			this.collapsed = !this.collapsed;
-			this.root.classList.toggle('custom-mode-surface-feature-checklist-collapsed', this.collapsed);
-			toggleButton.textContent = this.collapsed ? '+' : '\u2212';
-			const label = this.collapsed
-				? localize('surfaceFeatureChecklist.expand', 'Expand checklist')
-				: localize('surfaceFeatureChecklist.collapse', 'Collapse checklist');
-			toggleButton.setAttribute('aria-label', label);
-			toggleButton.title = label;
-		}));
+		this._register(addDisposableListener(toggleButton, 'click', () => this.onHide?.()));
 		this._register(this.service.onDidChangeState(state => this.render(state)));
 		this._register(toDisposable(() => this.root.replaceChildren()));
 

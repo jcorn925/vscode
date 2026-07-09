@@ -18,7 +18,7 @@ suite('surfaceTaskTreePanel', () => {
 		const panel = new SurfaceTaskTreePanel(root, service);
 		try {
 			panel.render(createTree());
-			assert.ok(root.textContent?.includes('Build feature'));
+			assert.ok(root.textContent?.includes('First'));
 			assert.ok(root.textContent?.includes('50%'));
 			assert.ok(root.querySelector('.custom-mode-surface-task-tree-node'));
 		} finally {

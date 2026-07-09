@@ -23,7 +23,8 @@ import { IContextKeyService, type IScopedContextKeyService } from '../../../../p
 import { IInstantiationService, type ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
 import { DevServerState, DevServerSuggestedCommands, IDevServerService } from '../../../../../custom/devserver/DevServerService.js';
-import { collectUniqueSurfacePorts, freeSurfacePorts, killProcessListeningOnPort, parsePortFromLocalUrl } from '../../../../../custom/devserver/surfaceDevPortUtils.js';
+import { freeSurfacePorts, killProcessListeningOnPort } from '../../../../../custom/devserver/surfaceDevPortFreeing.js';
+import { collectUniqueSurfacePorts, parsePortFromLocalUrl } from '../../../../../custom/devserver/surfaceDevPortUtils.js';
 import { IDefaultProjectService } from '../../../../../custom/devserver/DefaultProjectService.js';
 import { IModeService, Mode } from '../../../../../custom/mode/ModeService.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
@@ -116,6 +117,7 @@ const STORAGE_CONTEXT_GATHERING_OPEN = 'modeShell.contextGatheringOpen';
 const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
 const STORAGE_ACTIVE_UI_CHAT_SURFACE = 'modeShell.activeUiChatSurface';
 const STORAGE_SURFACE_MAIN_VIEW_PREFIX = 'modeShell.surfaceMainView.';
+const STORAGE_SURFACE_FEATURE_CHECKLIST_HIDDEN = 'modeShell.surfaceFeatureChecklistHidden';
 const ADD_SURFACE_ID = '__add_surface__';
 
 export async function runSurfaceWorkflowFromModeShell(surfaceId?: string): Promise<boolean> {
@@ -1506,10 +1508,10 @@ class ModeShellContribution extends Disposable {
 				flex: 0 0 auto;
 			}
 
-			.monaco-workbench .custom-mode-surface-task-tree-prompt {
-				font-size: 13px;
-				font-weight: 600;
-				color: var(--vscode-foreground);
+			.monaco-workbench .custom-mode-surface-task-tree-empty {
+				padding: 12px 14px;
+				font-size: 12px;
+				color: var(--vscode-descriptionForeground);
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-status {
@@ -3662,12 +3664,16 @@ class ModeShellContribution extends Disposable {
 		}
 		this.uiMainColumn = $('div.custom-mode-ui-main');
 		this.uiFeatureChecklistColumn = $('div.custom-mode-ui-feature-checklist-column');
+		if (this.isSurfaceFeatureChecklistHidden()) {
+			this.uiFeatureChecklistColumn.classList.add('hidden');
+		}
 		this._register(new SurfaceFeatureChecklistPanel(
 			this.uiFeatureChecklistColumn,
 			this.surfaceFeatureChecklistService,
 			(surfaceId, stepId) => stepId
 				? void this.playSelectedSurfaceWorkflowStep(surfaceId, stepId)
 				: void this.playSelectedSurfaceWorkflow(surfaceId),
+			() => this.setSurfaceFeatureChecklistHidden(true),
 		));
 		this.uiSetup = $('div.custom-mode-setup');
 		this.uiSelectionCountEl = $('span.custom-mode-ui-selection-count', undefined, '0');
@@ -5707,7 +5713,7 @@ class ModeShellContribution extends Disposable {
 		if (!ports.length) {
 			return;
 		}
-		await freeSurfacePorts(ports);
+		await freeSurfacePorts(ports, this.instantiationService);
 		this.pushUiRuntimeLog(`[surface-ports] freed ports before startup: ${ports.join(', ')}`);
 	}
 
@@ -5721,7 +5727,7 @@ class ModeShellContribution extends Disposable {
 		if (commandPort) {
 			ports.add(commandPort);
 		}
-		await Promise.all([...ports].map(port => killProcessListeningOnPort(port)));
+		await Promise.all([...ports].map(port => killProcessListeningOnPort(port, this.instantiationService)));
 	}
 
 	private parsePortFromCommand(command: string): number | undefined {
@@ -6026,8 +6032,16 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private updateSurfaceFeatureChecklistVisibility(): void {
-		const showChecklist = Boolean(this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID);
-		this.uiFeatureChecklistColumn.classList.toggle('hidden', !showChecklist);
+		this.uiFeatureChecklistColumn.classList.toggle('hidden', this.isSurfaceFeatureChecklistHidden());
+	}
+
+	private isSurfaceFeatureChecklistHidden(): boolean {
+		return this.storageService.getBoolean(STORAGE_SURFACE_FEATURE_CHECKLIST_HIDDEN, StorageScope.WORKSPACE, true);
+	}
+
+	private setSurfaceFeatureChecklistHidden(hidden: boolean): void {
+		this.storageService.store(STORAGE_SURFACE_FEATURE_CHECKLIST_HIDDEN, hidden, StorageScope.WORKSPACE, StorageTarget.USER);
+		this.uiFeatureChecklistColumn.classList.toggle('hidden', hidden);
 	}
 
 	private renderSelectedSurfaceLaunchPanel(): void {
@@ -6621,7 +6635,7 @@ class ModeShellContribution extends Disposable {
 
 		this.startAllSurfacesInProgress = true;
 		this.updateStartAppControl();
-		await freeSurfacePorts(collectUniqueSurfacePorts(surfaces));
+		await freeSurfacePorts(collectUniqueSurfacePorts(surfaces), this.instantiationService);
 		const pending = [...surfaces];
 		const started: string[] = [];
 		const failed: string[] = [];

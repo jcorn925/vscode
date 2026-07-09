@@ -12,7 +12,6 @@ import { formatNodeDetail, isRetryableLeaf, statusIcon } from '../../../../../cu
 
 export class SurfaceTaskTreePanel extends Disposable {
 	private readonly headerEl: HTMLElement;
-	private readonly promptEl: HTMLElement;
 	private readonly statusEl: HTMLElement;
 	private readonly progressBarEl: HTMLElement;
 	private readonly progressLabelEl: HTMLElement;
@@ -33,14 +32,12 @@ export class SurfaceTaskTreePanel extends Disposable {
 		super();
 
 		this.headerEl = $('div.custom-mode-surface-task-tree-header');
-		this.promptEl = $('div.custom-mode-surface-task-tree-prompt');
 		this.statusEl = $('div.custom-mode-surface-task-tree-status');
 		const progressBlock = $('div.custom-mode-surface-task-tree-progress');
 		this.progressBarEl = $('div.custom-mode-surface-task-tree-progress-bar');
 		this.progressLabelEl = $('div.custom-mode-surface-task-tree-progress-label');
 		progressBlock.appendChild(this.progressBarEl);
 		progressBlock.appendChild(this.progressLabelEl);
-		this.headerEl.appendChild(this.promptEl);
 		this.headerEl.appendChild(this.statusEl);
 		this.headerEl.appendChild(progressBlock);
 
@@ -93,17 +90,16 @@ export class SurfaceTaskTreePanel extends Disposable {
 	render(tree: AgentTaskTree | undefined): void {
 		this.tree = tree;
 		if (!tree) {
-			this.promptEl.textContent = localize('surfaceTaskTree.empty', 'No task tree for this surface yet.');
 			this.statusEl.textContent = '';
 			this.progressBarEl.style.width = '0%';
 			this.progressLabelEl.textContent = '';
-			this.treeEl.replaceChildren();
+			this.treeEl.replaceChildren($('div.custom-mode-surface-task-tree-empty', undefined,
+				localize('surfaceTaskTree.empty', 'No task tree for this surface yet.')));
 			this.setControlsEnabled(false);
 			return;
 		}
 
 		const progress = computeTaskTreeProgress(tree);
-		this.promptEl.textContent = tree.prompt;
 		this.statusEl.textContent = tree.status;
 		this.progressBarEl.style.width = `${progress.percent}%`;
 		this.progressLabelEl.textContent = localize(

@@ -8,12 +8,13 @@ import { Disposable } from '../../vs/base/common/lifecycle.js';
 import { basename, joinPath } from '../../vs/base/common/resources.js';
 import { URI } from '../../vs/base/common/uri.js';
 import { isWindows } from '../../vs/base/common/platform.js';
-import { createDecorator } from '../../vs/platform/instantiation/common/instantiation.js';
+import { createDecorator, IInstantiationService } from '../../vs/platform/instantiation/common/instantiation.js';
 import { InstantiationType, registerSingleton } from '../../vs/platform/instantiation/common/extensions.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../vs/platform/workspace/common/workspace.js';
 import { ITerminalInstance, ITerminalService } from '../../vs/workbench/contrib/terminal/browser/terminal.js';
-import { killProcessListeningOnPort, parsePortFromLocalUrl } from './surfaceDevPortUtils.js';
+import { killProcessListeningOnPort } from './surfaceDevPortFreeing.js';
+import { parsePortFromLocalUrl } from './surfaceDevPortUtils.js';
 
 export type DevServerPackageManager = 'npm' | 'yarn' | 'pnpm';
 
@@ -96,7 +97,8 @@ export class DevServerService extends Disposable implements IDevServerService {
 	constructor(
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@IFileService private readonly fileService: IFileService,
-		@ITerminalService private readonly terminalService: ITerminalService
+		@ITerminalService private readonly terminalService: ITerminalService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService
 	) {
 		super();
 
@@ -505,7 +507,7 @@ export class DevServerService extends Disposable implements IDevServerService {
 		if (commandPort) {
 			ports.add(commandPort);
 		}
-		await Promise.all([...ports].map(port => killProcessListeningOnPort(port)));
+		await Promise.all([...ports].map(port => killProcessListeningOnPort(port, this.instantiationService)));
 	}
 
 	private getDevServerTerminalTitle(folder: URI, label?: string): string {
