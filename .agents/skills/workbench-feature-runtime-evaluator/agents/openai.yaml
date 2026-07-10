@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workbench Runtime Evaluator"
+  short_description: "Score running workbench features with screenshot proof"
+  default_prompt: "Use $workbench-feature-runtime-evaluator to evaluate this running workbench feature with screenshots, console evidence, and prioritized findings."

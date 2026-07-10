@@ -1,0 +1,1623 @@
+{
+  "dir": "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-050800",
+  "cdpPort": 59126,
+  "pid": 25103,
+  "rendererPid": 57900,
+  "targetCount": 1,
+  "targets": [
+    {
+      "description": "",
+      "devtoolsFrontendUrl": "https://chrome-devtools-frontend.appspot.com/serve_rev/@66a408cf561cd18ce86fe8e77e85e8ca6497e245/inspector.html?ws=127.0.0.1:59126/devtools/page/66BB75CEC53F8FEC6AE773A78B2F02E0",
+      "id": "66BB75CEC53F8FEC6AE773A78B2F02E0",
+      "title": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench.html",
+      "type": "page",
+      "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench.html",
+      "webSocketDebuggerUrl": "ws://127.0.0.1:59126/devtools/page/66BB75CEC53F8FEC6AE773A78B2F02E0"
+    }
+  ],
+  "selectedPage": {
+    "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench.html",
+    "title": ""
+  },
+  "before": {
+    "label": "before-reload",
+    "href": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench.html",
+    "title": "",
+    "readyState": "complete",
+    "bodyTextLength": 0,
+    "bodyTextSample": "",
+    "bodyRect": {
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 0,
+      "top": 0,
+      "right": 1440,
+      "bottom": 0,
+      "left": 0
+    },
+    "workbenchRect": null,
+    "editorRect": null,
+    "customShellRect": null,
+    "scripts": [
+      "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench.js"
+    ],
+    "stylesheets": [
+      "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/workbench.desktop.main.css",
+      null
+    ]
+  },
+  "after": {
+    "label": "after-reload",
+    "href": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench.html",
+    "title": "",
+    "readyState": "complete",
+    "bodyTextLength": 0,
+    "bodyTextSample": "",
+    "bodyRect": {
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 0,
+      "top": 0,
+      "right": 1440,
+      "bottom": 0,
+      "left": 0
+    },
+    "workbenchRect": null,
+    "editorRect": null,
+    "customShellRect": null,
+    "scripts": [
+      "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench.js"
+    ],
+    "stylesheets": [
+      "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/workbench.desktop.main.css",
+      null
+    ]
+  },
+  "events": [
+    {
+      "kind": "requestfailed",
+      "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/workbench.desktop.main.css",
+      "failure": {
+        "errorText": "net::ERR_FILE_NOT_FOUND"
+      },
+      "time": "2026-07-10T05:08:00.947Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load resource: net::ERR_FILE_NOT_FOUND",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/workbench.desktop.main.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:00.947Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "network",
+        "level": "error",
+        "text": "Failed to load resource: net::ERR_FILE_NOT_FOUND",
+        "timestamp": 1783660080946.616,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/workbench.desktop.main.css",
+        "networkRequestId": "57900.2427"
+      },
+      "time": "2026-07-10T05:08:00.947Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/browser/actions/media/actions.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.298Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081249.479,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/browser/actions/media/actions.css"
+      },
+      "time": "2026-07-10T05:08:01.298Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/browser/parts/banner/media/bannerpart.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.301Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081256.109,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/browser/parts/banner/media/bannerpart.css"
+      },
+      "time": "2026-07-10T05:08:01.301Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/browser/parts/statusbar/media/statusbarpart.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.301Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081256.592,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/browser/parts/statusbar/media/statusbarpart.css"
+      },
+      "time": "2026-07-10T05:08:01.301Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/services/progress/browser/media/progressService.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.302Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081257.432,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/services/progress/browser/media/progressService.css"
+      },
+      "time": "2026-07-10T05:08:01.302Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "[uncaught exception]: TypeError: Failed to fetch dynamically imported module: vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/workbench.desktop.main.js",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench.js",
+        "line": 324,
+        "column": 12,
+        "lineNumber": 324,
+        "columnNumber": 12
+      },
+      "time": "2026-07-10T05:08:01.303Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "TypeError: Failed to fetch dynamically imported module: vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/workbench.desktop.main.js",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench.js",
+        "line": 326,
+        "column": 14,
+        "lineNumber": 326,
+        "columnNumber": 14
+      },
+      "time": "2026-07-10T05:08:01.303Z"
+    },
+    {
+      "kind": "pageerror",
+      "message": "Failed to fetch dynamically imported module: vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/workbench.desktop.main.js",
+      "stack": "",
+      "time": "2026-07-10T05:08:01.304Z"
+    },
+    {
+      "kind": "Runtime.exceptionThrown",
+      "exception": {
+        "exceptionId": 2,
+        "text": "Uncaught (in promise)",
+        "lineNumber": 404,
+        "columnNumber": 0,
+        "scriptId": "9",
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench.js",
+        "exception": {
+          "type": "object",
+          "subtype": "error",
+          "className": "TypeError",
+          "description": "TypeError: Failed to fetch dynamically imported module: vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/workbench.desktop.main.js",
+          "objectId": "8516492175901117203.4.1",
+          "preview": {
+            "type": "object",
+            "subtype": "error",
+            "description": "TypeError: Failed to fetch dynamically imported module: vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/workbench.desktop.main.js",
+            "overflow": false,
+            "properties": [
+              {
+                "name": "stack",
+                "type": "string",
+                "value": "TypeError: Failed to fetch dynamically imported mo…vscode/out/vs/workbench/workbench.desktop.main.js"
+              },
+              {
+                "name": "message",
+                "type": "string",
+                "value": "Failed to fetch dynamically imported module: vscod…vscode/out/vs/workbench/workbench.desktop.main.js"
+              }
+            ]
+          }
+        },
+        "executionContextId": 4
+      },
+      "time": "2026-07-10T05:08:01.304Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/services/userDataProfile/browser/media/userDataProfileView.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.345Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081296.771,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/services/userDataProfile/browser/media/userDataProfileView.css"
+      },
+      "time": "2026-07-10T05:08:01.345Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/imageCarousel/browser/media/imageCarousel.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.414Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081375.079,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/imageCarousel/browser/media/imageCarousel.css"
+      },
+      "time": "2026-07-10T05:08:01.414Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/files/browser/media/explorerviewlet.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.416Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081379.445,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/files/browser/media/explorerviewlet.css"
+      },
+      "time": "2026-07-10T05:08:01.416Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/search/browser/media/searchview.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.421Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081394.59,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/search/browser/media/searchview.css"
+      },
+      "time": "2026-07-10T05:08:01.421Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/debug/browser/media/debug.contribution.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.578,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/debug/browser/media/debug.contribution.css"
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/debug/browser/media/debugHover.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.631,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/debug/browser/media/debugHover.css"
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/debug/browser/media/callStackEditorContribution.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.664,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/debug/browser/media/callStackEditorContribution.css"
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/debug/browser/media/repl.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.697,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/debug/browser/media/repl.css"
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/debug/browser/media/debugViewlet.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.728,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/debug/browser/media/debugViewlet.css"
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/extensions/browser/media/extensionManagement.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.761,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/extensions/browser/media/extensionManagement.css"
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/extensions/browser/media/extensionsViewlet.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.79,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/extensions/browser/media/extensionsViewlet.css"
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/output/browser/output.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.825,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/output/browser/output.css"
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/activityBar.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.862,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/activityBar.css"
+      },
+      "time": "2026-07-10T05:08:01.438Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/commandCenter.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.893,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/commandCenter.css"
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/editorBorder.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.924,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/editorBorder.css"
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/sashHandles.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.955,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/sashHandles.css"
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/shadows.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081410.987,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/shadows.css"
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/keyboardFocusOnly.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081411.023,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/keyboardFocusOnly.css"
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/titlebar.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081411.055,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/titlebar.css"
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/paneHeaders.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081411.089,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/paneHeaders.css"
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/roundedCorners.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081411.119,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/roundedCorners.css"
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/tabs.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081411.15,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/tabs.css"
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/fontRamp.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081411.18,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/fontRamp.css"
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/statusBar.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081411.217,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/statusBar.css"
+      },
+      "time": "2026-07-10T05:08:01.439Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/scrollShadows.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.440Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081411.282,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/scrollShadows.css"
+      },
+      "time": "2026-07-10T05:08:01.440Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/padding.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.440Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081411.327,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/styleOverrides/browser/media/padding.css"
+      },
+      "time": "2026-07-10T05:08:01.440Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/markdown/browser/media/markdown.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.440Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081411.37,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/markdown/browser/media/markdown.css"
+      },
+      "time": "2026-07-10T05:08:01.440Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/welcomeOnboarding/browser/media/variationA.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.443Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081419.148,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/welcomeOnboarding/browser/media/variationA.css"
+      },
+      "time": "2026-07-10T05:08:01.443Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/workspace/browser/media/workspaceTrustEditor.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.462Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081447.739,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/workspace/browser/media/workspaceTrustEditor.css"
+      },
+      "time": "2026-07-10T05:08:01.462Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/share/browser/share.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.462Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081447.814,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/share/browser/share.css"
+      },
+      "time": "2026-07-10T05:08:01.462Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/electron-browser/media/window.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.462Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081447.894,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/electron-browser/media/window.css"
+      },
+      "time": "2026-07-10T05:08:01.462Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/electron-browser/actions/media/actions.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.462Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081447.977,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/electron-browser/actions/media/actions.css"
+      },
+      "time": "2026-07-10T05:08:01.463Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/base/browser/ui/contextview/contextview.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.463Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081448.032,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/base/browser/ui/contextview/contextview.css"
+      },
+      "time": "2026-07-10T05:08:01.463Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/extensions/browser/media/runtimeExtensionsEditor.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.177,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/extensions/browser/media/runtimeExtensionsEditor.css"
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/issue/browser/media/issueReporterOverlay.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.234,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/issue/browser/media/issueReporterOverlay.css"
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/surveys/browser/media/surveyEditorPane.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.266,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/surveys/browser/media/surveyEditorPane.css"
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/browserView/electron-browser/media/browser.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.384,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/browserView/electron-browser/media/browser.css"
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/chat/electron-browser/media/tunnelHost.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.465,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/chat/electron-browser/media/tunnelHost.css"
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/chat/electron-browser/actions/media/voiceChatActions.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.53,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/chat/electron-browser/actions/media/voiceChatActions.css"
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/chat/electron-browser/agentSessions/media/openInAgents.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.57,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/workbench/contrib/chat/electron-browser/agentSessions/media/openInAgents.css"
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/browser/widget/codeEditor/editor.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.646,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/browser/widget/codeEditor/editor.css"
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/anchorSelect/browser/anchorSelect.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.701,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/anchorSelect/browser/anchorSelect.css"
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/bracketMatching/browser/bracketMatching.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.742,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/bracketMatching/browser/bracketMatching.css"
+      },
+      "time": "2026-07-10T05:08:01.467Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/dnd/browser/dnd.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.815,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/dnd/browser/dnd.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/folding/browser/folding.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.86,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/folding/browser/folding.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/inlineProgress/browser/inlineProgressWidget.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.918,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/inlineProgress/browser/inlineProgressWidget.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/gotoSymbol/browser/link/goToDefinitionAtPosition.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081461.954,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/gotoSymbol/browser/link/goToDefinitionAtPosition.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/hover/browser/hover.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081462.007,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/hover/browser/hover.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplace.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081462.06,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplace.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/linkedEditing/browser/linkedEditing.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081462.101,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/linkedEditing/browser/linkedEditing.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/links/browser/links.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081462.132,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/links/browser/links.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/placeholderText/browser/placeholderText.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081462.167,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/placeholderText/browser/placeholderText.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/unicodeHighlighter/browser/unicodeHighlighter.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081462.231,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/unicodeHighlighter/browser/unicodeHighlighter.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/base/browser/ui/codicons/codicon/codicon-modifiers.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081462.288,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/base/browser/ui/codicons/codicon/codicon-modifiers.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/base/browser/ui/codicons/codicon/codicon.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081462.323,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/base/browser/ui/codicons/codicon/codicon.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+      "location": {
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/floatingMenu/browser/floatingMenu.css",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    },
+    {
+      "kind": "Log.entryAdded",
+      "entry": {
+        "source": "javascript",
+        "level": "error",
+        "text": "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"text/css\". Strict MIME type checking is enforced for module scripts per HTML spec.",
+        "timestamp": 1783660081462.354,
+        "url": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/editor/contrib/floatingMenu/browser/floatingMenu.css"
+      },
+      "time": "2026-07-10T05:08:01.468Z"
+    }
+  ]
+}
