@@ -209,9 +209,65 @@ suite('agentTaskTreeService', () => {
 				templateId: 'marketing',
 			});
 			assert.strictEqual(tree.surfaceId, 'marketing');
+			assert.deepStrictEqual(tree.roots.map(root => root.title), [
+				'Surface Scaffold',
+				'Routes and UI',
+				'APIs and Shared',
+				'Acceptance and Verification',
+			]);
+			const campaignLeaf = tree.roots
+				.flatMap(root => root.children ?? [])
+				.find(node => node.subsystemId === 'hero' || node.title.includes('Marketing Hero'));
+			assert.ok(campaignLeaf);
+			assert.ok((campaignLeaf!.expectedPaths?.length ?? 0) > 0);
 			const persisted = await service.loadTaskTree(tree.id);
 			assert.strictEqual(persisted?.surfaceName, 'Marketing Site');
 			assert.strictEqual(persisted?.templateId, 'marketing');
+			assert.ok((persisted?.roots.flatMap(root => root.children ?? []).find(node => node.id === campaignLeaf!.id)?.expectedPaths?.length ?? 0) > 0);
+		} finally {
+			service.dispose();
+		}
+	});
+
+	test('generateSurfaceCoreBuildPlanTree uses template when blueprint is absent', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		try {
+			const tree = await service.generateSurfaceCoreBuildPlanTree('Core implementation build plan for Ads Manager', {
+				surfaceId: 'ads-manager',
+				surfaceName: 'Ads Manager',
+				templateId: 'ads-manager',
+			});
+			assert.strictEqual(tree.templateId, 'ads-manager');
+			assert.ok(tree.roots.some(root => root.title === 'Routes and UI'));
+			assert.ok(tree.roots.some(root => root.title === 'Acceptance and Verification'));
+			assert.ok(!tree.roots.some(root => root.title === 'Feature Planning'));
+			assert.ok(!tree.roots.some(root => root.title === 'Agent Loop'));
+		} finally {
+			service.dispose();
+		}
+	});
+
+	test('default executor scaffolds a surface task tree leaf from template', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		try {
+			const tree = await service.generateSurfaceCoreBuildPlanTree('Core implementation build plan for Content Scheduler', {
+				surfaceId: 'content-scheduler',
+				surfaceName: 'Content Scheduler',
+				templateId: 'content-scheduler',
+			});
+
+			const result = await service.continueNextTask(tree.id);
+
+			assert.strictEqual(result.status, 'completed');
+			assert.strictEqual(result.task?.title, 'Scaffold app shell');
+			assert.ok(await fileService.exists(joinPath(workspaceFolder, 'apps/content-scheduler/package.json')));
+			assert.ok(await fileService.exists(joinPath(workspaceFolder, 'apps/content-scheduler/app/layout.tsx')));
+			assert.ok(await fileService.exists(joinPath(workspaceFolder, 'workspace.goal.json')));
+			assert.ok(await fileService.exists(joinPath(workspaceFolder, '.agent/surfaces/content-scheduler.blueprint.json')));
+			assert.ok(result.task?.implementation?.changedFiles?.some(path => path === 'apps/content-scheduler/package.json'));
+			assert.ok(result.task?.implementation?.verification?.includes('apps/content-scheduler/package.json'));
 		} finally {
 			service.dispose();
 		}

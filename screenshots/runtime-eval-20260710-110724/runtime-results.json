@@ -1,0 +1,209 @@
+{
+  "checks": {
+    "createImportChoice": true,
+    "createGoesToDraftPrompt": true,
+    "importSourceChoices": true,
+    "folderImportRegistered": true,
+    "noBlueprintAfterFolder": true,
+    "gitFailureDoesNotRegister": true,
+    "gitFailureNotifies": true,
+    "gitTargetNotCreated": true,
+    "gitExtensionLikelyEnabled": true
+  },
+  "findings": [],
+  "shots": [
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-110724/01-after-launch.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-110724/03-new-surface-picker.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-110724/04-create-new-surface-prompt.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-110724/05-import-source-picker.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-110724/06-existing-folder-dialog.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-110724/07-after-folder-select.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-110724/08-after-folder-import-flow.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-110724/09-git-url-prompt.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-110724/10-after-git-clone-attempt.png"
+  ],
+  "health": {
+    "title": "Welcome — import-runtime-ws",
+    "readyState": "complete",
+    "bodyLen": 1217,
+    "bodySample": "Console\nCode\nDrag to Select\n0\nSelected\nBusiness name\nDescription\nLogo\nDrop logo or click to upload\nLogo mark\nDrop icon or click to upload\nPrimary\nSecondary\nAccent\nSurfaces\nChoose where to start. Each surface becomes a deployable app in your workspace.\nStart all surfaces\nMarketing Site\nNot created\nBooking\nNot created\nClient Portal\nNot created\nTrainer Admin\nNot created\nAnalytics\nNot created\nContent Scheduler\nNot created\nAds Manager\nNot created\nSubscriptions\nNot created\nNew Surface\nAI chat\n✕\nConsole\nBuild with Agent\n\nAI responses may be inaccurate\n\nGenerate Agent Instructions to onboard AI onto your codebase.\n\ngpt-4o-mini\nLocal\nDefault Approvals\nError: Ix Docker backend failed to start. See Process tab for details.\n1 of 3\nWelcome to VS Code\n\nSign in to use Continue.\n\nContinue with GitHub\nGHE\nBy signing in, you agree to Continue's Terms and Privacy Statement. Continue may show public code suggestions and use your data to improve the product. You can change these settings anytime.\nContinue ",
+    "classes": "custom-mode-shell-enabled monaco-enable-motion custom-mode-ui custom-mode-context-gathering-open custom-mode-shell-hasProject monaco-workbench mac chromium nopanel panel-position-bottom panel-alignment-center macos-tahoe custom-mode-ui-surface-selected file-icons-enabled vs-dark vscode-theme-defaults-themes-2026-dark-json",
+    "starterTitles": [
+      "Marketing Site",
+      "Booking",
+      "Client Portal",
+      "Trainer Admin",
+      "Analytics",
+      "Content Scheduler",
+      "Ads Manager",
+      "Subscriptions",
+      "New Surface"
+    ],
+    "uiVisible": true,
+    "newSurface": true
+  },
+  "afterMode": {
+    "starterTitles": [
+      "Marketing Site",
+      "Booking",
+      "Client Portal",
+      "Trainer Admin",
+      "Analytics",
+      "Content Scheduler",
+      "Ads Manager",
+      "Subscriptions",
+      "New Surface"
+    ],
+    "newSurface": true,
+    "bodySample": "Console\nCode\nDrag to Select\n0\nSelected\nBusiness name\nDescription\nLogo\nDrop logo or click to upload\nLogo mark\nDrop icon or click to upload\nPrimary\nSecondary\nAccent\nSurfaces\nChoose where to start. Each surface becomes a deployable app in your workspace.\nStart all surfaces\nMarketing Site\nNot created\nBooking\nNot created\nClient Portal\nNot created\nTrainer Admin\nNot created\nAnalytics\nNot created\nContent Scheduler\nNot created\nAds Manager\nNot created\nSubscriptions\nNot created\nNew Surface\nAI chat\n✕\nConsole\nBuild with Agent\n\nAI responses may be inaccurate\n\nGenerate Agent Instructions to onboard AI onto your codebase.\n\ngpt-4o-mini\nLocal\nDefault Approvals\nError: Ix Docker backend failed to start. See Process tab for details.\n1 of 3\nWelcome to VS Code\n\nSign in to use Continue.\n\nContinue with GitHub\nGHE\nBy signing in, you agree to Continue's Terms and Privacy Statement. Continue may show public code suggestions and use your data to improve the product. You can change these settings anytime.\nContinue without Signing In\nIx Docker backend failed to start. See Process tab for details.\nDocker Desktop is required for Ix (`ix docker start`) and Docker MCP tools. Install Docker Desktop, start it, then reload this window.",
+    "classes": "custom-mode-shell-enabled monaco-enable-motion custom-mode-ui custom-mode-context-gathering-open custom-mode-shell-hasProject monaco-workbench mac chromium nopanel panel-position-bottom panel-alignment-center macos-tahoe custom-mode-ui-surface-selected file-icons-enabled vs-dark vscode-theme-defaults-themes-2026-dark-json"
+  },
+  "createPicker": {
+    "click1": {
+      "ok": true,
+      "text": "New SurfaceCreate a custom app or import an existing repo.",
+      "title": "Create or import a surface"
+    },
+    "picks1": [
+      {
+        "label": "Create New SurfaceUse the guided builder and scaffold flow",
+        "aria": "Create New Surface, Use the guided builder and scaffold flow"
+      },
+      {
+        "label": "Import RepoRegister an existing app folder or clone a Git URL",
+        "aria": "Import Repo, Register an existing app folder or clone a Git URL"
+      }
+    ]
+  },
+  "createPrompt": {
+    "title": " ",
+    "message": "",
+    "placeholder": "e.g. Referral Program",
+    "visible": true,
+    "body": "What should this surface be called? (Press 'Enter' to confirm or 'Escape' to cancel)"
+  },
+  "importSourcePicker": [
+    {
+      "label": "Clone from Git URLClone into apps/<surface-id> and register it",
+      "aria": "Clone from Git URL, Clone into apps/<surface-id> and register it"
+    },
+    {
+      "label": "Use Existing FolderRegister a folder already inside this workspace",
+      "aria": "Use Existing Folder, Register a folder already inside this workspace"
+    }
+  ],
+  "folderDialog": {
+    "quickVisible": true,
+    "title": "Choose Surface Folder",
+    "body": "Choose Surface Folder\n3 Results\nImport Surface\n..\napps\npackages",
+    "simpleDialog": true
+  },
+  "folderTyped": {
+    "ok": true,
+    "value": "/tmp/gc/import-runtime-ws/apps/existing-portal"
+  },
+  "folderPrompt0": {
+    "visible": true,
+    "title": "Import Repo",
+    "prompt": "Import Repo\nOptional: enter the dev command for this surface. (Press 'Enter' to confirm or 'Escape' to cancel)",
+    "placeholder": "e.g. npm --prefix apps/existing-portal run dev"
+  },
+  "folderPrompt1": {
+    "visible": true,
+    "title": "Import Repo",
+    "prompt": "Import Repo\nOptional: enter the local preview URL. (Press 'Enter' to confirm or 'Escape' to cancel)",
+    "placeholder": "e.g. http://localhost:3001"
+  },
+  "folderPrompt2": {
+    "visible": true,
+    "title": "Import Repo",
+    "prompt": ".quick-input-list .quick-input-list-entry { border-top-color:  var(--vscode-pickerGroup-border); }\n.quick-input-list .quick-input-list-separator { color:  var(--vscode-pickerGroup-foreground); }\n.quick-input-list .quick-input-list-separator-as-item { color: var(--vscode-descriptionForeground); }\n.qu",
+    "placeholder": "e.g. http://localhost:3001"
+  },
+  "folderPrompt3": {
+    "visible": true,
+    "title": "Import Repo",
+    "prompt": ".quick-input-list .quick-input-list-entry { border-top-color:  var(--vscode-pickerGroup-border); }\n.quick-input-list .quick-input-list-separator { color:  var(--vscode-pickerGroup-foreground); }\n.quick-input-list .quick-input-list-separator-as-item { color: var(--vscode-descriptionForeground); }\n.qu",
+    "placeholder": "e.g. http://localhost:3001"
+  },
+  "notificationsAfterFolder": [
+    "Imported existing portal as a goal workspace surface..monaco-list.list_id_13 .monaco-list-rows { background: var(--vscode-notifications-background); } .monaco-list.list_id_13:focus .monaco-list-row.focused { background-color: var(--vscode-l",
+    "Imported existing portal as a goal workspace surface.",
+    "Imported existing portal as a goal workspace surface."
+  ],
+  "manifestAfterFolder": {
+    "goal": {
+      "id": "import-runtime-demo",
+      "name": "Import Runtime Demo",
+      "description": "Workspace for verifying New Surface import flows"
+    },
+    "surfaces": [
+      {
+        "id": "existing-portal",
+        "name": "existing portal",
+        "type": "web-app",
+        "path": "apps/existing-portal",
+        "purpose": "Imported app surface for existing portal.",
+        "capabilities": [],
+        "events": [],
+        "entities": [],
+        "ixSubsystems": [],
+        "localUrl": "http://localhost:3001"
+      }
+    ],
+    "shared": {
+      "events": "packages/events",
+      "entities": "packages/entities",
+      "capabilities": "packages/capabilities"
+    }
+  },
+  "notificationsAfterGit": [
+    "Could not import repo: command '_git.cloneRepository' not found.monaco-list.list_id_14 .monaco-list-rows { background: var(--vscode-notifications-background); } .monaco-list.list_id_14:focus .monaco-list-row.focused { background-color: var(",
+    "Could not import repo: command '_git.cloneRepository' not found",
+    "Could not import repo: command '_git.cloneRepository' not found"
+  ],
+  "manifestAfterGit": {
+    "goal": {
+      "id": "import-runtime-demo",
+      "name": "Import Runtime Demo",
+      "description": "Workspace for verifying New Surface import flows"
+    },
+    "surfaces": [
+      {
+        "id": "existing-portal",
+        "name": "existing portal",
+        "type": "web-app",
+        "path": "apps/existing-portal",
+        "purpose": "Imported app surface for existing portal.",
+        "capabilities": [],
+        "events": [],
+        "entities": [],
+        "ixSubsystems": [],
+        "localUrl": "http://localhost:3001"
+      }
+    ],
+    "shared": {
+      "events": "packages/events",
+      "entities": "packages/entities",
+      "capabilities": "packages/capabilities"
+    }
+  },
+  "gitCmdProbe": {
+    "hasGitContribution": true,
+    "bodyHasScm": true
+  },
+  "launchInfo": {
+    "pid": 19187,
+    "cdpPort": 57818,
+    "extHostPort": 57819,
+    "mainPort": 57820,
+    "agentHostPort": 57821,
+    "userDataDir": "/tmp/code-oss-dev/20260710-110944-19168/user-data",
+    "extensionsDir": "/tmp/code-oss-dev/20260710-110944-19168/user-data/extensions",
+    "sharedDataDir": "/tmp/code-oss-dev/20260710-110944-19168/shared-data",
+    "runDir": "/tmp/code-oss-dev/20260710-110944-19168",
+    "logFile": "/tmp/code-oss-dev/20260710-110944-19168/code.log",
+    "repo": "/Users/jasoncornell/vscode",
+    "agents": false
+  }
+}

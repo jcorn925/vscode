@@ -1,0 +1,20 @@
+{
+  "title": "Welcome — import-runtime-ws",
+  "readyState": "complete",
+  "bodyLen": 1217,
+  "bodySample": "Console\nCode\nDrag to Select\n0\nSelected\nBusiness name\nDescription\nLogo\nDrop logo or click to upload\nLogo mark\nDrop icon or click to upload\nPrimary\nSecondary\nAccent\nSurfaces\nChoose where to start. Each surface becomes a deployable app in your workspace.\nStart all surfaces\nMarketing Site\nNot created\nBooking\nNot created\nClient Portal\nNot created\nTrainer Admin\nNot created\nAnalytics\nNot created\nContent Scheduler\nNot created\nAds Manager\nNot created\nSubscriptions\nNot created\nNew Surface\nAI chat\n✕\nConsole\nBuild with Agent\n\nAI responses may be inaccurate\n\nGenerate Agent Instructions to onboard AI onto your codebase.\n\ngpt-4o-mini\nLocal\nDefault Approvals\nError: Ix Docker backend failed to start. See Process tab for details.\n1 of 3\nWelcome to VS Code\n\nSign in to use Continue.\n\nContinue with GitHub\nGHE\nBy signing in, you agree to Continue's Terms and Privacy Statement. Continue may show public code suggestions and use your data to improve the product. You can change these settings anytime.\nContinue ",
+  "classes": "custom-mode-shell-enabled monaco-enable-motion custom-mode-ui custom-mode-context-gathering-open custom-mode-shell-hasProject monaco-workbench mac chromium nopanel panel-position-bottom panel-alignment-center macos-tahoe custom-mode-ui-surface-selected file-icons-enabled vs-dark vscode-theme-defaults-themes-2026-dark-json",
+  "starterTitles": [
+    "Marketing Site",
+    "Booking",
+    "Client Portal",
+    "Trainer Admin",
+    "Analytics",
+    "Content Scheduler",
+    "Ads Manager",
+    "Subscriptions",
+    "New Surface"
+  ],
+  "uiVisible": true,
+  "newSurface": true
+}

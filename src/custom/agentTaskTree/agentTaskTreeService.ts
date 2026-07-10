@@ -13,10 +13,17 @@ import { createDecorator } from '../../vs/platform/instantiation/common/instanti
 import { InstantiationType, registerSingleton } from '../../vs/platform/instantiation/common/extensions.js';
 import { IWorkspaceContextService } from '../../vs/platform/workspace/common/workspace.js';
 import { AGENT_CONTEXT_FOLDER, WORKSPACE_MANIFEST } from '../goalWorkspace/ConsoleService.js';
+import { blueprintResource, createBlueprintFromTemplateId, readBlueprint, writeBlueprint } from '../goalWorkspace/surfaceBlueprintService.js';
+import { scaffoldSurfaceFromBlueprint } from '../goalWorkspace/surfaceBlueprintScaffold.js';
 import { discoverIxSubsystemRegions } from '../goalWorkspace/surfaceBlueprintIxDiscovery.js';
 import type { IxSubsystemRegion } from '../goalWorkspace/surfaceIxMatch.js';
 import type { IIxIntegrationService } from '../ix/IxIntegrationService.js';
 import { appendIxValidationRepairLeaves, buildAgentTaskTreeIxValidation } from './agentTaskTreeIxValidation.js';
+import {
+	buildSurfaceCoreBuildPlanScaffold,
+	resolveSurfaceCoreBuildPlanSource,
+	scaffoldToAgentTaskTreeRoots,
+} from './surfaceCoreBuildPlanScaffold.js';
 import type {
 	AgentTaskExecutionResult,
 	AgentTaskExecutor,
@@ -28,6 +35,7 @@ import type {
 	AgentTaskTreeIxValidationGap,
 	AgentTaskTreeSurfaceMetadata,
 } from './agentTaskTreeTypes.js';
+import type { SurfaceBlueprint, SurfaceBlueprintTemplate } from '../goalWorkspace/surfaceBlueprintTypes.js';
 
 export const AGENT_TASK_TREES_FOLDER = 'task-trees';
 
@@ -37,6 +45,11 @@ export interface IAgentTaskTreeService {
 	readonly _serviceBrand: undefined;
 	readonly onDidChangeTaskTree: Event<AgentTaskTree | undefined>;
 	generateTaskTree(prompt: string, metadata?: AgentTaskTreeSurfaceMetadata): Promise<AgentTaskTree>;
+	generateSurfaceCoreBuildPlanTree(
+		prompt: string,
+		metadata: Required<Pick<AgentTaskTreeSurfaceMetadata, 'surfaceId' | 'surfaceName' | 'templateId'>>,
+		source?: { readonly blueprint?: SurfaceBlueprint; readonly template?: SurfaceBlueprintTemplate },
+	): Promise<AgentTaskTree>;
 	loadTaskTree(treeId: string): Promise<AgentTaskTree | undefined>;
 	loadLatestResumableTaskTree(): Promise<AgentTaskTree | undefined>;
 	loadLatestTaskTreeForSurface(surfaceId: string): Promise<AgentTaskTree | undefined>;
@@ -61,7 +74,7 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 
 	private readonly _onDidChangeTaskTree = this._register(new Emitter<AgentTaskTree | undefined>());
 	readonly onDidChangeTaskTree = this._onDidChangeTaskTree.event;
-	private executor: AgentTaskExecutor = new BlockingAgentTaskExecutor();
+	private executor: AgentTaskExecutor;
 	private activeRun = false;
 
 	constructor(
@@ -69,6 +82,7 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
+		this.executor = new SurfaceScaffoldAgentTaskExecutor(fileService, workspaceContextService);
 	}
 
 	setExecutorForTesting(executor: AgentTaskExecutor): void {
@@ -76,6 +90,13 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 	}
 
 	async generateTaskTree(prompt: string, metadata?: AgentTaskTreeSurfaceMetadata): Promise<AgentTaskTree> {
+		if (metadata?.surfaceId && metadata.surfaceName && metadata.templateId) {
+			return this.generateSurfaceCoreBuildPlanTree(prompt, {
+				surfaceId: metadata.surfaceId,
+				surfaceName: metadata.surfaceName,
+				templateId: metadata.templateId,
+			});
+		}
 		const workspaceFolder = this.requireWorkspaceFolder();
 		const now = new Date().toISOString();
 		const tree: AgentTaskTree = deriveParentStatuses({
@@ -90,6 +111,42 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 			surfaceId: metadata?.surfaceId,
 			surfaceName: metadata?.surfaceName,
 			templateId: metadata?.templateId,
+		});
+		await this.writeTaskTree(workspaceFolder, tree);
+		this._onDidChangeTaskTree.fire(tree);
+		return tree;
+	}
+
+	async generateSurfaceCoreBuildPlanTree(
+		prompt: string,
+		metadata: Required<Pick<AgentTaskTreeSurfaceMetadata, 'surfaceId' | 'surfaceName' | 'templateId'>>,
+		source?: { readonly blueprint?: SurfaceBlueprint; readonly template?: SurfaceBlueprintTemplate },
+	): Promise<AgentTaskTree> {
+		const workspaceFolder = this.requireWorkspaceFolder();
+		const planSource = resolveSurfaceCoreBuildPlanSource({
+			surfaceId: metadata.surfaceId,
+			surfaceName: metadata.surfaceName,
+			templateId: metadata.templateId,
+			blueprint: source?.blueprint,
+			template: source?.template,
+		});
+		if (!planSource) {
+			throw new Error(`No surface blueprint template found for ${metadata.templateId}.`);
+		}
+		const scaffold = buildSurfaceCoreBuildPlanScaffold(planSource, prompt.trim() || `Core implementation build plan for ${metadata.surfaceName}`);
+		const now = new Date().toISOString();
+		const tree: AgentTaskTree = deriveParentStatuses({
+			version: 1,
+			id: createTreeId(scaffold.prompt),
+			prompt: scaffold.prompt,
+			createdAt: now,
+			updatedAt: now,
+			status: 'active',
+			roots: scaffoldToAgentTaskTreeRoots(scaffold),
+			cursor: {},
+			surfaceId: metadata.surfaceId,
+			surfaceName: metadata.surfaceName,
+			templateId: metadata.templateId,
 		});
 		await this.writeTaskTree(workspaceFolder, tree);
 		this._onDidChangeTaskTree.fire(tree);
@@ -320,9 +377,93 @@ export class AgentTaskBlockedError extends Error {
 	}
 }
 
-class BlockingAgentTaskExecutor implements AgentTaskExecutor {
-	async executeTask(): Promise<AgentTaskExecutionResult> {
+class SurfaceScaffoldAgentTaskExecutor implements AgentTaskExecutor {
+	constructor(
+		private readonly fileService: IFileService,
+		private readonly workspaceContextService: IWorkspaceContextService,
+	) { }
+
+	async executeTask(tree: AgentTaskTree, task: AgentTaskNode): Promise<AgentTaskExecutionResult> {
+		if (!tree.surfaceId || !tree.surfaceName || !tree.templateId) {
+			throw this.blocked();
+		}
+		const workspaceFolder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		if (!workspaceFolder) {
+			throw new AgentTaskBlockedError('Open a workspace before executing surface task trees.');
+		}
+
+		const expectedPaths = [...(task.expectedPaths ?? [])];
+		let missingPaths = await this.findMissingPaths(workspaceFolder, expectedPaths);
+		let changedFiles: string[] = [];
+		let scaffolded = false;
+
+		if (missingPaths.length) {
+			const blueprint = await this.loadOrCreateBlueprint(workspaceFolder, tree);
+			const result = await scaffoldSurfaceFromBlueprint(this.fileService, workspaceFolder, blueprint);
+			scaffolded = true;
+			changedFiles = [...result.createdFiles, blueprintResource(workspaceFolder, blueprint.surfaceId).path.slice(workspaceFolder.path.length + 1)];
+			blueprint.status = 'scaffolded';
+			await writeBlueprint(this.fileService, workspaceFolder, blueprint);
+			missingPaths = await this.findMissingPaths(workspaceFolder, expectedPaths);
+		}
+
+		if (missingPaths.length) {
+			throw new AgentTaskBlockedError(`Surface scaffold did not create expected path(s): ${missingPaths.join(', ')}`);
+		}
+
+		return {
+			changedFiles: uniqueStrings(changedFiles.length ? changedFiles : expectedPaths),
+			commandsRun: scaffolded
+				? [`scaffoldSurfaceFromBlueprint(${tree.surfaceId})`]
+				: [`verifyExpectedPaths(${tree.surfaceId}:${task.id})`],
+			verification: expectedPaths.length
+				? `Verified expected path(s): ${expectedPaths.join(', ')}`
+				: `Executed surface task ${task.title}.`,
+			notes: scaffolded
+				? `Generated runnable ${tree.surfaceName} scaffold from the ${tree.templateId} blueprint template.`
+				: `Expected files for ${task.title} were already present.`,
+		};
+	}
+
+	private blocked(): AgentTaskBlockedError {
 		throw new AgentTaskBlockedError('Autonomous Custom AI task execution is not connected yet. Resume from the task-tree UI and run the task through Custom AI.');
+	}
+
+	private async loadOrCreateBlueprint(workspaceFolder: URI, tree: AgentTaskTree): Promise<SurfaceBlueprint> {
+		const existing = await readBlueprint(this.fileService, blueprintResource(workspaceFolder, tree.surfaceId!));
+		if (existing) {
+			return existing;
+		}
+		const created = await createBlueprintFromTemplateId(this.fileService, workspaceFolder, tree.templateId!, {
+			surfaceId: tree.surfaceId,
+			surfaceName: tree.surfaceName,
+		});
+		if (!created) {
+			throw new AgentTaskBlockedError(`No surface blueprint template found for ${tree.templateId}.`);
+		}
+		return created.blueprint;
+	}
+
+	private async findMissingPaths(workspaceFolder: URI, expectedPaths: readonly string[]): Promise<string[]> {
+		const missing: string[] = [];
+		for (const expectedPath of expectedPaths) {
+			if (await this.existsExpectedPath(workspaceFolder, expectedPath)) {
+				continue;
+			}
+			missing.push(expectedPath);
+		}
+		return missing;
+	}
+
+	private async existsExpectedPath(workspaceFolder: URI, expectedPath: string): Promise<boolean> {
+		const resource = joinPath(workspaceFolder, ...expectedPath.split('/').filter(Boolean));
+		if (await this.fileService.exists(resource)) {
+			return true;
+		}
+		if (!/\.[a-z0-9]+$/i.test(expectedPath)) {
+			return this.fileService.exists(joinPath(resource, 'page.tsx'));
+		}
+		return false;
 	}
 }
 
@@ -576,6 +717,9 @@ function parseNodes(raw: unknown, parentId: string | undefined): AgentTaskNode[]
 			order,
 			children: parseNodes(item.children, id),
 			implementation: parseImplementation(item.implementation),
+			subsystemId: optionalString(item.subsystemId),
+			expectedPaths: stringArray(item.expectedPaths),
+			acceptanceChecks: stringArray(item.acceptanceChecks),
 		});
 	}
 	return nodes.sort((a, b) => a.order - b.order);
@@ -703,6 +847,20 @@ function createTreeId(prompt: string): string {
 
 function slugify(value: string): string {
 	return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+	const seen = new Set<string>();
+	const result: string[] = [];
+	for (const value of values) {
+		const trimmed = value.trim();
+		if (!trimmed || seen.has(trimmed)) {
+			continue;
+		}
+		seen.add(trimmed);
+		result.push(trimmed);
+	}
+	return result;
 }
 
 function isTreeStatus(value: unknown): value is AgentTaskTree['status'] {

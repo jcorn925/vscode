@@ -198,6 +198,17 @@ function expectedShapesFromTaskTree(tree: AgentTaskTree, surfacePath: string): E
 }
 
 function expectedShapeFromTaskLeaf(node: AgentTaskNode, surfacePath: string): ExpectedShape | undefined {
+	const explicitPaths = (node.expectedPaths ?? [])
+		.map(normalizePath)
+		.filter(path => path === surfacePath || path.startsWith(`${surfacePath}/`) || path.startsWith('packages/'));
+	if (explicitPaths.length) {
+		return {
+			id: node.id,
+			label: node.title,
+			paths: uniqueStrings(explicitPaths),
+			minFiles: 1,
+		};
+	}
 	const text = `${node.title}\n${node.description ?? ''}`;
 	const paths = Array.from(text.matchAll(/(?:apps|packages|workflows)\/[a-z0-9._/-]+/gi))
 		.map(match => normalizePath(match[0]))
@@ -211,6 +222,11 @@ function expectedShapeFromTaskLeaf(node: AgentTaskNode, surfacePath: string): Ex
 		paths,
 		minFiles: 1,
 	};
+}
+
+/** Exported for tests: resolves leaf expected paths preferring explicit node.expectedPaths. */
+export function resolveTaskLeafExpectedPaths(node: AgentTaskNode, surfacePath: string): string[] {
+	return expectedShapeFromTaskLeaf(node, surfacePath)?.paths.slice() ?? [];
 }
 
 function mergeExpectedShapes(shapes: readonly ExpectedShape[]): ExpectedShape[] {

@@ -2163,6 +2163,31 @@ class ModeShellContribution extends Disposable {
 				backdrop-filter: blur(4px);
 			}
 
+			.monaco-workbench .custom-mode-ui-surface-starter-card-task-tree {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				flex: 0 0 auto;
+				width: 24px;
+				height: 24px;
+				padding: 0;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 6px;
+				background: color-mix(in srgb, var(--vscode-editorWidget-background) 90%, transparent);
+				color: var(--vscode-foreground);
+				cursor: pointer;
+				backdrop-filter: blur(4px);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter-card-task-tree:hover {
+				border-color: var(--vscode-focusBorder);
+				color: var(--vscode-textLink-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter-card-task-tree .codicon {
+				font-size: 14px;
+			}
+
 			.monaco-workbench .custom-mode-ui-surface-starter-card-status.created {
 				border-color: var(--vscode-textLink-foreground);
 				color: var(--vscode-textLink-foreground);
@@ -4214,7 +4239,7 @@ class ModeShellContribution extends Disposable {
 		}
 
 		if (onUi && this.appLaunchGuidePanel.isVisible()
-			&& Boolean(this.configurationService.getValue<boolean>('custom.appLaunchGuide.autoRun') ?? true)) {
+			&& Boolean(this.configurationService.getValue<boolean>('custom.appLaunchGuide.autoRun') ?? false)) {
 			this.tabGuideAutoRunAttempted = true;
 			void this.appLaunchGuideService.runAutomaticFixes();
 		}
@@ -5398,10 +5423,16 @@ class ModeShellContribution extends Disposable {
 		const preview = $('div.custom-mode-ui-surface-starter-card-preview');
 		const previewShell = $('div.custom-mode-ui-surface-starter-card-preview-shell', undefined, preview);
 		const status = $('span.custom-mode-ui-surface-starter-card-status', undefined, localize('customMode.surfaceStarterStatusNotCreated', 'Not created'));
+		const taskTreeButton = $('button.custom-mode-ui-surface-starter-card-task-tree', {
+			type: 'button',
+			title: localize('customMode.surfaceStarterOpenTaskTree', 'Open core build plan for {0}', starter.name),
+			'aria-label': localize('customMode.surfaceStarterOpenTaskTree', 'Open core build plan for {0}', starter.name),
+		}, $('span.codicon' + ThemeIcon.asCSSSelector(Codicon.listTree))) as HTMLButtonElement;
 		const overlay = $('div.custom-mode-ui-surface-starter-card-overlay', undefined,
 			$('div.custom-mode-ui-surface-starter-card-overlay-top', undefined,
 				$('div.custom-mode-ui-surface-starter-card-icon.codicon' + ThemeIcon.asCSSSelector(starter.icon)),
 				$('div.custom-mode-ui-surface-starter-card-title', undefined, starter.name),
+				taskTreeButton,
 				status,
 			),
 		);
@@ -5413,6 +5444,11 @@ class ModeShellContribution extends Disposable {
 			previewShell,
 			overlay,
 		);
+		this._register(addDisposableListener(taskTreeButton, 'click', event => {
+			event.preventDefault();
+			event.stopPropagation();
+			void this.openSurfaceCoreBuildPlan(starter);
+		}));
 		this._register(addDisposableListener(card, 'click', () => void this.beginSurfaceHandoff({
 			templateId: starter.id,
 			surfaceId: starter.id,
@@ -6068,7 +6104,7 @@ class ModeShellContribution extends Disposable {
 		this.selectedSurfaceId = surface.id;
 		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
 		this.applySurfaceSelection(surfaceId, { contextGathering: false });
-		void this.ensureSurfaceServerStarted(surface);
+		void this.ensureSurfaceServerStarted(surface); // gated on verified scaffold / no blueprint
 	}
 
 	private async deleteGoalSurface(surfaceId: string): Promise<void> {
@@ -6202,6 +6238,36 @@ class ModeShellContribution extends Disposable {
 		this.storageService.store(this.surfaceMainViewStorageKey(surfaceId), view, StorageScope.WORKSPACE, StorageTarget.USER);
 	}
 
+	private async openSurfaceCoreBuildPlan(starter: StarterSurface): Promise<void> {
+		const existingSurface = this.consoleService.getSurface(starter.id);
+		if (existingSurface) {
+			this.selectGoalSurface(starter.id);
+		} else {
+			this.selectedSurfaceId = starter.id;
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, starter.id, StorageScope.WORKSPACE, StorageTarget.USER);
+			this.applySurfaceSelection(starter.id, { contextGathering: false });
+		}
+		const prompt = `Core implementation build plan for ${starter.name} focused on ${starter.workflow}.`;
+		try {
+			await this.ensureSurfaceTaskTree(starter.id, prompt, {
+				surfaceId: starter.id,
+				surfaceName: starter.name,
+				templateId: starter.id,
+			});
+			this.setSurfaceMainView('taskTree');
+		} catch (error: unknown) {
+			this.notificationService.notify({
+				severity: Severity.Error,
+				message: localize(
+					'customMode.surfaceCoreBuildPlanOpenFailed',
+					'Could not open the core build plan for {0}: {1}',
+					starter.name,
+					String((error as Error)?.message ?? error),
+				),
+			});
+		}
+	}
+
 	private async ensureSurfaceTaskTree(
 		surfaceId: string,
 		prompt: string,
@@ -6213,7 +6279,11 @@ class ModeShellContribution extends Disposable {
 			this.surfaceTaskTreePanel?.render(existing);
 			return existing;
 		}
-		const tree = await this.agentTaskTreeService.generateTaskTree(prompt, metadata);
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		const blueprint = workspaceFolder
+			? await readBlueprint(this.fileService, blueprintResource(workspaceFolder, surfaceId))
+			: undefined;
+		const tree = await this.agentTaskTreeService.generateSurfaceCoreBuildPlanTree(prompt, metadata, { blueprint });
 		this.selectedSurfaceTaskTree = tree;
 		this.surfaceTaskTreePanel?.render(tree);
 		return tree;
@@ -6926,10 +6996,32 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
+	/**
+	 * Auto-start preview servers only after scaffold verification completes.
+	 * Surfaces still in draft/scaffolded/failed blueprint state (or mid-handoff) must not
+	 * launch `npm run dev` just because package.json / devCommand already exist.
+	 * Imported surfaces with no blueprint are allowed to start immediately.
+	 */
+	private async isSurfaceReadyForDevServerAutoStart(surface: WorkspaceSurface): Promise<boolean> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			return false;
+		}
+		const blueprint = await readBlueprint(this.fileService, blueprintResource(workspaceFolder, surface.id));
+		if (!blueprint) {
+			return true;
+		}
+		return blueprint.status === 'verified';
+	}
+
 	private async ensureSurfaceServerStarted(surface: WorkspaceSurface): Promise<void> {
 		const command = surface.devCommand?.trim();
 		const workspaceFolder = this.getWorkspaceFolderUri();
 		if (!command || !workspaceFolder) {
+			return;
+		}
+		if (!(await this.isSurfaceReadyForDevServerAutoStart(surface))) {
+			this.pushUiRuntimeLog(`[surface-autostart:deferred] ${surface.id}: waiting for verified scaffold before starting dev server`);
 			return;
 		}
 		try {
@@ -7010,7 +7102,8 @@ class ModeShellContribution extends Disposable {
 		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
 		const hints = this.lastUiStartHints;
 		const goalWorkspaceState = this.consoleService.getState();
-		const surfaceCommand = this.getSelectedSurface()?.devCommand?.trim();
+		const selectedSurface = this.getSelectedSurface();
+		const surfaceCommand = selectedSurface?.devCommand?.trim();
 		const canUseFallbackScript = goalWorkspaceState.status !== 'loaded';
 		if (!hasProject || !(surfaceCommand || (canUseFallbackScript && hints?.primaryRunCommand))) {
 			return;
@@ -7022,8 +7115,17 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 
-		this.autoStartAppAttempted = true;
-		queueMicrotask(() => void this.onStartAppClicked());
+		void (async () => {
+			if (selectedSurface && !(await this.isSurfaceReadyForDevServerAutoStart(selectedSurface))) {
+				this.pushUiRuntimeLog(`[surface-autostart:deferred] ${selectedSurface.id}: waiting for verified scaffold before Start App auto-run`);
+				return;
+			}
+			if (this.autoStartAppAttempted) {
+				return;
+			}
+			this.autoStartAppAttempted = true;
+			void this.onStartAppClicked();
+		})();
 	}
 
 	private renderStartHintsInto(root: HTMLElement, hints: DevServerSuggestedCommands | undefined): void {

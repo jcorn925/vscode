@@ -1,0 +1,225 @@
+{
+  "checks": {
+    "newSurfaceVisible": true,
+    "createImportChoice": true,
+    "createGoesToDraftPrompt": true,
+    "importSourceChoices": true,
+    "folderImportRegistered": true,
+    "noBlueprintAfterFolder": true,
+    "gitCloneRegistered": true,
+    "gitCloneOnDisk": true,
+    "noBlueprintAfterGit": true,
+    "gitCommandAvailable": true,
+    "gitFailureDoesNotRegister": false,
+    "gitFailureNotifies": false,
+    "gitFailTargetAbsent": true,
+    "continueSignInAbsent": true
+  },
+  "findings": [],
+  "shots": [
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-111439/01-after-launch.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-111439/02-ready.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-111439/03-new-surface-picker.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-111439/04-create-prompt.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-111439/05-import-source.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-111439/06-folder-dialog.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-111439/07-after-folder-import.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-111439/08-git-url-prompt.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-111439/09-after-git-clone.png",
+    "/Users/jasoncornell/vscode/screenshots/runtime-eval-20260710-111439/10-after-git-failure.png"
+  ],
+  "health": {
+    "title": "import-runtime-ws",
+    "continueSignIn": false,
+    "starterTitles": [
+      "Marketing Site",
+      "Booking",
+      "Client Portal",
+      "Trainer Admin",
+      "Analytics",
+      "Content Scheduler",
+      "Ads Manager",
+      "Subscriptions",
+      "New Surface"
+    ],
+    "bodySample": "Console\nCode\nDrag to Select\n0\nSelected\nBusiness name\nDescription\nLogo\nDrop logo or click to upload\nLogo mark\nDrop icon or click to upload\nPrimary\nSecondary\nAccent\nSurfaces\nChoose where to start. Each surface becomes a deployable app in your workspace.\nStart all surfaces\nMarketing Site\nNot created\nBooking\nNot created\nClient Portal\nNot created\nTrainer Admin\nNot created\nAnalytics\nNot created\nContent Scheduler\nNot created\nAds Manager\nNot created\nSubscriptions\nNot created\nNew Surface\nAI chat\n✕\nConsole\nBuild with Agent\n\nAI responses may be inaccurate\n\nGenerate Agent Instructions to onboard AI onto y"
+  },
+  "createPicker": [
+    "Create New Surface, Use the guided builder and scaffold flow",
+    "Import Repo, Register an existing app folder or clone a Git URL"
+  ],
+  "createPrompt": {
+    "visible": true,
+    "text": "What should this surface be called? (Press 'Enter' to confirm or 'Escape' to cancel)",
+    "placeholder": "e.g. Referral Program"
+  },
+  "importSourcePicker": [
+    "Clone from Git URL, Clone into apps/<surface-id> and register it",
+    "Use Existing Folder, Register a folder already inside this workspace"
+  ],
+  "folderStep0": {
+    "visible": true,
+    "text": "Choose Surface Folder\n3 Results\nImport Surface\n..\napps\npackages",
+    "placeholder": "Folder path"
+  },
+  "folderStep1": {
+    "visible": true,
+    "text": "Choose Surface Folder\n2 Results\nImport Surface\n..\nexisting-portal",
+    "placeholder": "Folder path"
+  },
+  "folderStep2": {
+    "visible": true,
+    "text": "Import Repo\nWhat should this surface be called? (Press 'Enter' to confirm or 'Escape' to cancel)",
+    "placeholder": "e.g. Customer Portal"
+  },
+  "folderStep3": {
+    "visible": true,
+    "text": "Import Repo\nOptional: enter the dev command for this surface. (Press 'Enter' to confirm or 'Escape' to cancel)",
+    "placeholder": "e.g. npm --prefix apps/existing-portal run dev"
+  },
+  "folderStep4": {
+    "visible": true,
+    "text": "Import Repo\nOptional: enter the local preview URL. (Press 'Enter' to confirm or 'Escape' to cancel)",
+    "placeholder": "e.g. http://localhost:3001"
+  },
+  "folderStep5": {
+    "visible": true,
+    "text": ".quick-input-list .quick-input-list-entry { border-top-color:  var(--vscode-pickerGroup-border); }\n.quick-input-list .quick-input-list-separator { color:  var(--vscode-pickerGroup-foreground); }\n.quick-input-list .quick-input-list-separator-as-item { color: var(--vscode-descriptionForeground); }\n.quick-input-list .monaco-keybinding > .monaco-keybin",
+    "placeholder": "e.g. http://localhost:3001"
+  },
+  "notificationsAfterFolder": [
+    "Imported Existing Portal as a goal workspace surface..monaco-list.list_id_13 .monaco-list-rows { background: var(--vscode-notifications-background); } .monaco-list.list_id_13:focus .monaco-list-row.fo",
+    "Imported Existing Portal as a goal workspace surface."
+  ],
+  "manifestAfterFolder": {
+    "goal": {
+      "id": "import-runtime-demo",
+      "name": "Import Runtime Demo",
+      "description": "Workspace for verifying New Surface import flows"
+    },
+    "surfaces": [
+      {
+        "id": "existing-portal",
+        "name": "Existing Portal",
+        "type": "web-app",
+        "path": "apps/existing-portal",
+        "purpose": "Imported app surface for Existing Portal.",
+        "capabilities": [],
+        "events": [],
+        "entities": [],
+        "ixSubsystems": [],
+        "localUrl": "http://localhost:3001"
+      }
+    ],
+    "shared": {
+      "events": "packages/events",
+      "entities": "packages/entities",
+      "capabilities": "packages/capabilities"
+    }
+  },
+  "notificationsAfterGitSuccess": [
+    "Imported Hello World as a goal workspace surface..monaco-list.list_id_15 .monaco-list-rows { background: var(--vscode-notifications-background); } .monaco-list.list_id_15:focus .monaco-list-row.focuse",
+    "Imported Hello World as a goal workspace surface."
+  ],
+  "manifestAfterGit": {
+    "goal": {
+      "id": "import-runtime-demo",
+      "name": "Import Runtime Demo",
+      "description": "Workspace for verifying New Surface import flows"
+    },
+    "surfaces": [
+      {
+        "id": "existing-portal",
+        "name": "Existing Portal",
+        "type": "web-app",
+        "path": "apps/existing-portal",
+        "purpose": "Imported app surface for Existing Portal.",
+        "capabilities": [],
+        "events": [],
+        "entities": [],
+        "ixSubsystems": [],
+        "localUrl": "http://localhost:3001"
+      },
+      {
+        "id": "hello-world",
+        "name": "Hello World",
+        "type": "web-app",
+        "path": "apps/hello-world",
+        "purpose": "Imported app surface for Hello World.",
+        "capabilities": [],
+        "events": [],
+        "entities": [],
+        "ixSubsystems": []
+      }
+    ],
+    "shared": {
+      "events": "packages/events",
+      "entities": "packages/entities",
+      "capabilities": "packages/capabilities"
+    }
+  },
+  "notificationsAfterGitFail": [],
+  "manifestAfterGitFail": {
+    "goal": {
+      "id": "import-runtime-demo",
+      "name": "Import Runtime Demo",
+      "description": "Workspace for verifying New Surface import flows"
+    },
+    "surfaces": [
+      {
+        "id": "existing-portal",
+        "name": "Existing Portal",
+        "type": "web-app",
+        "path": "apps/existing-portal",
+        "purpose": "Imported app surface for Existing Portal.",
+        "capabilities": [],
+        "events": [],
+        "entities": [],
+        "ixSubsystems": [],
+        "localUrl": "http://localhost:3001"
+      },
+      {
+        "id": "hello-world",
+        "name": "Hello World",
+        "type": "web-app",
+        "path": "apps/hello-world",
+        "purpose": "Imported app surface for Hello World.",
+        "capabilities": [],
+        "events": [],
+        "entities": [],
+        "ixSubsystems": []
+      },
+      {
+        "id": "broken-clone",
+        "name": "Broken Clone",
+        "type": "web-app",
+        "path": "apps/broken-clone",
+        "purpose": "Imported app surface for Broken Clone.",
+        "capabilities": [],
+        "events": [],
+        "entities": [],
+        "ixSubsystems": []
+      }
+    ],
+    "shared": {
+      "events": "packages/events",
+      "entities": "packages/entities",
+      "capabilities": "packages/capabilities"
+    }
+  },
+  "launchArgv": "import-runtime-ws",
+  "launchInfo": {
+    "pid": 30383,
+    "cdpPort": 50660,
+    "extHostPort": 50661,
+    "mainPort": 50662,
+    "agentHostPort": 50663,
+    "userDataDir": "/tmp/code-oss-dev/20260710-111441-30364/user-data",
+    "extensionsDir": "/tmp/code-oss-dev/20260710-111441-30364/user-data/extensions",
+    "sharedDataDir": "/tmp/code-oss-dev/20260710-111441-30364/shared-data",
+    "runDir": "/tmp/code-oss-dev/20260710-111441-30364",
+    "logFile": "/tmp/code-oss-dev/20260710-111441-30364/code.log",
+    "repo": "/Users/jasoncornell/vscode",
+    "agents": false
+  }
+}

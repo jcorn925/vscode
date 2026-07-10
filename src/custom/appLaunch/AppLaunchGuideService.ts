@@ -107,7 +107,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 		if (isWeb) {
 			return false;
 		}
-		if (!(this.configurationService.getValue<boolean>('custom.appLaunchGuide.showOnIncomplete') ?? true)) {
+		if (!(this.configurationService.getValue<boolean>('custom.appLaunchGuide.showOnIncomplete') ?? false)) {
 			return false;
 		}
 		if (this.storageService.getBoolean(STORAGE_DISMISSED, StorageScope.APPLICATION, false)) {

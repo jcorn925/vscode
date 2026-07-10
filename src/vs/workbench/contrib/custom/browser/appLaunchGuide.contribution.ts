@@ -15,13 +15,13 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 	properties: {
 		'custom.appLaunchGuide.showOnIncomplete': {
 			type: 'boolean',
-			default: true,
+			default: false,
 			description: localize('custom.appLaunchGuide.showOnIncomplete', "When enabled, show the App Launch guide on the UI tab while localhost server setup steps are incomplete."),
 			scope: ConfigurationScope.APPLICATION
 		},
 		'custom.appLaunchGuide.autoRun': {
 			type: 'boolean',
-			default: true,
+			default: false,
 			description: localize('custom.appLaunchGuide.autoRun', "When enabled, automatically run fixable App Launch steps (project recovery, dependency install, dev server start) when the guide opens on the UI tab."),
 			scope: ConfigurationScope.APPLICATION
 		},

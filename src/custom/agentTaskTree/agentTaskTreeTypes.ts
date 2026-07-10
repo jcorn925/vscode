@@ -32,6 +32,12 @@ export interface AgentTaskNode {
 	readonly order: number;
 	children?: AgentTaskNode[];
 	implementation?: AgentTaskImplementation;
+	/** Blueprint subsystem id when this leaf maps to a surface subsystem. */
+	readonly subsystemId?: string;
+	/** Explicit paths Ix should expect for this leaf (preferred over scraping description). */
+	readonly expectedPaths?: readonly string[];
+	/** Human/agent checks that prove the leaf is done. */
+	readonly acceptanceChecks?: readonly string[];
 }
 
 export interface AgentTaskTreeSurfaceMetadata {

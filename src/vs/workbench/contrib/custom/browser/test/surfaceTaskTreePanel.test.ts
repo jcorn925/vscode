@@ -97,6 +97,10 @@ class TestAgentTaskTreeService {
 		return createTree();
 	}
 
+	async generateSurfaceCoreBuildPlanTree(): Promise<AgentTaskTree> {
+		return createTree();
+	}
+
 	async loadTaskTree(): Promise<AgentTaskTree | undefined> {
 		return createTree();
 	}
