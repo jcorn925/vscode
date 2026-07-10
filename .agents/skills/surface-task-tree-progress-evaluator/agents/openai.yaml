@@ -1,0 +1,4 @@
+interface:
+  display_name: "Surface Task Tree Progress Evaluator"
+  short_description: "Evaluate surface task-tree progress UI"
+  default_prompt: "Use $surface-task-tree-progress-evaluator to evaluate the surface task tree progress view implementation with screenshot evidence."
