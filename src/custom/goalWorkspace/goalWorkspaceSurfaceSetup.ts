@@ -29,6 +29,15 @@ export interface GoalWorkspaceBuilderInput {
 	readonly brand: WorkspaceBrandInput;
 }
 
+export interface ImportedGoalWorkspaceSurfaceInput {
+	readonly surfaceId: string;
+	readonly surfaceName: string;
+	readonly relativePath: string;
+	readonly devCommand?: string;
+	readonly localUrl?: string;
+	readonly purpose?: string;
+}
+
 export interface WorkspaceBrandInput {
 	readonly primaryColor?: string;
 	readonly secondaryColor?: string;
@@ -146,6 +155,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function normalizeWorkspaceRelativePath(path: string): string | undefined {
+	const normalized = path.trim().replace(/\\/g, '/').replace(/\/+$/g, '');
+	if (!normalized || /^[a-zA-Z]:\//.test(normalized) || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(normalized)) {
+		return undefined;
+	}
+	if (normalized.startsWith('/')) {
+		return undefined;
+	}
+	const segments = normalized.split('/').filter(segment => segment.length > 0);
+	if (segments.some(segment => segment === '.' || segment === '..')) {
+		return undefined;
+	}
+	return segments.join('/');
+}
+
 function cleanBrandInput(brand: WorkspaceBrandInput): Record<string, string> {
 	const payload: Record<string, string> = {};
 	if (brand.primaryColor?.trim()) {
@@ -221,6 +245,73 @@ export async function saveGoalWorkspaceBuilderFields(
 	}
 
 	await fileService.writeFile(manifestResource, VSBuffer.fromString(JSON.stringify(raw, null, '\t')));
+}
+
+export async function upsertImportedGoalWorkspaceSurface(
+	fileService: IFileService,
+	workspaceFolder: URI,
+	input: ImportedGoalWorkspaceSurfaceInput,
+): Promise<boolean> {
+	const surfaceId = input.surfaceId.trim();
+	const surfaceName = input.surfaceName.trim();
+	const relativePath = normalizeWorkspaceRelativePath(input.relativePath);
+	if (!surfaceId || !surfaceName || !relativePath) {
+		return false;
+	}
+
+	const manifestResource = joinPath(workspaceFolder, WORKSPACE_MANIFEST);
+	let raw: Record<string, unknown> = {};
+	try {
+		const content = await fileService.readFile(manifestResource);
+		raw = JSON.parse(content.value.toString()) as Record<string, unknown>;
+		if (!isRecord(raw)) {
+			raw = {};
+		}
+	} catch {
+		raw = {};
+	}
+
+	if (!Array.isArray(raw.surfaces)) {
+		raw.surfaces = [];
+	}
+
+	const rawSurfaces: unknown[] = Array.isArray(raw.surfaces) ? raw.surfaces : [];
+	const surfaces: Record<string, unknown>[] = rawSurfaces.filter(isRecord);
+	const existingIndex = surfaces.findIndex(surface => surface.id === surfaceId);
+	const existing = existingIndex >= 0 ? surfaces[existingIndex]! : {};
+	const surface: Record<string, unknown> = {
+		...existing,
+		id: surfaceId,
+		name: surfaceName,
+		type: typeof existing.type === 'string' && existing.type.trim() ? existing.type.trim() : 'web-app',
+		path: relativePath,
+		purpose: input.purpose?.trim() || (typeof existing.purpose === 'string' && existing.purpose.trim()
+			? existing.purpose.trim()
+			: `Imported app surface for ${surfaceName}.`),
+		capabilities: Array.isArray(existing.capabilities) ? existing.capabilities : [],
+		events: Array.isArray(existing.events) ? existing.events : [],
+		entities: Array.isArray(existing.entities) ? existing.entities : [],
+		ixSubsystems: Array.isArray(existing.ixSubsystems) ? existing.ixSubsystems : [],
+	};
+	if (input.devCommand?.trim()) {
+		surface.devCommand = input.devCommand.trim();
+	} else if (typeof existing.devCommand === 'string' && existing.devCommand.trim()) {
+		surface.devCommand = existing.devCommand.trim();
+	}
+	if (input.localUrl?.trim()) {
+		surface.localUrl = input.localUrl.trim();
+	} else if (typeof existing.localUrl === 'string' && existing.localUrl.trim()) {
+		surface.localUrl = existing.localUrl.trim();
+	}
+
+	if (existingIndex >= 0) {
+		surfaces[existingIndex] = surface;
+	} else {
+		surfaces.push(surface);
+	}
+	raw.surfaces = surfaces;
+	await fileService.writeFile(manifestResource, VSBuffer.fromString(JSON.stringify(raw, null, '\t')));
+	return true;
 }
 
 export async function deleteGoalWorkspaceSurface(

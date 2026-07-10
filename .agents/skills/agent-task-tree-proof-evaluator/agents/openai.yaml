@@ -1,0 +1,4 @@
+interface:
+  display_name: "Task Tree Proof Evaluator"
+  short_description: "Evaluate task-tree behavior with screenshot proof"
+  default_prompt: "Use $agent-task-tree-proof-evaluator to evaluate the task-tree feature and include screenshots as evidence."

@@ -12,13 +12,14 @@ import { Disposable, DisposableStore, type IDisposable, toDisposable } from '../
 import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { isMacintosh, isWeb, isWindows } from '../../../../base/common/platform.js';
 import { URI, UriComponents } from '../../../../base/common/uri.js';
-import { basename, isEqualOrParent, joinPath, resolvePath } from '../../../../base/common/resources.js';
+import { basename, extUri, isEqualOrParent, joinPath, resolvePath } from '../../../../base/common/resources.js';
 import { localize } from '../../../../nls.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IContextKeyService, type IScopedContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService, type ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
@@ -31,9 +32,10 @@ import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/w
 import { ITerminalService } from '../../terminal/browser/terminal.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
-import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
+import { IQuickInputService, type IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
+import { IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { INativeEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { createUiClickOverlayScript, UiClickOverlayMessage } from './uiClickOverlayScript.js';
@@ -90,6 +92,7 @@ import {
 	loadSurfaceSetupDraft,
 	saveGoalWorkspaceBuilderFields,
 	saveSurfaceSetupDraft,
+	upsertImportedGoalWorkspaceSurface,
 	type SurfaceSetupStep,
 } from '../../../../../custom/goalWorkspace/goalWorkspaceSurfaceSetup.js';
 import { SurfaceBuilderHandoffState, type SurfaceBuilderHandoffStateValue } from '../../../../../custom/goalWorkspace/surfaceBuilderHandoffState.js';
@@ -134,6 +137,28 @@ function slugifySurfaceId(value: string): string {
 		.replace(/[^a-z0-9]+/g, '-')
 		.replace(/^-+|-+$/g, '')
 		|| 'custom-surface';
+}
+
+function surfaceIdFromRepoUrl(value: string): string {
+	const withoutQuery = value.trim().split(/[?#]/)[0] ?? value.trim();
+	const leaf = withoutQuery.replace(/\/+$/, '').split(/[/:]/).pop() ?? '';
+	return slugifySurfaceId(leaf.replace(/\.git$/i, ''));
+}
+
+function isValidLocalPreviewUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		const hostname = url.hostname.toLowerCase();
+		return (url.protocol === 'http:' || url.protocol === 'https:')
+			&& (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]');
+	} catch {
+		return false;
+	}
+}
+
+function normalizeOptionalSurfaceInput(value: string | undefined): string | undefined {
+	const trimmed = value?.trim();
+	return trimmed ? trimmed : undefined;
 }
 
 interface StarterSurface {
@@ -435,10 +460,12 @@ class ModeShellContribution extends Disposable {
 		@INativeEnvironmentService private readonly nativeEnvironmentService: INativeEnvironmentService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
+		@ICommandService private readonly commandService: ICommandService,
 		@IIxIntegrationService private readonly ixIntegrationService: IIxIntegrationService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IDockerAvailabilityService private readonly dockerAvailabilityService: IDockerAvailabilityService,
 		@IOpenerService private readonly openerService: IOpenerService,
+		@IFileDialogService private readonly fileDialogService: IFileDialogService,
 		@IStartupGuideService private readonly startupGuideService: IStartupGuideService,
 		@IAppLaunchGuideService private readonly appLaunchGuideService: IAppLaunchGuideService,
 		@IConsoleService private readonly consoleService: IConsoleService,
@@ -5125,16 +5152,226 @@ class ModeShellContribution extends Disposable {
 	private createNewSurfaceCard(): HTMLButtonElement {
 		const button = $('button.custom-mode-ui-surface-starter-card.custom-mode-ui-surface-starter-card-new', {
 			type: 'button',
-			title: localize('customMode.surfaceStarterNewTitle', 'Create a custom surface'),
+			title: localize('customMode.surfaceStarterNewTitle', 'Create or import a surface'),
 		},
 			$('div.custom-mode-ui-surface-starter-card-header', undefined,
 				$('div.custom-mode-ui-surface-starter-card-icon.codicon' + ThemeIcon.asCSSSelector(Codicon.add)),
 				$('div.custom-mode-ui-surface-starter-card-title', undefined, localize('customMode.surfaceStarterNew', 'New Surface')),
 			),
-			$('div.custom-mode-ui-surface-starter-card-summary', undefined, localize('customMode.surfaceStarterNewSummary', 'Describe a custom app for your business.')),
+			$('div.custom-mode-ui-surface-starter-card-summary', undefined, localize('customMode.surfaceStarterNewSummary', 'Create a custom app or import an existing repo.')),
 		) as HTMLButtonElement;
-		this._register(addDisposableListener(button, 'click', () => void this.draftNewSurfacePrompt()));
+		this._register(addDisposableListener(button, 'click', () => void this.showNewSurfaceActionPicker()));
 		return button;
+	}
+
+	private async showNewSurfaceActionPicker(): Promise<void> {
+		type NewSurfaceActionPick = IQuickPickItem & { action: 'create' | 'import' };
+		const pick = await this.quickInputService.pick<NewSurfaceActionPick>([
+			{
+				label: localize('customMode.surfaceNewCreateLabel', 'Create New Surface'),
+				description: localize('customMode.surfaceNewCreateDescription', 'Use the guided builder and scaffold flow'),
+				action: 'create',
+			},
+			{
+				label: localize('customMode.surfaceNewImportLabel', 'Import Repo'),
+				description: localize('customMode.surfaceNewImportDescription', 'Register an existing app folder or clone a Git URL'),
+				action: 'import',
+			},
+		], {
+			title: localize('customMode.surfaceNewActionTitle', 'New Surface'),
+			placeHolder: localize('customMode.surfaceNewActionPlaceholder', 'Choose how to add the surface'),
+		});
+		if (!pick) {
+			return;
+		}
+		if (pick.action === 'create') {
+			await this.draftNewSurfacePrompt();
+			return;
+		}
+		await this.importSurfaceRepo();
+	}
+
+	private async importSurfaceRepo(): Promise<void> {
+		type ImportSourcePick = IQuickPickItem & { source: 'git' | 'folder' };
+		const pick = await this.quickInputService.pick<ImportSourcePick>([
+			{
+				label: localize('customMode.surfaceImportGitLabel', 'Clone from Git URL'),
+				description: localize('customMode.surfaceImportGitDescription', 'Clone into apps/<surface-id> and register it'),
+				source: 'git',
+			},
+			{
+				label: localize('customMode.surfaceImportFolderLabel', 'Use Existing Folder'),
+				description: localize('customMode.surfaceImportFolderDescription', 'Register a folder already inside this workspace'),
+				source: 'folder',
+			},
+		], {
+			title: localize('customMode.surfaceImportSourceTitle', 'Import Repo'),
+			placeHolder: localize('customMode.surfaceImportSourcePlaceholder', 'Choose where the repo comes from'),
+		});
+		if (!pick) {
+			return;
+		}
+		if (pick.source === 'git') {
+			await this.importSurfaceFromGitUrl();
+		} else {
+			await this.importSurfaceFromExistingFolder();
+		}
+	}
+
+	private uniqueSurfaceId(preferredId: string): string {
+		const used = new Set(this.consoleService.getSurfaces().map(surface => surface.id));
+		const base = slugifySurfaceId(preferredId);
+		if (!used.has(base)) {
+			return base;
+		}
+		for (let i = 2; ; i++) {
+			const candidate = `${base}-${i}`;
+			if (!used.has(candidate)) {
+				return candidate;
+			}
+		}
+	}
+
+	private async promptImportedSurfaceName(defaultName: string): Promise<string | undefined> {
+		const name = await this.quickInputService.input({
+			title: localize('customMode.surfaceImportNameTitle', 'Import Repo'),
+			prompt: localize('customMode.surfaceImportNamePrompt', 'What should this surface be called?'),
+			value: defaultName,
+			placeHolder: localize('customMode.surfaceImportNamePlaceholder', 'e.g. Customer Portal'),
+			validateInput: async value => value.trim() ? undefined : localize('customMode.surfaceImportNameRequired', 'Enter a surface name.'),
+		});
+		return normalizeOptionalSurfaceInput(name);
+	}
+
+	private async promptImportedSurfaceDevCommand(defaultPath: string): Promise<string | undefined> {
+		const value = await this.quickInputService.input({
+			title: localize('customMode.surfaceImportDevCommandTitle', 'Import Repo'),
+			prompt: localize('customMode.surfaceImportDevCommandPrompt', 'Optional: enter the dev command for this surface.'),
+			placeHolder: localize('customMode.surfaceImportDevCommandPlaceholder', 'e.g. npm --prefix {0} run dev', defaultPath),
+		});
+		return normalizeOptionalSurfaceInput(value);
+	}
+
+	private async promptImportedSurfaceLocalUrl(): Promise<string | undefined> {
+		const value = await this.quickInputService.input({
+			title: localize('customMode.surfaceImportLocalUrlTitle', 'Import Repo'),
+			prompt: localize('customMode.surfaceImportLocalUrlPrompt', 'Optional: enter the local preview URL.'),
+			placeHolder: localize('customMode.surfaceImportLocalUrlPlaceholder', 'e.g. http://localhost:3001'),
+			validateInput: async input => {
+				const trimmed = input.trim();
+				if (!trimmed || isValidLocalPreviewUrl(trimmed)) {
+					return undefined;
+				}
+				return localize('customMode.surfaceImportLocalUrlInvalid', 'Enter a localhost http(s) URL, or leave this blank.');
+			},
+		});
+		return normalizeOptionalSurfaceInput(value);
+	}
+
+	private async importSurfaceFromGitUrl(): Promise<void> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			this.notificationService.warn(localize('customMode.surfaceImportNoWorkspace', 'Open a workspace folder before importing a surface.'));
+			return;
+		}
+		const repoUrl = await this.quickInputService.input({
+			title: localize('customMode.surfaceImportGitTitle', 'Clone from Git URL'),
+			prompt: localize('customMode.surfaceImportGitPrompt', 'Enter the Git repository URL to clone.'),
+			placeHolder: localize('customMode.surfaceImportGitPlaceholder', 'https://github.com/acme/customer-portal.git'),
+			validateInput: async value => value.trim() ? undefined : localize('customMode.surfaceImportGitRequired', 'Enter a Git repository URL.'),
+		});
+		const normalizedRepoUrl = normalizeOptionalSurfaceInput(repoUrl);
+		if (!normalizedRepoUrl) {
+			return;
+		}
+		const defaultId = surfaceIdFromRepoUrl(normalizedRepoUrl);
+		const surfaceName = await this.promptImportedSurfaceName(defaultId.split('-').map(part => part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part).join(' '));
+		if (!surfaceName) {
+			return;
+		}
+		const surfaceId = this.uniqueSurfaceId(surfaceName);
+		const relativePath = `apps/${surfaceId}`;
+		const target = joinPath(workspaceFolder, relativePath);
+		try {
+			await this.fileService.stat(target);
+			this.notificationService.warn(localize('customMode.surfaceImportCloneTargetExists', 'Cannot clone because {0} already exists.', relativePath));
+			return;
+		} catch {
+			// Missing is expected.
+		}
+		const devCommand = await this.promptImportedSurfaceDevCommand(relativePath);
+		const localUrl = await this.promptImportedSurfaceLocalUrl();
+		try {
+			await this.fileService.createFolder(joinPath(workspaceFolder, 'apps'));
+			await this.commandService.executeCommand('_git.cloneRepository', normalizedRepoUrl, target.fsPath);
+			await this.registerImportedSurface(surfaceId, surfaceName, relativePath, devCommand, localUrl);
+		} catch (error: unknown) {
+			this.notificationService.error(localize('customMode.surfaceImportGitFailed', 'Could not import repo: {0}', String((error as Error)?.message ?? error)));
+		}
+	}
+
+	private async importSurfaceFromExistingFolder(): Promise<void> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			this.notificationService.warn(localize('customMode.surfaceImportNoWorkspace', 'Open a workspace folder before importing a surface.'));
+			return;
+		}
+		const picked = await this.fileDialogService.showOpenDialog({
+			title: localize('customMode.surfaceImportFolderTitle', 'Choose Surface Folder'),
+			defaultUri: workspaceFolder,
+			openLabel: localize('customMode.surfaceImportFolderOpenLabel', 'Import Surface'),
+			canSelectFiles: false,
+			canSelectFolders: true,
+			canSelectMany: false,
+		});
+		const folder = picked?.[0];
+		if (!folder) {
+			return;
+		}
+		if (!isEqualOrParent(folder, workspaceFolder) || extUri.isEqual(folder, workspaceFolder)) {
+			this.notificationService.warn(localize('customMode.surfaceImportFolderOutsideWorkspace', 'Choose a folder inside the current workspace.'));
+			return;
+		}
+		const relativePath = extUri.relativePath(workspaceFolder, folder);
+		if (!relativePath) {
+			this.notificationService.warn(localize('customMode.surfaceImportFolderInvalidPath', 'Could not compute a workspace-relative surface path.'));
+			return;
+		}
+		const defaultName = basename(folder).replace(/[-_]+/g, ' ');
+		const surfaceName = await this.promptImportedSurfaceName(defaultName);
+		if (!surfaceName) {
+			return;
+		}
+		const surfaceId = this.uniqueSurfaceId(surfaceName);
+		const devCommand = await this.promptImportedSurfaceDevCommand(relativePath);
+		const localUrl = await this.promptImportedSurfaceLocalUrl();
+		await this.registerImportedSurface(surfaceId, surfaceName, relativePath, devCommand, localUrl);
+	}
+
+	private async registerImportedSurface(surfaceId: string, surfaceName: string, relativePath: string, devCommand?: string, localUrl?: string): Promise<void> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			this.notificationService.warn(localize('customMode.surfaceImportNoWorkspace', 'Open a workspace folder before importing a surface.'));
+			return;
+		}
+		const imported = await upsertImportedGoalWorkspaceSurface(this.fileService, workspaceFolder, {
+			surfaceId,
+			surfaceName,
+			relativePath,
+			devCommand,
+			localUrl,
+			purpose: localize('customMode.surfaceImportPurpose', 'Imported app surface for {0}.', surfaceName),
+		});
+		if (!imported) {
+			this.notificationService.warn(localize('customMode.surfaceImportInvalid', 'Could not import {0}; choose a valid workspace-relative app folder.', surfaceName));
+			return;
+		}
+		await this.consoleService.refresh();
+		this.syncGoalSurfaceSwitcher();
+		void this.refreshStarterSurfaceCardStatuses();
+		void this.surfaceFeatureChecklistService.refresh();
+		this.selectGoalSurface(surfaceId);
+		this.notificationService.info(localize('customMode.surfaceImportSuccess', 'Imported {0} as a goal workspace surface.', surfaceName));
 	}
 
 	private async draftNewSurfacePrompt(): Promise<void> {

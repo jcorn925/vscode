@@ -1,0 +1,4 @@
+interface:
+  display_name: "New Surface Import Repo Evaluator"
+  short_description: "Evaluate New Surface repo import."
+  default_prompt: "Evaluate how well the New Surface import repo plan was implemented in this VS Code fork."
