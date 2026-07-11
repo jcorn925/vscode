@@ -17,6 +17,19 @@ export function statusIcon(status: AgentTaskNode['status']): string {
 	}
 }
 
+/** Codicon class for rendering a task status glyph in workbench UI. */
+export function statusIconClass(status: AgentTaskNode['status']): string {
+	switch (status) {
+		case 'complete': return 'codicon-pass-filled';
+		case 'in_progress': return 'codicon-play-circle';
+		case 'blocked': return 'codicon-warning';
+		case 'failed': return 'codicon-error';
+		case 'skipped': return 'codicon-debug-step-over';
+		case 'pending':
+		default: return 'codicon-circle-large-outline';
+	}
+}
+
 export function statusIconQuickPick(status: AgentTaskNode['status']): string {
 	switch (status) {
 		case 'complete': return '$(pass)';

@@ -34,7 +34,9 @@ suite('surfaceTaskTreePanel', () => {
 			panel.render(createTree());
 			const buttons = root.querySelectorAll('.custom-mode-surface-task-tree-control') as NodeListOf<HTMLButtonElement>;
 			assert.strictEqual(buttons.length, 5);
-			buttons[1].click();
+			// Continue Next is the primary control and renders first.
+			assert.ok(buttons[0].classList.contains('custom-mode-surface-task-tree-control-primary'));
+			buttons[0].click();
 			await Promise.resolve();
 			assert.strictEqual(service.continueCount, 1);
 		} finally {

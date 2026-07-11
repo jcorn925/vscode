@@ -8,6 +8,35 @@ GoalConsole.ai is a custom Code - OSS fork for turning business intent into work
 - Legacy Vercel URL ([ide-purpose.vercel.app](https://ide-purpose.vercel.app/)) may lag until redeployed from `docs/ide-purpose`
 - Milestones: [.agent/milestones.json](.agent/milestones.json)
 
+## Compile and start
+
+From the repo root:
+
+```bash
+# 1. Install dependencies (first time, or after package-lock changes)
+npm ci
+
+# 2. Compile the client, built-in extensions, and Copilot bits
+npm run compile
+
+# 3. Start GoalConsole.ai (downloads Electron on first run if needed)
+./scripts/code.sh
+```
+
+On Windows, use `scripts\code.bat` instead of `./scripts/code.sh`.
+
+Optional:
+
+```bash
+# Incremental rebuild while developing (leave running in another terminal)
+npm run watch
+
+# Open a specific workspace folder
+./scripts/code.sh /path/to/your/goal-workspace
+```
+
+`./scripts/code.sh` runs `build/lib/preLaunch.ts` first: it installs `node_modules` if missing, fetches Electron, and runs `npm run compile` only when `out/` is missing. Prefer an explicit `npm run compile` (or `npm run watch`) after source changes so you are not relying on a stale `out/`.
+
 ## Upstream Base
 
 This fork is based on Visual Studio Code - Open Source ("Code - OSS").

@@ -8,7 +8,10 @@ import { Disposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
 import { computeTaskTreeProgress, findRetryableLeaf, type IAgentTaskTreeService } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import type { AgentTaskNode, AgentTaskTree } from '../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
-import { formatNodeDetail, isRetryableLeaf, statusIcon } from '../../../../../custom/agentTaskTree/surfaceTaskTreeUiHelpers.js';
+import { formatNodeDetail, isRetryableLeaf, statusIconClass } from '../../../../../custom/agentTaskTree/surfaceTaskTreeUiHelpers.js';
+
+/** Details longer than this are collapsed behind a "Show more" toggle (progressive disclosure). */
+const DETAIL_COLLAPSE_THRESHOLD = 180;
 
 export class SurfaceTaskTreePanel extends Disposable {
 	private readonly headerEl: HTMLElement;
@@ -17,6 +20,7 @@ export class SurfaceTaskTreePanel extends Disposable {
 	private readonly progressLabelEl: HTMLElement;
 	private readonly treeEl: HTMLElement;
 	private readonly controlsEl: HTMLElement;
+	private readonly messageEl: HTMLElement;
 	private readonly resumeButton: HTMLButtonElement;
 	private readonly continueButton: HTMLButtonElement;
 	private readonly pauseButton: HTMLButtonElement;
@@ -42,19 +46,24 @@ export class SurfaceTaskTreePanel extends Disposable {
 		this.headerEl.appendChild(progressBlock);
 
 		this.treeEl = $('div.custom-mode-surface-task-tree-list');
+		this.treeEl.setAttribute('role', 'tree');
+		this.treeEl.setAttribute('aria-label', localize('surfaceTaskTree.treeLabel', 'Surface build plan tasks'));
 		this.controlsEl = $('div.custom-mode-surface-task-tree-controls');
+		this.continueButton = this.createControlButton(localize('surfaceTaskTree.continueNext', 'Continue Next'), true);
 		this.resumeButton = this.createControlButton(localize('surfaceTaskTree.resume', 'Resume'));
-		this.continueButton = this.createControlButton(localize('surfaceTaskTree.continueNext', 'Continue Next'));
 		this.pauseButton = this.createControlButton(localize('surfaceTaskTree.pause', 'Pause'));
 		this.retryButton = this.createControlButton(localize('surfaceTaskTree.retry', 'Retry'));
 		this.skipButton = this.createControlButton(localize('surfaceTaskTree.skip', 'Skip'));
-		this.controlsEl.appendChild(this.resumeButton);
 		this.controlsEl.appendChild(this.continueButton);
+		this.controlsEl.appendChild(this.resumeButton);
 		this.controlsEl.appendChild(this.pauseButton);
 		this.controlsEl.appendChild(this.retryButton);
 		this.controlsEl.appendChild(this.skipButton);
 
-		this.root.appendChild($('div.custom-mode-surface-task-tree', undefined, this.headerEl, this.treeEl, this.controlsEl));
+		this.messageEl = $('div.custom-mode-surface-task-tree-message.hidden');
+		this.messageEl.setAttribute('role', 'status');
+
+		this.root.appendChild($('div.custom-mode-surface-task-tree', undefined, this.headerEl, this.treeEl, this.messageEl, this.controlsEl));
 
 		this._register(addDisposableListener(this.resumeButton, 'click', () => void this.runControl(() => this.service.resumeTaskTree(this.requireTree().id))));
 		this._register(addDisposableListener(this.continueButton, 'click', () => void this.runControl(async () => {
@@ -100,7 +109,8 @@ export class SurfaceTaskTreePanel extends Disposable {
 		}
 
 		const progress = computeTaskTreeProgress(tree);
-		this.statusEl.textContent = tree.status;
+		this.statusEl.textContent = formatTreeStatusLabel(tree.status);
+		this.statusEl.dataset.treeStatus = tree.status;
 		this.progressBarEl.style.width = `${progress.percent}%`;
 		this.progressLabelEl.textContent = localize(
 			'surfaceTaskTree.progress',
@@ -125,23 +135,31 @@ export class SurfaceTaskTreePanel extends Disposable {
 		}
 	}
 
-	private createControlButton(label: string): HTMLButtonElement {
-		return $('button.custom-mode-surface-task-tree-control', { type: 'button' }, label) as HTMLButtonElement;
+	private createControlButton(label: string, primary?: boolean): HTMLButtonElement {
+		const className = primary
+			? 'button.custom-mode-surface-task-tree-control.custom-mode-surface-task-tree-control-primary'
+			: 'button.custom-mode-surface-task-tree-control';
+		return $(className, { type: 'button' }, label) as HTMLButtonElement;
 	}
 
 	private appendNode(node: AgentTaskNode, depth: number, tree: AgentTaskTree): void {
 		const isCurrent = tree.cursor?.currentNodeId === node.id;
+		const icon = $(`span.custom-mode-surface-task-tree-node-icon.codicon.${statusIconClass(node.status)}`);
+		icon.setAttribute('aria-hidden', 'true');
+		icon.dataset.nodeStatus = node.status;
 		const row = $('div.custom-mode-surface-task-tree-node', undefined,
-			$('span.custom-mode-surface-task-tree-node-icon', undefined, statusIcon(node.status)),
+			icon,
 			$('span.custom-mode-surface-task-tree-node-title', undefined, node.title),
 		);
+		row.setAttribute('role', 'treeitem');
+		row.setAttribute('aria-label', `${node.title} (${node.status.replace(/_/g, ' ')})`);
 		row.classList.toggle('custom-mode-surface-task-tree-node-current', isCurrent);
 		row.classList.toggle(`custom-mode-surface-task-tree-node-${node.type}`, true);
 		row.style.paddingLeft = `${depth * 16 + 8}px`;
 
 		const detail = formatNodeDetail(node);
 		if (detail) {
-			row.appendChild($('div.custom-mode-surface-task-tree-node-detail', undefined, detail));
+			row.appendChild(this.createDetailElement(detail));
 		}
 
 		if (node.type === 'leaf' && isRetryableLeaf(node)) {
@@ -167,6 +185,33 @@ export class SurfaceTaskTreePanel extends Disposable {
 		for (const child of node.children ?? []) {
 			this.appendNode(child, depth + 1, tree);
 		}
+	}
+
+	private createDetailElement(detail: string): HTMLElement {
+		const container = $('div.custom-mode-surface-task-tree-node-detail');
+		if (detail.length <= DETAIL_COLLAPSE_THRESHOLD) {
+			container.textContent = detail;
+			return container;
+		}
+		const text = $('span.custom-mode-surface-task-tree-node-detail-text', undefined, `${detail.slice(0, DETAIL_COLLAPSE_THRESHOLD).trimEnd()}…`);
+		const toggle = $('button.custom-mode-surface-task-tree-detail-toggle', {
+			type: 'button',
+			'aria-expanded': 'false',
+		}, localize('surfaceTaskTree.showMore', 'Show more')) as HTMLButtonElement;
+		let expanded = false;
+		this._register(addDisposableListener(toggle, 'click', event => {
+			event.preventDefault();
+			event.stopPropagation();
+			expanded = !expanded;
+			text.textContent = expanded ? detail : `${detail.slice(0, DETAIL_COLLAPSE_THRESHOLD).trimEnd()}…`;
+			toggle.textContent = expanded
+				? localize('surfaceTaskTree.showLess', 'Show less')
+				: localize('surfaceTaskTree.showMore', 'Show more');
+			toggle.setAttribute('aria-expanded', String(expanded));
+		}));
+		container.appendChild(text);
+		container.appendChild(toggle);
+		return container;
 	}
 
 	private updateControlStates(tree: AgentTaskTree): void {
@@ -197,11 +242,19 @@ export class SurfaceTaskTreePanel extends Disposable {
 			return;
 		}
 		this.setBusy(true);
+		this.setMessage(undefined);
 		try {
 			await action();
+		} catch (error: unknown) {
+			this.setMessage(error instanceof Error ? error.message : String(error));
 		} finally {
 			this.setBusy(false);
 		}
+	}
+
+	private setMessage(message: string | undefined): void {
+		this.messageEl.textContent = message ?? '';
+		this.messageEl.classList.toggle('hidden', !message);
 	}
 
 	private async runRetryOrSkip(mode: 'retry' | 'skip'): Promise<void> {
@@ -220,5 +273,16 @@ export class SurfaceTaskTreePanel extends Disposable {
 				await this.service.skipTask(tree.id, node.id, localize('surfaceTaskTree.skipLeafNote', 'Skipped from task tree view.'));
 			}
 		});
+	}
+}
+
+function formatTreeStatusLabel(status: AgentTaskTree['status']): string {
+	switch (status) {
+		case 'active': return localize('surfaceTaskTree.statusActive', 'Active');
+		case 'paused': return localize('surfaceTaskTree.statusPaused', 'Paused');
+		case 'complete': return localize('surfaceTaskTree.statusComplete', 'Complete');
+		case 'failed': return localize('surfaceTaskTree.statusFailed', 'Failed');
+		case 'draft':
+		default: return localize('surfaceTaskTree.statusDraft', 'Draft');
 	}
 }

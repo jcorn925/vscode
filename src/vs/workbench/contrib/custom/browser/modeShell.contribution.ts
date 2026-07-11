@@ -1480,14 +1480,26 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-ui-surface-main-view-toggle button {
 				flex: 0 0 auto;
-				height: 28px;
-				padding: 0 12px;
+				height: 30px;
+				padding: 0 16px;
 				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.24));
 				background: var(--vscode-editorWidget-background);
-				color: var(--vscode-foreground);
+				color: var(--vscode-descriptionForeground);
 				font-size: 12px;
 				font-weight: 600;
 				cursor: pointer;
+				transition: background-color 0.12s ease, color 0.12s ease;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-main-view-toggle button:hover:not(.active) {
+				background: var(--vscode-toolbar-hoverBackground);
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-main-view-toggle button:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: -1px;
+				z-index: 1;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-main-view-toggle button:first-child {
@@ -1524,42 +1536,81 @@ class ModeShellContribution extends Disposable {
 				flex: 1 1 auto;
 				min-height: 0;
 				overflow: hidden;
-				padding: 12px 14px;
-				gap: 10px;
+				padding: 16px 18px;
+				gap: 12px;
+				max-width: 920px;
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-header {
 				display: flex;
 				flex-direction: column;
-				gap: 6px;
+				gap: 8px;
 				flex: 0 0 auto;
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-empty {
-				padding: 12px 14px;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				padding: 32px 16px;
 				font-size: 12px;
 				color: var(--vscode-descriptionForeground);
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-status {
+				align-self: flex-start;
+				display: inline-flex;
+				align-items: center;
+				padding: 2px 10px;
+				border-radius: 999px;
+				border: 1px solid var(--vscode-panel-border);
 				font-size: 11px;
+				font-weight: 600;
 				color: var(--vscode-descriptionForeground);
 				text-transform: uppercase;
 				letter-spacing: 0.04em;
 			}
 
+			.monaco-workbench .custom-mode-surface-task-tree-status[data-tree-status="active"] {
+				border-color: var(--vscode-textLink-foreground);
+				color: var(--vscode-textLink-foreground);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-status[data-tree-status="complete"] {
+				border-color: var(--vscode-testing-iconPassed);
+				color: var(--vscode-testing-iconPassed);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-status[data-tree-status="failed"] {
+				border-color: var(--vscode-errorForeground);
+				color: var(--vscode-errorForeground);
+			}
+
 			.monaco-workbench .custom-mode-surface-task-tree-progress {
+				position: relative;
 				display: flex;
 				flex-direction: column;
-				gap: 4px;
+				gap: 6px;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-progress::before {
+				content: '';
+				position: absolute;
+				top: 0;
+				left: 0;
+				right: 0;
+				height: 6px;
+				border-radius: 999px;
+				background: color-mix(in srgb, var(--vscode-progressBar-background, var(--vscode-button-background)) 18%, transparent);
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-progress-bar {
+				position: relative;
 				height: 6px;
 				border-radius: 999px;
 				background: var(--vscode-progressBar-background, var(--vscode-button-background));
 				width: 0%;
-				transition: width 0.2s ease;
+				transition: width 0.25s ease;
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-progress-label {
@@ -1573,7 +1624,7 @@ class ModeShellContribution extends Disposable {
 				overflow: auto;
 				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
 				border-radius: 8px;
-				padding: 8px 0;
+				padding: 6px 0;
 				background: var(--vscode-editorWidget-background);
 			}
 
@@ -1581,20 +1632,60 @@ class ModeShellContribution extends Disposable {
 				display: flex;
 				flex-wrap: wrap;
 				align-items: flex-start;
-				gap: 6px;
-				padding: 6px 8px;
+				gap: 8px;
+				padding: 7px 12px;
 				font-size: 12px;
+				line-height: 1.5;
+				border-left: 2px solid transparent;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node:hover {
+				background: var(--vscode-list-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-root {
+				margin-top: 6px;
+				font-size: 12px;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-root:first-child {
+				margin-top: 0;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-root > .custom-mode-surface-task-tree-node-title {
+				font-size: 13px;
+				font-weight: 700;
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-node-current {
 				background: var(--vscode-list-activeSelectionBackground);
 				color: var(--vscode-list-activeSelectionForeground);
+				border-left-color: var(--vscode-focusBorder);
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-node-icon {
 				flex: 0 0 auto;
-				width: 14px;
+				width: 16px;
+				margin-top: 1px;
+				font-size: 14px;
 				text-align: center;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-icon[data-node-status="complete"] {
+				color: var(--vscode-testing-iconPassed);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-icon[data-node-status="in_progress"] {
+				color: var(--vscode-textLink-foreground);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-icon[data-node-status="blocked"] {
+				color: var(--vscode-editorWarning-foreground, #cca700);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-icon[data-node-status="failed"] {
+				color: var(--vscode-errorForeground);
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-node-title {
@@ -1605,16 +1696,58 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-surface-task-tree-node-detail {
 				flex: 1 1 100%;
-				padding-left: 20px;
+				padding-left: 24px;
 				font-size: 11px;
+				line-height: 1.55;
 				color: var(--vscode-descriptionForeground);
+				overflow-wrap: anywhere;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-node-current .custom-mode-surface-task-tree-node-detail {
+				color: inherit;
+				opacity: 0.85;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-detail-toggle {
+				display: inline;
+				margin-left: 6px;
+				padding: 0;
+				border: 0;
+				background: transparent;
+				color: var(--vscode-textLink-foreground);
+				font-size: 11px;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-detail-toggle:hover {
+				text-decoration: underline;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-detail-toggle:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: 1px;
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-node-actions {
 				flex: 1 1 100%;
 				display: flex;
 				gap: 6px;
-				padding-left: 20px;
+				padding-left: 24px;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-message {
+				flex: 0 0 auto;
+				padding: 6px 10px;
+				border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-editorWarning-foreground, #cca700));
+				border-radius: 6px;
+				background: var(--vscode-inputValidation-warningBackground, transparent);
+				color: var(--vscode-foreground);
+				font-size: 11px;
+				line-height: 1.5;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-message.hidden {
+				display: none;
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-controls {
@@ -1622,18 +1755,41 @@ class ModeShellContribution extends Disposable {
 				flex-wrap: wrap;
 				gap: 8px;
 				flex: 0 0 auto;
+				padding-top: 2px;
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-control,
 			.monaco-workbench .custom-mode-surface-task-tree-inline-action {
-				height: 26px;
-				padding: 0 10px;
+				height: 28px;
+				padding: 0 12px;
 				border-radius: 6px;
 				border: 1px solid var(--vscode-button-border, transparent);
 				background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
 				color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
 				font-size: 12px;
+				font-weight: 600;
 				cursor: pointer;
+				transition: background-color 0.12s ease;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-control:hover:not(:disabled),
+			.monaco-workbench .custom-mode-surface-task-tree-inline-action:hover:not(:disabled) {
+				background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-control:focus-visible,
+			.monaco-workbench .custom-mode-surface-task-tree-inline-action:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: 2px;
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-control-primary {
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+			}
+
+			.monaco-workbench .custom-mode-surface-task-tree-control-primary:hover:not(:disabled) {
+				background: var(--vscode-button-hoverBackground);
 			}
 
 			.monaco-workbench .custom-mode-surface-task-tree-control:disabled,
@@ -1778,8 +1934,8 @@ class ModeShellContribution extends Disposable {
 				background: var(--vscode-toolbar-hoverBackground);
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-starter-card.generated:not(.has-preview) {
-				opacity: 0.72;
+			.monaco-workbench .custom-mode-ui-surface-starter-card.generated:not(.has-preview) .custom-mode-ui-surface-starter-card-preview-shell {
+				opacity: 0.6;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-section {
@@ -1987,13 +2143,20 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starters-header {
-				display: flex;
-				flex-direction: column;
-				gap: 6px;
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) auto;
+				align-items: center;
+				column-gap: 12px;
+				row-gap: 4px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starters-subtitle {
+				grid-column: 1 / -1;
 			}
 
 			.monaco-workbench .custom-mode-start-all-surfaces {
-				align-self: flex-start;
+				grid-row: 1;
+				grid-column: 2;
 				height: 28px;
 				padding: 0 10px;
 				border-radius: 6px;
@@ -2007,6 +2170,11 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-start-all-surfaces:hover:not(:disabled) {
 				background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
+			}
+
+			.monaco-workbench .custom-mode-start-all-surfaces:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: 2px;
 			}
 
 			.monaco-workbench .custom-mode-start-all-surfaces:disabled {
@@ -2031,7 +2199,7 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench .custom-mode-ui-surface-starter-grid {
 				display: grid;
 				grid-template-columns: repeat(2, minmax(0, 1fr));
-				gap: 12px;
+				gap: 16px;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card {
@@ -2040,22 +2208,33 @@ class ModeShellContribution extends Disposable {
 				min-height: 200px;
 				padding: 0;
 				border: 1px solid var(--vscode-panel-border);
-				border-radius: 8px;
+				border-radius: 10px;
 				background: var(--vscode-editor-background);
 				color: inherit;
 				text-align: left;
 				cursor: pointer;
 				font-family: inherit;
 				overflow: hidden;
+				transition: border-color 0.12s ease, box-shadow 0.15s ease, transform 0.15s ease;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card:hover {
 				border-color: var(--vscode-focusBorder);
+				box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+				transform: translateY(-1px);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card:focus-visible {
-				outline: 1px solid var(--vscode-focusBorder);
+				outline: 2px solid var(--vscode-focusBorder);
 				outline-offset: 2px;
+			}
+
+			@media (prefers-reduced-motion: reduce) {
+				.monaco-workbench .custom-mode-ui-surface-starter-card,
+				.monaco-workbench .custom-mode-ui-surface-starter-card:hover {
+					transition: none;
+					transform: none;
+				}
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-preview-shell {
@@ -2168,20 +2347,27 @@ class ModeShellContribution extends Disposable {
 				align-items: center;
 				justify-content: center;
 				flex: 0 0 auto;
-				width: 24px;
-				height: 24px;
+				width: 26px;
+				height: 26px;
 				padding: 0;
 				border: 1px solid var(--vscode-panel-border);
 				border-radius: 6px;
 				background: color-mix(in srgb, var(--vscode-editorWidget-background) 90%, transparent);
-				color: var(--vscode-foreground);
+				color: var(--vscode-descriptionForeground);
 				cursor: pointer;
 				backdrop-filter: blur(4px);
+				transition: border-color 0.12s ease, color 0.12s ease, background-color 0.12s ease;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-task-tree:hover {
 				border-color: var(--vscode-focusBorder);
+				background: var(--vscode-toolbar-hoverBackground);
 				color: var(--vscode-textLink-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter-card-task-tree:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: 1px;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-task-tree .codicon {
