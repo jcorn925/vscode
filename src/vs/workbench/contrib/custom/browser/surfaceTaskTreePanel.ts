@@ -23,6 +23,7 @@ export class SurfaceTaskTreePanel extends Disposable {
 	private readonly messageEl: HTMLElement;
 	private readonly resumeButton: HTMLButtonElement;
 	private readonly continueButton: HTMLButtonElement;
+	private readonly runAllButton: HTMLButtonElement;
 	private readonly pauseButton: HTMLButtonElement;
 	private readonly retryButton: HTMLButtonElement;
 	private readonly skipButton: HTMLButtonElement;
@@ -50,11 +51,13 @@ export class SurfaceTaskTreePanel extends Disposable {
 		this.treeEl.setAttribute('aria-label', localize('surfaceTaskTree.treeLabel', 'Surface build plan tasks'));
 		this.controlsEl = $('div.custom-mode-surface-task-tree-controls');
 		this.continueButton = this.createControlButton(localize('surfaceTaskTree.continueNext', 'Continue Next'), true);
+		this.runAllButton = this.createControlButton(localize('surfaceTaskTree.runAll', 'Run All'));
 		this.resumeButton = this.createControlButton(localize('surfaceTaskTree.resume', 'Resume'));
 		this.pauseButton = this.createControlButton(localize('surfaceTaskTree.pause', 'Pause'));
 		this.retryButton = this.createControlButton(localize('surfaceTaskTree.retry', 'Retry'));
 		this.skipButton = this.createControlButton(localize('surfaceTaskTree.skip', 'Skip'));
 		this.controlsEl.appendChild(this.continueButton);
+		this.controlsEl.appendChild(this.runAllButton);
 		this.controlsEl.appendChild(this.resumeButton);
 		this.controlsEl.appendChild(this.pauseButton);
 		this.controlsEl.appendChild(this.retryButton);
@@ -69,7 +72,16 @@ export class SurfaceTaskTreePanel extends Disposable {
 		this._register(addDisposableListener(this.continueButton, 'click', () => void this.runControl(async () => {
 			await this.service.continueNextTask(this.requireTree().id);
 		})));
-		this._register(addDisposableListener(this.pauseButton, 'click', () => void this.runControl(() => this.service.pauseTaskTree(this.requireTree().id))));
+		this._register(addDisposableListener(this.runAllButton, 'click', () => void this.runControl(async () => {
+			await this.service.runAllTasks(this.requireTree().id);
+		})));
+		this._register(addDisposableListener(this.pauseButton, 'click', () => {
+			if (this.busy) {
+				void this.service.pauseTaskTree(this.requireTree().id);
+				return;
+			}
+			void this.runControl(() => this.service.pauseTaskTree(this.requireTree().id));
+		}));
 		this._register(addDisposableListener(this.retryButton, 'click', () => void this.runRetryOrSkip('retry')));
 		this._register(addDisposableListener(this.skipButton, 'click', () => void this.runRetryOrSkip('skip')));
 		this._register(addDisposableListener(this.treeEl, 'click', event => {
@@ -219,13 +231,14 @@ export class SurfaceTaskTreePanel extends Disposable {
 		const hasPending = Boolean(this.service.findNextPendingLeaf(tree));
 		this.resumeButton.disabled = this.busy || tree.status !== 'paused';
 		this.continueButton.disabled = this.busy || (tree.status !== 'active' && tree.status !== 'paused') || !hasPending;
-		this.pauseButton.disabled = this.busy || tree.status !== 'active';
+		this.runAllButton.disabled = this.busy || (tree.status !== 'active' && tree.status !== 'paused') || !hasPending;
+		this.pauseButton.disabled = tree.status !== 'active';
 		this.retryButton.disabled = this.busy || !retryable;
 		this.skipButton.disabled = this.busy || !retryable;
 	}
 
 	private setControlsEnabled(enabled: boolean): void {
-		for (const button of [this.resumeButton, this.continueButton, this.pauseButton, this.retryButton, this.skipButton]) {
+		for (const button of [this.resumeButton, this.continueButton, this.runAllButton, this.pauseButton, this.retryButton, this.skipButton]) {
 			button.disabled = !enabled || this.busy;
 		}
 	}

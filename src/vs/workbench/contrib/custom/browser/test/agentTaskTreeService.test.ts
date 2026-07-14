@@ -21,6 +21,8 @@ import {
 	taskTreeResource,
 } from '../../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import type { IIxIntegrationService } from '../../../../../../custom/ix/IxIntegrationService.js';
+import { registerSurfaceFromBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintScaffold.js';
+import type { SurfaceBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintTypes.js';
 
 suite('agentTaskTreeService', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -103,6 +105,85 @@ suite('agentTaskTreeService', () => {
 			assert.strictEqual(findNode(persisted!, 'leaf-1')?.status, 'complete');
 			assert.strictEqual(findNode(persisted!, 'leaf-2')?.status, 'blocked');
 			assert.strictEqual(persisted?.roots[0].status, 'blocked');
+		} finally {
+			service.dispose();
+		}
+	});
+
+	test('existing paths alone do not count as agent execution', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		const tree = createTree();
+		tree.roots[0].children![0] = {
+			...tree.roots[0].children![0],
+			expectedPaths: ['apps/existing/page.tsx'],
+			acceptanceChecks: ['Route renders'],
+		};
+		await fileService.writeTree(tree);
+		await fileService.writeFile(joinPath(workspaceFolder, 'apps/existing/page.tsx'), VSBuffer.fromString('// existing'));
+		service.setExecutorForTesting({ executeTask: async () => ({ verification: 'looks good' }) });
+
+		try {
+			const result = await service.continueNextTask(tree.id);
+			assert.strictEqual(result.status, 'blocked');
+			assert.ok(result.task?.implementation?.error?.includes('tool execution evidence'));
+		} finally {
+			service.dispose();
+		}
+	});
+
+	test('runAllTasks executes leaves sequentially until the tree is complete', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		const tree = createTree();
+		await fileService.writeTree(tree);
+		const executed: string[] = [];
+		service.setExecutorForTesting({
+			executeTask: async (_tree, task) => {
+				executed.push(task.id);
+				return { verification: `verified ${task.id}` };
+			},
+		});
+
+		try {
+			const result = await service.runAllTasks(tree.id);
+			assert.strictEqual(result.status, 'complete');
+			assert.deepStrictEqual(executed, ['leaf-1', 'leaf-2']);
+			assert.strictEqual((await service.loadTaskTree(tree.id))?.status, 'complete');
+		} finally {
+			service.dispose();
+		}
+	});
+
+	test('pause cancels the active executor and leaves the current leaf resumable', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		const tree = createTree();
+		await fileService.writeTree(tree);
+		let started!: () => void;
+		const didStart = new Promise<void>(resolve => started = resolve);
+		service.setExecutorForTesting({
+			executeTask: async (_tree, _task, token) => {
+				started();
+				await new Promise<void>(resolve => {
+					const listener = token.onCancellationRequested(() => {
+						listener.dispose();
+						resolve();
+					});
+				});
+				return { verification: 'cancelled' };
+			},
+		});
+
+		try {
+			const running = service.continueNextTask(tree.id);
+			await didStart;
+			await service.pauseTaskTree(tree.id);
+			const result = await running;
+			assert.strictEqual(result.status, 'paused');
+			const persisted = await service.loadTaskTree(tree.id);
+			assert.strictEqual(persisted?.status, 'paused');
+			assert.strictEqual(findNode(persisted!, 'leaf-1')?.status, 'in_progress');
 		} finally {
 			service.dispose();
 		}
@@ -248,7 +329,35 @@ suite('agentTaskTreeService', () => {
 		}
 	});
 
-	test('default executor scaffolds a surface task tree leaf from template', async () => {
+	test('surface registration creates manifest metadata without scaffolding app files', async () => {
+		const fileService = new TestFileService();
+		const blueprint: SurfaceBlueprint = {
+			version: 1,
+			surfaceId: 'booking',
+			surfaceName: 'Booking',
+			templateId: 'booking',
+			status: 'draft',
+			createdAt: '2026-01-01T00:00:00.000Z',
+			subsystems: [],
+			manifest: { capabilities: ['Scheduling'], events: [], entities: [], ixSubsystems: [] },
+			acceptance: {
+				requiredRoutes: ['/'],
+				requiredWorkflows: ['booking'],
+				requiredUiSignals: ['booking'],
+				requiredBusinessTerms: ['booking'],
+				minimumFiles: 1,
+				minimumTotalLines: 1,
+				minimumInteractiveControls: 1,
+			},
+		};
+
+		await registerSurfaceFromBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+
+		assert.ok(await fileService.exists(joinPath(workspaceFolder, 'workspace.goal.json')));
+		assert.strictEqual(await fileService.exists(joinPath(workspaceFolder, 'apps/booking/package.json')), false);
+	});
+
+	test('registered executor runs a surface leaf and must create every expected path', async () => {
 		const fileService = new TestFileService();
 		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
 		try {
@@ -257,6 +366,18 @@ suite('agentTaskTreeService', () => {
 				surfaceName: 'Content Scheduler',
 				templateId: 'content-scheduler',
 			});
+			service.setExecutorForTesting({
+				executeTask: async (_tree, task) => {
+					for (const expectedPath of task.expectedPaths ?? []) {
+						await fileService.writeFile(joinPath(workspaceFolder, expectedPath), VSBuffer.fromString('generated'));
+					}
+					return {
+						changedFiles: task.expectedPaths,
+						commandsRun: ['custom.ai'],
+						verification: 'Agent verified the leaf.',
+					};
+				},
+			});
 
 			const result = await service.continueNextTask(tree.id);
 
@@ -264,10 +385,8 @@ suite('agentTaskTreeService', () => {
 			assert.strictEqual(result.task?.title, 'Scaffold app shell');
 			assert.ok(await fileService.exists(joinPath(workspaceFolder, 'apps/content-scheduler/package.json')));
 			assert.ok(await fileService.exists(joinPath(workspaceFolder, 'apps/content-scheduler/app/layout.tsx')));
-			assert.ok(await fileService.exists(joinPath(workspaceFolder, 'workspace.goal.json')));
-			assert.ok(await fileService.exists(joinPath(workspaceFolder, '.agent/surfaces/content-scheduler.blueprint.json')));
 			assert.ok(result.task?.implementation?.changedFiles?.some(path => path === 'apps/content-scheduler/package.json'));
-			assert.ok(result.task?.implementation?.verification?.includes('apps/content-scheduler/package.json'));
+			assert.strictEqual(result.task?.implementation?.verification, 'Agent verified the leaf.');
 		} finally {
 			service.dispose();
 		}
@@ -382,6 +501,29 @@ suite('agentTaskTreeService', () => {
 		}
 	});
 
+	test('continueNextTask runs final Ix validation before completing a surface tree', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		const tree = createSurfaceTree();
+		tree.roots[0].children![0].status = 'complete';
+		await fileService.writeTree(tree);
+		await writeSurfaceValidationFixture(fileService, [
+			'apps/marketing/app/page.tsx',
+			'apps/marketing/app/offers/page.tsx',
+		]);
+		const ixRegistration = service.setIxIntegrationService(passingIxService() as unknown as IIxIntegrationService);
+
+		try {
+			const result = await service.continueNextTask(tree.id);
+			assert.strictEqual(result.status, 'complete');
+			assert.strictEqual(result.tree.ixValidation?.status, 'passed');
+			assert.strictEqual(result.tree.ixValidationAttempts, 1);
+		} finally {
+			ixRegistration.dispose();
+			service.dispose();
+		}
+	});
+
 	test('surface Ix validation appends repair leaves for generated shape gaps', async () => {
 		const fileService = new TestFileService();
 		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
@@ -420,6 +562,13 @@ suite('agentTaskTreeService', () => {
 			});
 			const rerun = await service.loadTaskTree(tree.id);
 			assert.strictEqual(rerun?.roots.filter(root => root.title === 'Ix Validation Repair').length, 1);
+			await service.validateSurfaceTaskTreeShape('marketing', {
+				command: 'ix subsystems --list --detailed --sort importance --format json',
+				ixSubsystems: [],
+			});
+			const exhausted = await service.loadTaskTree(tree.id);
+			assert.strictEqual(exhausted?.ixValidationAttempts, 3);
+			assert.strictEqual(exhausted?.status, 'failed');
 		} finally {
 			service.dispose();
 		}
@@ -584,6 +733,33 @@ function blockingExecutor(message: string): AgentTaskExecutor {
 		executeTask: async () => {
 			throw new AgentTaskBlockedError(message);
 		},
+	};
+}
+
+function passingIxService(): Pick<IIxIntegrationService, 'mapPath' | 'ensureIxMappedIfEmpty' | 'runJsonQuery'> {
+	return {
+		mapPath: async () => ({ ok: true, raw: '', command: 'ix map apps/marketing' }),
+		ensureIxMappedIfEmpty: async () => ({ statsPreview: '', ranMap: false, statsOk: true }),
+		runJsonQuery: async () => ({
+			ok: true,
+			raw: '{}',
+			value: {
+				subsystems: [{
+					id: 'ix-marketing-home',
+					label: 'Marketing Home Route',
+					path: 'apps/marketing/app/page.tsx',
+					files: ['apps/marketing/app/page.tsx'],
+					fileCount: 1,
+				}, {
+					id: 'ix-marketing-offers',
+					label: 'Marketing Offers Route',
+					path: 'apps/marketing/app/offers/page.tsx',
+					files: ['apps/marketing/app/offers/page.tsx'],
+					fileCount: 1,
+				}],
+			},
+			command: 'ix subsystems --format json',
+		}),
 	};
 }
 

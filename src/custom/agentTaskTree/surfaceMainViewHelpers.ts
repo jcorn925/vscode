@@ -6,7 +6,7 @@
 import type { AgentTaskTree } from './agentTaskTreeTypes.js';
 import { treeHasActiveWork } from './agentTaskTreeService.js';
 
-export type SurfaceMainView = 'taskTree' | 'preview';
+export type SurfaceMainView = 'taskTree' | 'preview' | 'ixSubsystems';
 
 export function shouldShowSurfaceMainViewToggle(options: {
 	readonly selectedSurfaceId: string | undefined;

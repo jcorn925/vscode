@@ -263,6 +263,46 @@ suite('surfaceBlueprintVerify', () => {
 		assert.strictEqual(manifest.surfaces[0].devCommand, 'npm run dev --prefix apps/booking -- --port 3001');
 	});
 
+	test('does not duplicate devCommand port arguments on repeated scaffold runs', async () => {
+		const fileService = new TestBlueprintFileService();
+		const template = loadSurfaceTemplate('subscriptions')!;
+		const blueprint = instantiateBlueprintFromTemplate(template, { surfaceId: 'subscriptions', surfaceName: 'Subscriptions' });
+		await writeBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+		fileService.setFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST), JSON.stringify({
+			goal: {
+				id: 'personal-training-business',
+				name: 'Online Personal Training Business',
+			},
+			surfaces: [{
+				id: 'marketing',
+				name: 'Marketing Site',
+				path: 'apps/marketing',
+				localUrl: 'http://localhost:3001',
+				devCommand: 'npm run dev --prefix apps/marketing -- --port 3001',
+			}, {
+				id: 'booking',
+				name: 'Booking',
+				path: 'apps/booking',
+				localUrl: 'http://localhost:3002',
+				devCommand: 'npm run dev --prefix apps/booking -- --port 3002',
+			}, {
+				id: 'subscriptions',
+				name: 'Subscriptions',
+				type: 'web-app',
+				path: 'apps/subscriptions',
+				localUrl: 'http://localhost:3003',
+				devCommand: 'npm run dev --prefix apps/subscriptions -- --port 3003',
+			}],
+		}));
+
+		await scaffoldSurfaceFromBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+		await scaffoldSurfaceFromBlueprint(fileService as unknown as IFileService, workspaceFolder, blueprint);
+
+		const manifest = JSON.parse((await fileService.readFile(joinPath(workspaceFolder, WORKSPACE_MANIFEST))).value.toString());
+		const subscriptions = manifest.surfaces.find((surface: { id?: string }) => surface.id === 'subscriptions');
+		assert.strictEqual(subscriptions.devCommand, 'npm run dev --prefix apps/subscriptions -- --port 3003');
+	});
+
 	test('scaffold repairs legacy root-shaped manifest before verification', async () => {
 		const fileService = new TestBlueprintFileService();
 		const template = loadSurfaceTemplate('booking')!;

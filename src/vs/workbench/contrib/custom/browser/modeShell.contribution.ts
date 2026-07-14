@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, Dimension } from '../../../../base/browser/dom.js';
 import { createStyleSheet } from '../../../../base/browser/domStylesheets.js';
 import { mainWindow } from '../../../../base/browser/window.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
@@ -19,7 +19,6 @@ import { IWorkbenchLayoutService } from '../../../services/layout/browser/layout
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
-import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IContextKeyService, type IScopedContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService, type ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
@@ -29,7 +28,7 @@ import { collectUniqueSurfacePorts, parsePortFromLocalUrl } from '../../../../..
 import { IDefaultProjectService } from '../../../../../custom/devserver/DefaultProjectService.js';
 import { IModeService, Mode } from '../../../../../custom/mode/ModeService.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
-import { ITerminalService } from '../../terminal/browser/terminal.js';
+import { ITerminalService, type ITerminalInstance } from '../../terminal/browser/terminal.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { IQuickInputService, type IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
@@ -46,6 +45,7 @@ import { ChatWidget } from '../../chat/browser/widget/chatWidget.js';
 import { ChatAgentLocation, ChatModeKind } from '../../chat/common/constants.js';
 import type { IChatRequestFileEntry } from '../../chat/common/attachments/chatVariableEntries.js';
 import { ILanguageModelsService } from '../../chat/common/languageModels.js';
+import { IPluginGitService } from '../../chat/common/plugins/pluginGitService.js';
 import { editorBackground, editorForeground, inputBackground } from '../../../../platform/theme/common/colorRegistry.js';
 import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../common/theme.js';
 import { IRange } from '../../../../editor/common/core/range.js';
@@ -96,18 +96,19 @@ import {
 	type SurfaceSetupStep,
 } from '../../../../../custom/goalWorkspace/goalWorkspaceSurfaceSetup.js';
 import { SurfaceBuilderHandoffState, type SurfaceBuilderHandoffStateValue } from '../../../../../custom/goalWorkspace/surfaceBuilderHandoffState.js';
-import { blueprintResource, readBlueprint } from '../../../../../custom/goalWorkspace/surfaceBlueprintService.js';
+import { blueprintResource, createBlueprintFromTemplateId, readBlueprint } from '../../../../../custom/goalWorkspace/surfaceBlueprintService.js';
+import { registerSurfaceFromBlueprint } from '../../../../../custom/goalWorkspace/surfaceBlueprintScaffold.js';
 import { verifySurfaceBlueprint } from '../../../../../custom/goalWorkspace/surfaceBlueprintVerify.js';
-import { SurfaceCreationLangGraphOrchestrator } from '../../../../../custom/goalWorkspace/surfaceCreationLangGraphOrchestrator.js';
-import { getSurfaceHandoffGuidance, type SurfaceHandoffPhase } from '../../../../../custom/goalWorkspace/surfaceHandoffPrompt.js';
 import { MAX_SURFACE_BLUEPRINT_REPAIR_ATTEMPTS, SurfaceBlueprintOrchestrator } from '../../../../../custom/goalWorkspace/surfaceBlueprintOrchestrator.js';
 import { ISurfaceFeatureChecklistService } from '../../../../../custom/goalWorkspace/surfaceFeatureChecklistService.js';
 import { IWorkflowCatalogService, upsertWorkflowSpec, workflowCatalogResource } from '../../../../../custom/goalWorkspace/workflowCatalogService.js';
 import { IWorkflowRunnerService } from '../../../../../custom/goalWorkspace/workflowRunnerService.js';
 import { discoverIxSubsystemRegions } from '../../../../../custom/goalWorkspace/surfaceBlueprintIxDiscovery.js';
-import { ICustomAiChatTraceService } from '../../../../../custom/ai/browser/customAiChatTrace.js';
 import { SurfaceFeatureChecklistPanel } from './surfaceFeatureChecklistPanel.js';
+import { registerModeShellChatTarget } from './modeShellChatTarget.js';
 import { SurfaceTaskTreePanel } from './surfaceTaskTreePanel.js';
+import { CustomAiAgentTaskExecutor } from './agentTaskTreeChatExecutor.js';
+import { SurfaceIxSubsystemsPanel } from './surfaceIxSubsystemsPanel.js';
 import { IAgentTaskTreeService } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import type { AgentTaskTree } from '../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
@@ -143,17 +144,6 @@ function surfaceIdFromRepoUrl(value: string): string {
 	const withoutQuery = value.trim().split(/[?#]/)[0] ?? value.trim();
 	const leaf = withoutQuery.replace(/\/+$/, '').split(/[/:]/).pop() ?? '';
 	return slugifySurfaceId(leaf.replace(/\.git$/i, ''));
-}
-
-function isValidLocalPreviewUrl(value: string): boolean {
-	try {
-		const url = new URL(value);
-		const hostname = url.hostname.toLowerCase();
-		return (url.protocol === 'http:' || url.protocol === 'https:')
-			&& (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]');
-	} catch {
-		return false;
-	}
 }
 
 function normalizeOptionalSurfaceInput(value: string | undefined): string | undefined {
@@ -289,12 +279,13 @@ class ModeShellContribution extends Disposable {
 		return ModeShellContribution.activeInstance;
 	}
 
-	private static readonly MODES: readonly Mode[] = ['Code'];
+	private static readonly MODES: readonly Mode[] = [];
 
 	private readonly container: HTMLElement;
 	private readonly topModeButtons = new Map<Mode, HTMLButtonElement>();
 	private readonly modeTopBar: HTMLElement;
 	private readonly uiProjectName: HTMLElement;
+	private readonly uiProjectNameLabel: HTMLElement;
 	private readonly modeSurface: HTMLElement;
 	private readonly uiContainer: HTMLElement;
 	private readonly processContainer: HTMLElement;
@@ -306,8 +297,7 @@ class ModeShellContribution extends Disposable {
 	private readonly uiFeatureChecklistColumn: HTMLElement;
 	private readonly uiChatColumn: HTMLElement;
 	private readonly uiChatTitleEl: HTMLElement;
-	private readonly uiChatTabSwitcher: HTMLElement;
-	private readonly uiChatTabButtons = new Map<string, HTMLButtonElement>();
+	private readonly uiChatNewButton: HTMLButtonElement;
 	private activeUiChatSurfaceId: string | undefined;
 	private readonly uiChatReopenBtn: HTMLButtonElement;
 	private readonly styleSheet = createStyleSheet();
@@ -332,8 +322,10 @@ class ModeShellContribution extends Disposable {
 	private readonly uiSurfaceLaunchPanel: HTMLElement;
 	private readonly uiSurfaceMainViewToggle: HTMLElement;
 	private readonly uiSurfaceTaskTreePanelRoot: HTMLElement;
+	private readonly uiSurfaceIxSubsystemsPanelRoot: HTMLElement;
 	private readonly uiSurfaceTaskTreeToggleButtons = new Map<SurfaceMainView, HTMLButtonElement>();
 	private surfaceTaskTreePanel: SurfaceTaskTreePanel | undefined;
+	private surfaceIxSubsystemsPanel: SurfaceIxSubsystemsPanel | undefined;
 	private surfaceMainView: SurfaceMainView = 'taskTree';
 	private selectedSurfaceTaskTree: AgentTaskTree | undefined;
 	private readonly uiSurfaceSetupDashboard: HTMLElement;
@@ -353,10 +345,14 @@ class ModeShellContribution extends Disposable {
 	private uiSurfaceScaffoldTextarea!: HTMLTextAreaElement;
 	private uiSurfaceScaffoldScaffoldButton!: HTMLButtonElement;
 	private uiSurfaceScaffoldCancelButton!: HTMLButtonElement;
+	private uiSurfaceSetupBusinessContext!: HTMLElement;
+	private uiSurfaceSetupBusinessContextToggle!: HTMLButtonElement;
+	private uiSurfaceSetupBusinessContextChevron!: HTMLElement;
 	private readonly uiSurfaceSetupSections = new Map<SurfaceSetupStep, HTMLElement>();
 	private surfaceSetupBrandLogoPath: string | undefined;
 	private surfaceSetupBrandLogoMarkPath: string | undefined;
 	private surfaceSetupCurrentStep: SurfaceSetupStep = 'goal';
+	private surfaceSetupBusinessContextOpen = false;
 	private surfaceSetupDraftDirty = false;
 	private surfaceSetupHydrating = false;
 	private readonly surfaceSetupAutosaveScheduler = this._register(new RunOnceScheduler(() => void this.autosaveSurfaceSetupBuilder(), 600));
@@ -365,7 +361,7 @@ class ModeShellContribution extends Disposable {
 	private readonly uiSurfaceEmptyTitle: HTMLElement;
 	private readonly uiSurfaceEmptySubtitle: HTMLElement;
 	private readonly uiSurfaceButtons = new Map<string, HTMLButtonElement>();
-	private readonly starterSurfaceCardMeta = new Map<string, { card: HTMLElement; status: HTMLElement; preview: HTMLElement }>();
+	private readonly starterSurfaceCardMeta = new Map<string, { card: HTMLElement; status: HTMLElement; preview: HTMLElement; description: HTMLElement }>();
 	private selectedSurfaceId: string | undefined;
 	private lastSurfaceRoutingLogKey: string | undefined;
 	private lastUiStartHints: DevServerSuggestedCommands | undefined;
@@ -460,7 +456,6 @@ class ModeShellContribution extends Disposable {
 		@INativeEnvironmentService private readonly nativeEnvironmentService: INativeEnvironmentService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
-		@ICommandService private readonly commandService: ICommandService,
 		@IIxIntegrationService private readonly ixIntegrationService: IIxIntegrationService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IDockerAvailabilityService private readonly dockerAvailabilityService: IDockerAvailabilityService,
@@ -473,8 +468,8 @@ class ModeShellContribution extends Disposable {
 		@IQuickInputService private readonly quickInputService: IQuickInputService,
 		@IWorkflowCatalogService private readonly workflowCatalogService: IWorkflowCatalogService,
 		@IWorkflowRunnerService private readonly workflowRunnerService: IWorkflowRunnerService,
-		@ICustomAiChatTraceService private readonly customAiChatTraceService: ICustomAiChatTraceService,
 		@IAgentTaskTreeService private readonly agentTaskTreeService: IAgentTaskTreeService,
+		@IPluginGitService private readonly pluginGitService: IPluginGitService,
 	) {
 		super();
 		ModeShellContribution.activeInstance = this;
@@ -490,6 +485,13 @@ class ModeShellContribution extends Disposable {
 		this.activeUiChatSurfaceId = this.storageService.get(STORAGE_ACTIVE_UI_CHAT_SURFACE, StorageScope.WORKSPACE);
 
 		this.chatSessionManager = new ModeShellChatSessionManager(this.chatService, this.chatWidgetService, this.storageService);
+		this._register(this.agentTaskTreeService.setExecutor(new CustomAiAgentTaskExecutor(
+			this.chatService,
+			this.chatSessionManager,
+			this.fileService,
+			this.workspaceContextService,
+		)));
+		this._register(this.agentTaskTreeService.setIxIntegrationService(this.ixIntegrationService));
 		this.processNotesStore = this._register(new ProcessNotesStore(this.fileService, this.workspaceContextService, this.configurationService));
 
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
@@ -646,6 +648,9 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-ui-project-name {
 				flex: 0 0 auto;
+				display: inline-flex;
+				align-items: center;
+				gap: 5px;
 				max-width: min(240px, 28vw);
 				overflow: hidden;
 				text-overflow: ellipsis;
@@ -654,7 +659,7 @@ class ModeShellContribution extends Disposable {
 				font-size: 12px;
 				font-weight: 600;
 				line-height: 1;
-				padding: 2px 6px;
+				padding: 4px 8px;
 				margin: 0 0 0 12px;
 				border: 0;
 				border-radius: 4px;
@@ -663,13 +668,33 @@ class ModeShellContribution extends Disposable {
 				-webkit-app-region: no-drag;
 			}
 
+			.monaco-workbench .custom-mode-ui-project-name-label {
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.monaco-workbench .custom-mode-ui-project-name .codicon {
+				flex: 0 0 auto;
+				font-size: 12px;
+				color: var(--vscode-descriptionForeground);
+			}
+
 			.monaco-workbench .custom-mode-ui-project-name:hover {
 				background-color: var(--vscode-toolbar-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-project-name:hover .codicon {
+				color: var(--vscode-foreground);
 			}
 
 			.monaco-workbench .custom-mode-ui-project-name.active {
 				color: var(--vscode-textLink-foreground);
 				background-color: var(--vscode-list-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-project-name:not(.active) .codicon {
+				display: none;
 			}
 
 			.monaco-workbench .custom-mode-ui-project-name.hidden {
@@ -954,45 +979,10 @@ class ModeShellContribution extends Disposable {
 				padding: 6px 8px 4px 10px;
 			}
 
-			.monaco-workbench .custom-mode-ui-chat-tab-switcher {
-				display: flex;
-				flex-direction: row;
+			.monaco-workbench .custom-mode-ui-chat-header-actions {
+				display: inline-flex;
 				align-items: center;
-				flex: 0 0 auto;
 				gap: 2px;
-				padding: 0 6px 4px;
-				overflow-x: auto;
-				overflow-y: hidden;
-			}
-
-			.monaco-workbench .custom-mode-ui-chat-tab-button {
-				flex: 0 0 auto;
-				height: 24px;
-				max-width: 140px;
-				padding: 0 8px;
-				border-radius: 4px;
-				border: 0;
-				border-bottom: 2px solid transparent;
-				background: transparent;
-				color: var(--vscode-tab-inactiveForeground);
-				cursor: pointer;
-				font-size: 11px;
-				font-weight: 600;
-				line-height: 1.2;
-				white-space: nowrap;
-				overflow: hidden;
-				text-overflow: ellipsis;
-			}
-
-			.monaco-workbench .custom-mode-ui-chat-tab-button:hover {
-				color: var(--vscode-tab-activeForeground);
-				background: var(--vscode-toolbar-hoverBackground);
-			}
-
-			.monaco-workbench .custom-mode-ui-chat-tab-button.active {
-				border-bottom-color: var(--vscode-tab-activeBorder, var(--vscode-focusBorder));
-				background: var(--vscode-tab-activeBackground, transparent);
-				color: var(--vscode-tab-activeForeground);
 			}
 
 			.monaco-workbench .custom-mode-ui-chat-header button {
@@ -1008,6 +998,10 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-ui-chat-header button:hover {
 				background-color: var(--vscode-toolbar-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-chat-header button.custom-mode-ui-chat-new .codicon {
+				font-size: 14px;
 			}
 
 			.monaco-workbench .custom-mode-ui-chat-reopen {
@@ -1798,9 +1792,9 @@ class ModeShellContribution extends Disposable {
 				cursor: default;
 			}
 
-			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-task-tree .custom-mode-ui-frame,
-			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-task-tree .custom-mode-ui-webview,
-			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-task-tree .custom-mode-ui-surface-empty {
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-overlay .custom-mode-ui-frame,
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-overlay .custom-mode-ui-webview,
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-overlay .custom-mode-ui-surface-empty {
 				display: none !important;
 			}
 
@@ -2004,6 +1998,51 @@ class ModeShellContribution extends Disposable {
 				display: flex;
 				flex-direction: column;
 				gap: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-business-context {
+				display: flex;
+				flex-direction: column;
+				gap: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-business-context-toggle {
+				display: flex;
+				align-items: center;
+				gap: 6px;
+				width: fit-content;
+				padding: 0;
+				border: 0;
+				background: transparent;
+				color: var(--vscode-descriptionForeground);
+				font-size: 12px;
+				font-weight: 600;
+				font-family: inherit;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-business-context-toggle:hover {
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-business-context-toggle:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: 2px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-business-context-chevron {
+				font-size: 14px;
+				line-height: 1;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-business-context-body {
+				display: flex;
+				flex-direction: column;
+				gap: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-business-context:not(.open) .custom-mode-ui-surface-business-context-body {
+				display: none;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-goal-field {
@@ -2306,17 +2345,41 @@ class ModeShellContribution extends Disposable {
 				text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-starter-card-summary,
 			.monaco-workbench .custom-mode-ui-surface-starter-card-meta,
-			.monaco-workbench .custom-mode-ui-surface-starter-card-highlights,
 			.monaco-workbench .custom-mode-ui-surface-starter-card-preview-row {
 				display: none;
 			}
 
+			.monaco-workbench .custom-mode-ui-surface-starter-card-description {
+				display: flex;
+				flex-direction: column;
+				justify-content: flex-end;
+				gap: 8px;
+				width: 100%;
+				height: 100%;
+				padding: 12px 14px 14px;
+				box-sizing: border-box;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter-card.has-preview .custom-mode-ui-surface-starter-card-description {
+				display: none;
+			}
+
 			.monaco-workbench .custom-mode-ui-surface-starter-card-summary {
+				display: block;
 				color: var(--vscode-descriptionForeground);
 				font-size: 12px;
 				line-height: 1.45;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter-card-highlights {
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+				margin: 0;
+				padding: 0;
+				list-style: none;
+				width: 100%;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-meta {
@@ -2327,7 +2390,7 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-status {
-				display: inline-flex;
+				display: none;
 				align-items: center;
 				flex: 0 0 auto;
 				padding: 2px 8px;
@@ -2374,6 +2437,11 @@ class ModeShellContribution extends Disposable {
 				font-size: 14px;
 			}
 
+			.monaco-workbench .custom-mode-ui-surface-starter-card-status.created,
+			.monaco-workbench .custom-mode-ui-surface-starter-card-status.running {
+				display: inline-flex;
+			}
+
 			.monaco-workbench .custom-mode-ui-surface-starter-card-status.created {
 				border-color: var(--vscode-textLink-foreground);
 				color: var(--vscode-textLink-foreground);
@@ -2404,16 +2472,6 @@ class ModeShellContribution extends Disposable {
 				align-items: center;
 				gap: 6px;
 				flex-wrap: wrap;
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-starter-card-highlights {
-				display: flex;
-				flex-direction: column;
-				gap: 4px;
-				margin: 0;
-				padding: 0;
-				list-style: none;
-				width: 100%;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-highlight {
@@ -2461,7 +2519,11 @@ class ModeShellContribution extends Disposable {
 				font-size: 22px;
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-starter-card-new .custom-mode-ui-surface-starter-card-summary,
+			.monaco-workbench .custom-mode-ui-surface-starter-card.has-preview .custom-mode-ui-surface-starter-card-preview {
+				position: absolute;
+				inset: 0;
+			}
+
 			.monaco-workbench .custom-mode-ui-surface-starter-card-new .custom-mode-ui-surface-starter-card-highlights {
 				display: none;
 			}
@@ -3861,18 +3923,16 @@ class ModeShellContribution extends Disposable {
 			observer.observe(this.container, { attributes: true, attributeFilter: ['class'] });
 			this._register(toDisposable(() => observer.disconnect()));
 		}
+		this.uiProjectNameLabel = $('span.custom-mode-ui-project-name-label');
 		this.uiProjectName = $('button.custom-mode-ui-project-name.hidden', {
 			type: 'button',
-			title: localize('customMode.workspaceNameOpenBuilder', 'Open guided builder — double-click for goal workspace overview'),
+			role: 'tab',
+			title: localize('customMode.consoleCodeToggle', 'Toggle Console / Code — double-click for goal workspace overview'),
 			'aria-pressed': 'false',
-		}) as HTMLButtonElement;
+		}, this.uiProjectNameLabel, $('span.codicon' + ThemeIcon.asCSSSelector(Codicon.arrowSwap))) as HTMLButtonElement;
 		this.modeTopBar.appendChild(this.uiProjectName);
 		this._register(addDisposableListener(this.uiProjectName, 'click', () => {
-			if (this.container.classList.contains('custom-mode-ui-landing-open')) {
-				this.closeGoalWorkspaceLanding();
-				return;
-			}
-			this.selectGoalSurface(ADD_SURFACE_ID);
+			this.toggleConsoleCodeMode();
 		}));
 		this._register(addDisposableListener(this.uiProjectName, 'dblclick', event => {
 			event.preventDefault();
@@ -3990,14 +4050,29 @@ class ModeShellContribution extends Disposable {
 			role: 'tab',
 			'aria-selected': 'false',
 		}, localize('customMode.surfaceMainViewPreview', 'Preview')) as HTMLButtonElement;
+		const ixSubsystemsToggleButton = $('button', {
+			type: 'button',
+			role: 'tab',
+			'aria-selected': 'false',
+		}, localize('customMode.surfaceMainViewIxSubsystems', 'Ix Subsystems')) as HTMLButtonElement;
 		this.uiSurfaceTaskTreeToggleButtons.set('taskTree', taskTreeToggleButton);
 		this.uiSurfaceTaskTreeToggleButtons.set('preview', previewToggleButton);
+		this.uiSurfaceTaskTreeToggleButtons.set('ixSubsystems', ixSubsystemsToggleButton);
 		this.uiSurfaceMainViewToggle.appendChild(taskTreeToggleButton);
 		this.uiSurfaceMainViewToggle.appendChild(previewToggleButton);
+		this.uiSurfaceMainViewToggle.appendChild(ixSubsystemsToggleButton);
 		this._register(addDisposableListener(taskTreeToggleButton, 'click', () => this.setSurfaceMainView('taskTree')));
 		this._register(addDisposableListener(previewToggleButton, 'click', () => this.setSurfaceMainView('preview')));
+		this._register(addDisposableListener(ixSubsystemsToggleButton, 'click', () => this.setSurfaceMainView('ixSubsystems')));
 		this.uiSurfaceTaskTreePanelRoot = $('div.custom-mode-ui-surface-task-tree-panel.hidden');
+		this.uiSurfaceTaskTreePanelRoot.hidden = true;
 		this.surfaceTaskTreePanel = this._register(new SurfaceTaskTreePanel(this.uiSurfaceTaskTreePanelRoot, this.agentTaskTreeService));
+		this.uiSurfaceIxSubsystemsPanelRoot = $('div.custom-mode-ui-surface-ix-subsystems-panel.hidden');
+		this.uiSurfaceIxSubsystemsPanelRoot.hidden = true;
+		this.surfaceIxSubsystemsPanel = this._register(new SurfaceIxSubsystemsPanel(
+			this.uiSurfaceIxSubsystemsPanelRoot,
+			this.ixIntegrationService,
+		));
 		this._register(this.agentTaskTreeService.onDidChangeTaskTree(tree => {
 			if (!tree?.surfaceId || tree.surfaceId !== this.selectedSurfaceId) {
 				return;
@@ -4021,6 +4096,7 @@ class ModeShellContribution extends Disposable {
 		this.uiBrowserShell.appendChild(this.uiSurfaceMainViewToggle);
 		this.uiBrowserShell.appendChild(this.uiSurfaceLaunchPanel);
 		this.uiBrowserShell.appendChild(this.uiSurfaceTaskTreePanelRoot);
+		this.uiBrowserShell.appendChild(this.uiSurfaceIxSubsystemsPanelRoot);
 		this.uiBrowserShell.appendChild(this.uiSurfaceSetupDashboard);
 		this.uiBrowserShell.appendChild(this.uiSurfaceEmptyState);
 		this.uiBrowserShell.appendChild(this.uiBrowser);
@@ -4034,17 +4110,23 @@ class ModeShellContribution extends Disposable {
 
 		this.uiChatContainer = $('div.custom-mode-embedded-chat.custom-mode-ui-side-chat');
 		this.uiChatTitleEl = $('span', undefined, localize('customMode.uiChatTitle', 'AI chat'));
-		this.uiChatTabSwitcher = $('div.custom-mode-ui-chat-tab-switcher', { role: 'tablist' });
 		const uiChatCloseLabel = localize('customMode.uiChatClose', 'Close');
 		const uiCloseBtn = $('button', { type: 'button', 'aria-label': uiChatCloseLabel, title: uiChatCloseLabel }, '\u2715') as HTMLButtonElement;
-		const uiChatHeaderTop = $('div.custom-mode-ui-chat-header-top', undefined,
-			this.uiChatTitleEl,
+		const uiChatNewLabel = localize('customMode.uiChatNew', 'New conversation');
+		this.uiChatNewButton = $('button.custom-mode-ui-chat-new', {
+			type: 'button',
+			'aria-label': uiChatNewLabel,
+			title: uiChatNewLabel,
+		}, $('span.codicon' + ThemeIcon.asCSSSelector(Codicon.add))) as HTMLButtonElement;
+		const uiChatHeaderActions = $('div.custom-mode-ui-chat-header-actions', undefined,
+			this.uiChatNewButton,
 			uiCloseBtn
 		);
-		const uiChatHeader = $('div.custom-mode-ui-chat-header', undefined,
-			uiChatHeaderTop,
-			this.uiChatTabSwitcher
+		const uiChatHeaderTop = $('div.custom-mode-ui-chat-header-top', undefined,
+			this.uiChatTitleEl,
+			uiChatHeaderActions
 		);
+		const uiChatHeader = $('div.custom-mode-ui-chat-header', undefined, uiChatHeaderTop);
 		this.uiChatColumn = $('div.custom-mode-ui-chat-column', undefined, uiChatHeader, this.uiChatContainer);
 		this.uiContainer.appendChild(this.uiChatColumn);
 
@@ -4055,6 +4137,7 @@ class ModeShellContribution extends Disposable {
 		}, localize('customMode.uiChatReopenShort', 'AI chat')) as HTMLButtonElement;
 		this.uiContainer.appendChild(this.uiChatReopenBtn);
 
+		this._register(addDisposableListener(this.uiChatNewButton, 'click', () => void this.startNewUiChatConversation()));
 		this._register(addDisposableListener(uiCloseBtn, 'click', () => this.setUiChatDismissed(true)));
 		this._register(addDisposableListener(this.uiChatReopenBtn, 'click', () => this.setUiChatDismissed(false)));
 
@@ -4271,6 +4354,7 @@ class ModeShellContribution extends Disposable {
 		// Create embedded chat widgets for UI/Process.
 		this.uiChatWidget = this.createEmbeddedChatWidget(this.uiChatContainer, 'customModeShellUI');
 		this.processChatWidget = this.createEmbeddedChatWidget(this.processChatContainer, 'customModeShellProcess', 'how does the scrape videos process work');
+		registerModeShellChatTarget(() => this.getPreferredChatWidgetForTerminalAttachment());
 
 		this.updateMode(this.modeService.getMode());
 		this.syncContextGatheringUi();
@@ -4669,6 +4753,7 @@ class ModeShellContribution extends Disposable {
 		this.container.classList.toggle('custom-mode-ui', mode === 'UI');
 		this.container.classList.toggle('custom-mode-process', mode === 'Process');
 		this.container.classList.toggle('custom-mode-code', mode === 'Code');
+		this.updateUiProjectName();
 
 		if (mode !== 'Process') {
 			this.ixPipelineDurationTicker.clear();
@@ -4739,24 +4824,64 @@ class ModeShellContribution extends Disposable {
 			this.layoutService.layout();
 			mainWindow.requestAnimationFrame(() => {
 				this.layoutService.layout();
-				if (this.modeService.getMode() === 'Code') {
-					this.relayoutTerminalInstances();
-				}
+				// Always remeasure terminals — UI/Process hide the grid at display:none, so
+				// switching back to Code (or revealing a Surface Dev PTY) must refresh cols
+				// before any more output is written.
+				this.relayoutTerminalInstances();
 			});
 		});
 	}
 
 	private relayoutTerminalInstances(): void {
+		const fallbackWidth = Math.max(640, Math.floor(mainWindow.innerWidth * 0.55));
+		const fallbackHeight = Math.max(180, Math.floor(mainWindow.innerHeight * 0.28));
 		for (const instance of this.terminalService.instances) {
 			const container = instance.domElement?.parentElement;
-			if (!(container instanceof HTMLElement)) {
-				continue;
-			}
-			const width = container.clientWidth;
-			const height = container.clientHeight;
-			if (width > 0 && height > 0) {
-				instance.layout({ width, height });
-			}
+			const measuredWidth = container instanceof HTMLElement ? container.clientWidth : 0;
+			const measuredHeight = container instanceof HTMLElement ? container.clientHeight : 0;
+			const width = measuredWidth > 0 ? measuredWidth : fallbackWidth;
+			const height = measuredHeight > 0 ? measuredHeight : fallbackHeight;
+			instance.layout(new Dimension(width, height));
+		}
+	}
+
+	/**
+	 * Surface Dev terminals are often created while Console UI has `.monaco-grid-view` at
+	 * `display:none`. Without activate + reveal + a real layout, the PTY stays ~16 cols and
+	 * `npm run dev` banners wrap forever. Mirror DevServerService's wait-for-width pattern.
+	 */
+	private async prepareTerminalForCommandOutput(instance: ITerminalInstance, minCols = 40, timeoutMs = 1500): Promise<void> {
+		this.terminalService.setActiveInstance(instance);
+		await this.terminalService.revealTerminal(instance, true);
+		this.relayoutTerminalInstances();
+		if (instance.cols >= minCols) {
+			return;
+		}
+		await new Promise<void>(resolve => {
+			let settled = false;
+			const finish = () => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				mainWindow.clearInterval(poll);
+				mainWindow.clearTimeout(timer);
+				resolve();
+			};
+			const poll = mainWindow.setInterval(() => {
+				this.relayoutTerminalInstances();
+				if (instance.cols >= minCols) {
+					finish();
+				}
+			}, 50);
+			const timer = mainWindow.setTimeout(finish, timeoutMs);
+		});
+		// Last-chance synthetic layout if the grid is still hidden.
+		if (instance.cols < minCols) {
+			instance.layout(new Dimension(
+				Math.max(640, Math.floor(mainWindow.innerWidth * 0.55)),
+				Math.max(180, Math.floor(mainWindow.innerHeight * 0.28)),
+			));
 		}
 	}
 
@@ -4925,7 +5050,7 @@ class ModeShellContribution extends Disposable {
 
 		if (showUi) {
 			this.syncActiveUiChatSurfaceId(this.consoleService.getSurfaces());
-			this.renderUiChatTabs();
+			this.updateUiChatNewButtonTitle();
 			await this.ensureEmbeddedChatModel('UI', this.getActiveUISurfaceChatKey());
 		} else if (showProcess) {
 			await this.ensureEmbeddedChatModel('Process');
@@ -4961,64 +5086,49 @@ class ModeShellContribution extends Disposable {
 		this.storageService.store(STORAGE_ACTIVE_UI_CHAT_SURFACE, fallback, StorageScope.WORKSPACE, StorageTarget.USER);
 	}
 
-	private renderUiChatTabs(): void {
-		const surfaces = this.consoleService.getSurfaces();
-		const activeId = this.getActiveUISurfaceChatKey();
-		const entries: Array<{ id: string; label: string }> = [
-			{ id: ADD_SURFACE_ID, label: this.getUiChatSurfaceLabel(ADD_SURFACE_ID) },
-			...surfaces.map(surface => ({ id: surface.id, label: surface.name })),
-		];
-
-		const nextButtons = new Map<string, HTMLButtonElement>();
-		const fragment = document.createDocumentFragment();
-		for (const entry of entries) {
-			let button = this.uiChatTabButtons.get(entry.id);
-			if (!button) {
-				const surfaceId = entry.id;
-				button = $('button.custom-mode-ui-chat-tab-button', {
-					type: 'button',
-					role: 'tab',
-				}) as HTMLButtonElement;
-				this._register(addDisposableListener(button, 'click', () => this.selectUiChatSurface(surfaceId)));
-			}
-			const isActive = entry.id === activeId;
-			button.textContent = entry.label;
-			button.title = localize('customMode.uiChatTabTitle', 'Open {0} chat', entry.label);
-			button.classList.toggle('active', isActive);
-			button.setAttribute('aria-selected', String(isActive));
-			nextButtons.set(entry.id, button);
-			fragment.appendChild(button);
-		}
-
-		this.uiChatTabButtons.clear();
-		for (const [id, button] of nextButtons) {
-			this.uiChatTabButtons.set(id, button);
-		}
-		this.uiChatTabSwitcher.replaceChildren(fragment);
-	}
-
-	private selectUiChatSurface(surfaceId: string): void {
-		void this.selectUiChatSurfaceAsync(surfaceId);
-	}
-
-	private async selectUiChatSurfaceAsync(surfaceId: string): Promise<void> {
+	private selectUiChatSurfaceAsync(surfaceId: string): Promise<void> {
 		this.activeUiChatSurfaceId = surfaceId;
 		this.storageService.store(STORAGE_ACTIVE_UI_CHAT_SURFACE, surfaceId, StorageScope.WORKSPACE, StorageTarget.USER);
-		this.renderUiChatTabs();
-		await this.ensureEmbeddedChatModel('UI', surfaceId);
+		this.updateUiChatNewButtonTitle();
+		return this.ensureEmbeddedChatModel('UI', surfaceId);
 	}
 
 	private setActiveUiChatSurfaceFromSurfaceTab(surfaceId: string): void {
 		this.activeUiChatSurfaceId = surfaceId;
 		this.storageService.store(STORAGE_ACTIVE_UI_CHAT_SURFACE, surfaceId, StorageScope.WORKSPACE, StorageTarget.USER);
-		this.renderUiChatTabs();
+		this.updateUiChatNewButtonTitle();
 		if (this.modeService.getMode() === 'UI') {
 			void this.ensureEmbeddedChatModel('UI', surfaceId);
 		}
 	}
 
+	private updateUiChatNewButtonTitle(): void {
+		const label = this.getUiChatSurfaceLabel(this.getActiveUISurfaceChatKey());
+		const title = localize('customMode.uiChatNewForView', 'New conversation for {0}', label);
+		this.uiChatNewButton.title = title;
+		this.uiChatNewButton.setAttribute('aria-label', title);
+	}
+
+	private async startNewUiChatConversation(): Promise<void> {
+		const surfaceId = this.getActiveUISurfaceChatKey();
+		this.chatSessionManager.createNewUISurfaceSessionResource(surfaceId);
+		await this.ensureEmbeddedChatModel('UI', surfaceId);
+		this.uiChatWidget.focusInput();
+	}
+
 	async refreshEmbeddedChatForCurrentMode(): Promise<void> {
 		await this.updateEmbeddedChat(this.modeService.getMode());
+	}
+
+	getPreferredChatWidgetForTerminalAttachment(): ChatWidget | undefined {
+		const mode = this.modeService.getMode();
+		if (mode === 'UI' && !this._uiChatDismissed) {
+			return this.uiChatWidget;
+		}
+		if (mode === 'Process' && !this._processChatDismissed) {
+			return this.processChatWidget;
+		}
+		return undefined;
 	}
 
 	private async ensureEmbeddedChatModel(mode: 'UI' | 'Process', surfaceId?: string): Promise<void> {
@@ -5042,7 +5152,7 @@ class ModeShellContribution extends Disposable {
 	private refreshUiChatTabsAndSession(): void {
 		const surfaces = this.consoleService.getSurfaces();
 		this.syncActiveUiChatSurfaceId(surfaces);
-		this.renderUiChatTabs();
+		this.updateUiChatNewButtonTitle();
 		if (this.modeService.getMode() === 'UI') {
 			void this.ensureEmbeddedChatModel('UI', this.getActiveUISurfaceChatKey());
 		}
@@ -5102,19 +5212,20 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceSetupLogoMarkDropzone = logoMarkDropzone.dropzone;
 		this.uiSurfaceSetupLogoMarkPreview = logoMarkDropzone.preview;
 
-		const goalSection = $('section.custom-mode-ui-surface-setup-section', { id: 'surface-setup-section-goal', 'data-section': 'goal' },
-			$('div.custom-mode-ui-surface-goal-form', undefined,
-				$('label.custom-mode-ui-surface-goal-field', undefined,
-					$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalNameLabel', 'Business name')),
-					this.uiSurfaceSetupGoalNameInput
-				),
-				$('label.custom-mode-ui-surface-goal-field', undefined,
-					$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalDescriptionLabel', 'Description')),
-					this.uiSurfaceSetupGoalDescriptionInput
-				)
-			)
-		);
-		const brandSection = $('section.custom-mode-ui-surface-setup-section', { id: 'surface-setup-section-brand', 'data-section': 'brand' },
+		this.uiSurfaceSetupBusinessContextChevron = $('span.custom-mode-ui-surface-business-context-chevron.codicon' + ThemeIcon.asCSSSelector(Codicon.chevronRight));
+		this.uiSurfaceSetupBusinessContextToggle = $('button.custom-mode-ui-surface-business-context-toggle', {
+			type: 'button',
+			'aria-expanded': 'false',
+			'aria-controls': 'surface-setup-business-context-body',
+		}, this.uiSurfaceSetupBusinessContextChevron, localize('customMode.surfaceSetupBusinessContextToggle', 'Business context')) as HTMLButtonElement;
+		this._register(addDisposableListener(this.uiSurfaceSetupBusinessContextToggle, 'click', () => {
+			this.setSurfaceSetupBusinessContextOpen(!this.surfaceSetupBusinessContextOpen);
+		}));
+		const businessContextBody = $('div.custom-mode-ui-surface-business-context-body', { id: 'surface-setup-business-context-body' },
+			$('label.custom-mode-ui-surface-goal-field', undefined,
+				$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalDescriptionLabel', 'Description')),
+				this.uiSurfaceSetupGoalDescriptionInput
+			),
 			$('div.custom-mode-ui-surface-brand-logos', undefined,
 				$('div.custom-mode-ui-surface-brand-logo-slot', undefined,
 					$('div.custom-mode-ui-surface-brand-logo-label', undefined, localize('customMode.surfaceSetupBrandLogo', 'Logo')),
@@ -5125,14 +5236,29 @@ class ModeShellContribution extends Disposable {
 					this.uiSurfaceSetupLogoMarkDropzone
 				)
 			),
-			brandColors
+			brandColors,
+		);
+		this.uiSurfaceSetupBusinessContext = $('div.custom-mode-ui-surface-business-context', undefined,
+			this.uiSurfaceSetupBusinessContextToggle,
+			businessContextBody,
+		);
+		this.applySurfaceSetupBusinessContextOpenState();
+
+		const goalSection = $('section.custom-mode-ui-surface-setup-section', { id: 'surface-setup-section-goal', 'data-section': 'goal' },
+			$('div.custom-mode-ui-surface-goal-form', undefined,
+				$('label.custom-mode-ui-surface-goal-field', undefined,
+					$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalNameLabel', 'Business name')),
+					this.uiSurfaceSetupGoalNameInput
+				),
+				this.uiSurfaceSetupBusinessContext,
+			)
 		);
 		const surfacesSection = $('section.custom-mode-ui-surface-setup-section', { id: 'surface-setup-section-surfaces', 'data-section': 'surfaces' },
 			starterButtons
 		);
 		for (const [step, section] of [
 			['goal', goalSection],
-			['brand', brandSection],
+			['brand', this.uiSurfaceSetupBusinessContext],
 			['surfaces', surfacesSection],
 		] as const) {
 			this.uiSurfaceSetupSections.set(step, section);
@@ -5140,7 +5266,6 @@ class ModeShellContribution extends Disposable {
 
 		this.uiSurfaceSetupMain = $('div.custom-mode-ui-surface-setup-main', undefined,
 			goalSection,
-			brandSection,
 			surfacesSection,
 		);
 		this.uiSurfaceScaffoldTitle = $('div.custom-mode-ui-surface-scaffold-title');
@@ -5463,22 +5588,6 @@ class ModeShellContribution extends Disposable {
 		return normalizeOptionalSurfaceInput(value);
 	}
 
-	private async promptImportedSurfaceLocalUrl(): Promise<string | undefined> {
-		const value = await this.quickInputService.input({
-			title: localize('customMode.surfaceImportLocalUrlTitle', 'Import Repo'),
-			prompt: localize('customMode.surfaceImportLocalUrlPrompt', 'Optional: enter the local preview URL.'),
-			placeHolder: localize('customMode.surfaceImportLocalUrlPlaceholder', 'e.g. http://localhost:3001'),
-			validateInput: async input => {
-				const trimmed = input.trim();
-				if (!trimmed || isValidLocalPreviewUrl(trimmed)) {
-					return undefined;
-				}
-				return localize('customMode.surfaceImportLocalUrlInvalid', 'Enter a localhost http(s) URL, or leave this blank.');
-			},
-		});
-		return normalizeOptionalSurfaceInput(value);
-	}
-
 	private async importSurfaceFromGitUrl(): Promise<void> {
 		const workspaceFolder = this.getWorkspaceFolderUri();
 		if (!workspaceFolder) {
@@ -5511,11 +5620,10 @@ class ModeShellContribution extends Disposable {
 			// Missing is expected.
 		}
 		const devCommand = await this.promptImportedSurfaceDevCommand(relativePath);
-		const localUrl = await this.promptImportedSurfaceLocalUrl();
 		try {
 			await this.fileService.createFolder(joinPath(workspaceFolder, 'apps'));
-			await this.commandService.executeCommand('_git.cloneRepository', normalizedRepoUrl, target.fsPath);
-			await this.registerImportedSurface(surfaceId, surfaceName, relativePath, devCommand, localUrl);
+			await this.pluginGitService.cloneRepository(normalizedRepoUrl, target);
+			await this.registerImportedSurface(surfaceId, surfaceName, relativePath, devCommand);
 		} catch (error: unknown) {
 			this.notificationService.error(localize('customMode.surfaceImportGitFailed', 'Could not import repo: {0}', String((error as Error)?.message ?? error)));
 		}
@@ -5555,8 +5663,7 @@ class ModeShellContribution extends Disposable {
 		}
 		const surfaceId = this.uniqueSurfaceId(surfaceName);
 		const devCommand = await this.promptImportedSurfaceDevCommand(relativePath);
-		const localUrl = await this.promptImportedSurfaceLocalUrl();
-		await this.registerImportedSurface(surfaceId, surfaceName, relativePath, devCommand, localUrl);
+		await this.registerImportedSurface(surfaceId, surfaceName, relativePath, devCommand);
 	}
 
 	private async registerImportedSurface(surfaceId: string, surfaceName: string, relativePath: string, devCommand?: string, localUrl?: string): Promise<void> {
@@ -5605,10 +5712,22 @@ class ModeShellContribution extends Disposable {
 		});
 	}
 
+	private createStarterSurfaceDescription(starter: StarterSurface): HTMLElement {
+		return $('div.custom-mode-ui-surface-starter-card-description', undefined,
+			$('div.custom-mode-ui-surface-starter-card-summary', undefined, starter.summary),
+			$('ul.custom-mode-ui-surface-starter-card-highlights', undefined,
+				...starter.highlights.map(highlight =>
+					$('li.custom-mode-ui-surface-starter-card-highlight', undefined, highlight)
+				),
+			),
+		);
+	}
+
 	private createStarterSurfaceCard(starter: StarterSurface): HTMLElement {
+		const description = this.createStarterSurfaceDescription(starter);
 		const preview = $('div.custom-mode-ui-surface-starter-card-preview');
-		const previewShell = $('div.custom-mode-ui-surface-starter-card-preview-shell', undefined, preview);
-		const status = $('span.custom-mode-ui-surface-starter-card-status', undefined, localize('customMode.surfaceStarterStatusNotCreated', 'Not created'));
+		const previewShell = $('div.custom-mode-ui-surface-starter-card-preview-shell', undefined, description, preview);
+		const status = $('span.custom-mode-ui-surface-starter-card-status');
 		const taskTreeButton = $('button.custom-mode-ui-surface-starter-card-task-tree', {
 			type: 'button',
 			title: localize('customMode.surfaceStarterOpenTaskTree', 'Open core build plan for {0}', starter.name),
@@ -5653,7 +5772,7 @@ class ModeShellContribution extends Disposable {
 				workflow: starter.workflow,
 			});
 		}));
-		this.starterSurfaceCardMeta.set(starter.id, { card, status, preview });
+		this.starterSurfaceCardMeta.set(starter.id, { card, status, preview, description });
 		return card;
 	}
 
@@ -5687,8 +5806,9 @@ class ModeShellContribution extends Disposable {
 			target.card.classList.toggle('generated', row.created);
 			target.card.classList.toggle('has-preview', Boolean(row.runningUrl));
 			target.status.classList.remove('created', 'running');
+			target.status.textContent = '';
+			target.description.style.removeProperty('display');
 			if (!row.created) {
-				target.status.textContent = localize('customMode.surfaceStarterStatusNotCreated', 'Not created');
 				target.preview.replaceChildren();
 				continue;
 			}
@@ -5756,13 +5876,6 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceScaffoldTextarea.value = '';
 	}
 
-	private showSurfaceScaffoldView(surfaceName: string, promptText: string): void {
-		this.uiSurfaceScaffoldTitle.textContent = localize('customMode.surfaceScaffoldTitle', 'Scaffold {0}', surfaceName);
-		this.uiSurfaceScaffoldTextarea.value = promptText;
-		this.uiSurfaceSetupInner.classList.add('custom-mode-ui-surface-scaffold-open');
-		this.focusSurfaceSetupSection('surfaces', { scroll: false });
-	}
-
 	private cancelSurfaceScaffoldDraft(): void {
 		this.endSurfaceSetupHandoff();
 	}
@@ -5780,38 +5893,6 @@ class ModeShellContribution extends Disposable {
 		} catch (e: unknown) {
 			this.pushUiRuntimeLog(`[surface-setup:chat] failed to submit scaffold: ${String((e as Error)?.message ?? e)}`);
 		}
-	}
-
-	private composeSurfaceHandoffInputText(options: {
-		readonly surfaceName: string;
-		readonly surfaceId: string;
-		readonly workflow: string;
-		readonly phase: SurfaceHandoffPhase;
-	}): string {
-		const businessName = this.uiSurfaceSetupGoalNameInput.value.trim();
-		const businessDescription = this.uiSurfaceSetupGoalDescriptionInput.value.trim();
-		const headline = options.phase === 'scaffold'
-			? localize(
-				'customMode.surfaceSetupScaffoldPrompt',
-				'Create a {0} surface for this goal workspace focused on {1}.',
-				options.surfaceName,
-				options.workflow,
-			)
-			: localize(
-				'customMode.surfaceSetupBlueprintPrompt',
-				'Customize and finalize the surface blueprint for {0} focused on {1}. Edit `.agent/surfaces/{2}.blueprint.json` and workspace.goal.json surface metadata only — do not scaffold app files yet.',
-				options.surfaceName,
-				options.workflow,
-				options.surfaceId,
-			);
-		const contextLines = [
-			businessName ? localize('customMode.surfaceSetupPromptBusiness', 'Business: {0}', businessName) : undefined,
-			businessDescription ? localize('customMode.surfaceSetupPromptDescription', 'Description: {0}', businessDescription) : undefined,
-			hasBrandConfigured(this.getSurfaceSetupBuilderInput().brand)
-				? localize('customMode.surfaceSetupPromptBrand', 'Use the brand colors and logos from workspace.goal.json.')
-				: undefined,
-		].filter((line): line is string => Boolean(line));
-		return [headline, ...contextLines, getSurfaceHandoffGuidance(options.phase)].join('\n\n');
 	}
 
 	private async isSurfaceScaffolded(surfaceId: string): Promise<boolean> {
@@ -5849,19 +5930,28 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
-	private async clearHandoffChatAttachments(): Promise<void> {
-		try {
-			if (!this.embeddedChatRefs.UI.value) {
-				return;
-			}
-			this.uiChatWidget.input.attachmentModel.clear(false);
-		} catch {
-			// Chat session may not be bound yet.
+	private setSurfaceSetupBusinessContextOpen(open: boolean): void {
+		if (this.surfaceSetupBusinessContextOpen === open) {
+			return;
 		}
+		this.surfaceSetupBusinessContextOpen = open;
+		this.applySurfaceSetupBusinessContextOpenState();
+	}
+
+	private applySurfaceSetupBusinessContextOpenState(): void {
+		this.uiSurfaceSetupBusinessContext.classList.toggle('open', this.surfaceSetupBusinessContextOpen);
+		this.uiSurfaceSetupBusinessContextToggle.setAttribute('aria-expanded', String(this.surfaceSetupBusinessContextOpen));
+		this.uiSurfaceSetupBusinessContextChevron.className = [
+			'custom-mode-ui-surface-business-context-chevron',
+			ThemeIcon.asClassName(this.surfaceSetupBusinessContextOpen ? Codicon.chevronDown : Codicon.chevronRight),
+		].join(' ');
 	}
 
 	private focusSurfaceSetupSection(step: SurfaceSetupStep, options?: { scroll?: boolean }): void {
 		this.surfaceSetupCurrentStep = step;
+		if (step === 'brand') {
+			this.setSurfaceSetupBusinessContextOpen(true);
+		}
 		if (options?.scroll === false) {
 			return;
 		}
@@ -5956,94 +6046,78 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 		const { templateId, surfaceId, surfaceName, workflow } = options;
-		const phase: SurfaceHandoffPhase = 'scaffold';
-		const inputText = this.composeSurfaceHandoffInputText({ surfaceName, surfaceId, workflow, phase });
-		await this.ensureSurfaceTaskTree(surfaceId, inputText, { surfaceId, surfaceName, templateId });
 		try {
 			const workspaceFolder = this.getWorkspaceFolderUri();
 			if (!workspaceFolder) {
 				return;
 			}
-			const orchestrator = new SurfaceCreationLangGraphOrchestrator({
-				fileService: this.fileService,
-				workspaceFolder,
-				maxRepairRetries: MAX_SURFACE_BLUEPRINT_REPAIR_ATTEMPTS,
-				traceEvent: (type, payload) => this.customAiChatTraceService.traceEditEvent(type, payload),
-			});
-			const creationResult = await orchestrator.createSurface(surfaceId, workflow);
-			const verification = creationResult.verification;
-			let ixGapCount: number | undefined;
-			try {
-				const ixValidation = await this.agentTaskTreeService.validateSurfaceTaskTreeShape(surfaceId, {
-					ixIntegrationService: this.ixIntegrationService,
+			let blueprint = await readBlueprint(this.fileService, blueprintResource(workspaceFolder, surfaceId));
+			if (!blueprint) {
+				const created = await createBlueprintFromTemplateId(this.fileService, workspaceFolder, templateId, {
+					surfaceId,
+					surfaceName,
+					goal: this.consoleService.getGoal(),
 				});
-				ixGapCount = ixValidation.gaps.length;
-			} catch (error) {
-				this.pushUiRuntimeLog(`[surface-setup:ix-validation] skipped for ${surfaceId}: ${String((error as Error)?.message ?? error)}`);
+				if (!created) {
+					throw new Error(`No surface blueprint template found for ${templateId}.`);
+				}
+				blueprint = created.blueprint;
 			}
+			await registerSurfaceFromBlueprint(this.fileService, workspaceFolder, blueprint);
 			await this.consoleService.refresh();
-			const refreshedTaskTree = await this.agentTaskTreeService.loadLatestTaskTreeForSurface(surfaceId);
-			if (refreshedTaskTree) {
-				this.selectedSurfaceTaskTree = refreshedTaskTree;
-				this.surfaceTaskTreePanel?.render(refreshedTaskTree);
-			}
+			this.syncGoalSurfaceSwitcher();
+			const objective = `Create ${surfaceName} for ${workflow}.`;
+			const tree = await this.ensureSurfaceTaskTree(surfaceId, objective, { surfaceId, surfaceName, templateId });
+			this.selectedSurfaceTaskTree = tree;
+			this.surfaceTaskTreePanel?.render(tree);
 			void this.refreshStarterSurfaceCardStatuses();
 			void this.surfaceFeatureChecklistService.refresh();
-			this.setSurfaceSetupBuilderHandoff(true, {
-				kind: 'surface',
-				templateId: creationResult.templateId || templateId,
-				surfaceId,
-				surfaceName,
-				title: surfaceName,
-				phase,
-				prompt: inputText,
-				blueprintResource: creationResult.blueprintResource.fsPath,
-				repairAttempts: 0,
-			});
-			this.pushUiRuntimeLog(`[surface-setup:scaffold] created ${creationResult.scaffoldResult.createdFiles.length} files for ${surfaceId}; verification=${verification.passed ? 'passed' : 'failed'}; repairs=${creationResult.repairAttempts}; ixGaps=${ixGapCount ?? 'skipped'}`);
-			if (verification.passed) {
-				this.notificationService.info(localize('customMode.surfaceScaffoldVerified', 'Scaffolded and verified {0}.', surfaceName));
-			} else {
-				this.notificationService.warn(localize('customMode.surfaceScaffoldNeedsRepair', 'Scaffolded {0}, but product verification found {1} gaps.', surfaceName, verification.gaps.length));
-			}
-			this.showSurfaceScaffoldView(surfaceName, inputText);
+			this.endSurfaceSetupHandoff();
 			this.ensureWorkspaceView();
 			await this.selectUiChatSurfaceAsync(surfaceId);
-			await this.clearHandoffChatAttachments();
-			if (this.embeddedChatRefs.UI.value) {
-				const manifest = joinPath(workspaceFolder, 'workspace.goal.json');
-				for (const [uri, name, id] of [
-					[manifest, 'workspace.goal.json', 'surface-handoff:workspace.goal.json'],
-					[creationResult.blueprintResource, `${surfaceId}.blueprint.json`, `surface-handoff:${surfaceId}.blueprint.json`],
-				] as const) {
-					try {
-						this.uiChatWidget.input.attachmentModel.addContext({
-							kind: 'file',
-							value: { uri },
-							id,
-							name,
-						} satisfies IChatRequestFileEntry);
-					} catch {
-						// ignore attachment failures
-					}
-				}
-			}
-			this.uiChatWidget.setInput(inputText);
-			this.uiChatWidget.focusInput();
 			this.selectGoalSurface(surfaceId);
 			this.setSurfaceMainView('taskTree');
+			this.notificationService.info(localize('customMode.surfaceTaskTreeReady', '{0} task tree is ready. Continue the next task or run all.', surfaceName));
 		} catch (e: unknown) {
-			this.pushUiRuntimeLog(`[surface-setup:chat] failed to draft prompt: ${String((e as Error)?.message ?? e)}`);
+			this.pushUiRuntimeLog(`[surface-setup:task-tree] failed to create task tree: ${String((e as Error)?.message ?? e)}`);
+			this.notificationService.error(localize('customMode.surfaceTaskTreeCreateFailed', 'Could not create {0} task tree: {1}', surfaceName, String((e as Error)?.message ?? e)));
 		}
+	}
+
+	private isCodeTabSelected(): boolean {
+		return this.modeService.getMode() === 'Code';
+	}
+
+	private isSurfaceContextSelected(): boolean {
+		return !!this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID;
 	}
 
 	private updateUiProjectName(): void {
 		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
-		const label = localize('customMode.consoleTab', 'Console');
-		this.uiProjectName.textContent = hasProject ? label : '';
-		this.uiProjectName.setAttribute('aria-label', label);
+		const inCode = this.isCodeTabSelected();
+		const label = inCode
+			? localize('customMode.codeTab', 'Code')
+			: localize('customMode.consoleTab', 'Console');
+		this.uiProjectNameLabel.textContent = hasProject ? label : '';
+		this.uiProjectName.setAttribute('aria-label', localize('customMode.consoleCodeToggleAria', 'Toggle Console and Code. Currently {0}.', label));
 		this.uiProjectName.classList.toggle('hidden', !hasProject);
 		this.syncContextGatheringUi();
+	}
+
+	private toggleConsoleCodeMode(): void {
+		if (this.container.classList.contains('custom-mode-ui-landing-open')) {
+			this.closeGoalWorkspaceLanding();
+			return;
+		}
+
+		const onSurface = this.isSurfaceContextSelected();
+
+		if (this.modeService.getMode() === 'Code' || onSurface) {
+			this.selectGoalSurface(ADD_SURFACE_ID);
+			return;
+		}
+
+		this.modeService.setMode('Code');
 	}
 
 	private ensureWorkspaceView(): void {
@@ -6058,17 +6132,21 @@ class ModeShellContribution extends Disposable {
 
 	private syncContextGatheringUi(): void {
 		this.container.classList.toggle('custom-mode-context-gathering-open', this.contextGatheringOpen);
+		const mode = this.modeService.getMode();
 		const builderOpen = this.selectedSurfaceId === ADD_SURFACE_ID;
-		this.uiProjectName.classList.toggle('active', builderOpen);
-		this.uiProjectName.setAttribute('aria-pressed', String(builderOpen));
+		const toggleActive = this.isCodeTabSelected() || (mode === 'UI' && builderOpen);
+		this.uiProjectName.classList.toggle('active', toggleActive);
+		this.uiProjectName.setAttribute('aria-pressed', String(toggleActive));
+		this.uiProjectName.setAttribute('aria-selected', String(toggleActive));
 		const landingOpen = this.container.classList.contains('custom-mode-ui-landing-open');
 		if (landingOpen) {
 			this.uiProjectName.title = localize('customMode.workspaceNameLandingOpen', 'Goal workspace overview — click to close, or press Escape');
 			return;
 		}
-		this.uiProjectName.title = builderOpen
-			? localize('customMode.workspaceNameBuilderOpen', 'Guided builder is open — click a surface tab to preview. Double-click for goal workspace overview.')
-			: localize('customMode.workspaceNameOpenBuilder', 'Open guided builder — double-click for goal workspace overview');
+		const inCode = this.isCodeTabSelected();
+		this.uiProjectName.title = inCode
+			? localize('customMode.consoleCodeToggleToConsole', 'Switch to Console — double-click for goal workspace overview')
+			: localize('customMode.consoleCodeToggleToCode', 'Switch to Code — double-click for goal workspace overview');
 	}
 
 	private openGoalWorkspaceLanding(): void {
@@ -6417,7 +6495,7 @@ class ModeShellContribution extends Disposable {
 
 	private getStoredSurfaceMainView(surfaceId: string): SurfaceMainView | undefined {
 		const stored = this.storageService.get(this.surfaceMainViewStorageKey(surfaceId), StorageScope.WORKSPACE);
-		return stored === 'taskTree' || stored === 'preview' ? stored : undefined;
+		return stored === 'taskTree' || stored === 'preview' || stored === 'ixSubsystems' ? stored : undefined;
 	}
 
 	private persistSurfaceMainView(surfaceId: string, view: SurfaceMainView): void {
@@ -6516,10 +6594,19 @@ class ModeShellContribution extends Disposable {
 		}
 
 		const showTaskTree = showToggle && this.surfaceMainView === 'taskTree';
-		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-main-view-task-tree', showTaskTree);
+		const showIxSubsystems = showToggle && this.surfaceMainView === 'ixSubsystems';
+		const showOverlay = showTaskTree || showIxSubsystems;
+		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-main-view-overlay', showOverlay);
 		this.uiSurfaceTaskTreePanelRoot.classList.toggle('hidden', !showTaskTree);
+		this.uiSurfaceIxSubsystemsPanelRoot.classList.toggle('hidden', !showIxSubsystems);
 		if (showTaskTree) {
 			this.surfaceTaskTreePanel?.render(this.selectedSurfaceTaskTree);
+		}
+		if (showIxSubsystems) {
+			void this.surfaceIxSubsystemsPanel?.load({
+				surface: this.getSelectedSurface(),
+				workspaceFolder: this.getWorkspaceFolderUri(),
+			});
 		}
 		this.renderSelectedSurfaceLaunchPanel();
 	}
@@ -6542,14 +6629,16 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceLaunchPanel.replaceChildren();
 
 		const surface = this.getSelectedSurface();
-		if (!surface || this.contextGatheringOpen || this.surfaceMainView === 'taskTree') {
+		if (!surface || this.contextGatheringOpen || this.surfaceMainView !== 'preview') {
 			this.uiSurfaceLaunchPanel.classList.add('hidden');
+			this.uiSurfaceLaunchPanel.hidden = true;
 			return;
 		}
 
 		const command = surface.devCommand?.trim();
 		if (!command) {
 			this.uiSurfaceLaunchPanel.classList.remove('hidden');
+			this.uiSurfaceLaunchPanel.hidden = false;
 			this.uiSurfaceLaunchPanel.appendChild($('div.custom-mode-ui-surface-launch-meta', undefined,
 				localize('customMode.surfaceLaunchMissingCommand', 'No start command for {0}. Add devCommand in workspace.goal.json.', surface.name)));
 			return;
@@ -6558,6 +6647,7 @@ class ModeShellContribution extends Disposable {
 		const workspaceFolder = this.getWorkspaceFolderUri();
 		const displayedCommand = this.alignSurfaceCommandToPreferredPort(command, surface.localUrl);
 		this.uiSurfaceLaunchPanel.classList.remove('hidden');
+		this.uiSurfaceLaunchPanel.hidden = false;
 		this.uiSurfaceLaunchPanel.appendChild($('div.custom-mode-ui-surface-launch-meta', undefined,
 			surface.localUrl
 				? localize('customMode.surfaceLaunchMetaWithUrl', '{0} -> {1}', surface.name, surface.localUrl)
@@ -7234,6 +7324,7 @@ class ModeShellContribution extends Disposable {
 			if (!existing) {
 				await terminal.rename(title);
 			}
+			await this.prepareTerminalForCommandOutput(terminal);
 			terminal.sendText(alignedCommand, true);
 			this.startedSurfaceServers.add(surfaceId);
 			void this.refreshStarterSurfaceCardStatuses();

@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { Emitter } from '../../../../../base/common/event.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import type { AgentTaskNode, AgentTaskTree } from '../../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
+import type { AgentTaskNode, AgentTaskRunResult, AgentTaskTree } from '../../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
 import { SurfaceTaskTreePanel } from '../surfaceTaskTreePanel.js';
 
 suite('surfaceTaskTreePanel', () => {
@@ -33,12 +33,15 @@ suite('surfaceTaskTreePanel', () => {
 		try {
 			panel.render(createTree());
 			const buttons = root.querySelectorAll('.custom-mode-surface-task-tree-control') as NodeListOf<HTMLButtonElement>;
-			assert.strictEqual(buttons.length, 5);
+			assert.strictEqual(buttons.length, 6);
 			// Continue Next is the primary control and renders first.
 			assert.ok(buttons[0].classList.contains('custom-mode-surface-task-tree-control-primary'));
 			buttons[0].click();
-			await Promise.resolve();
+			await new Promise(resolve => setTimeout(resolve, 0));
 			assert.strictEqual(service.continueCount, 1);
+			buttons[1].click();
+			await new Promise(resolve => setTimeout(resolve, 0));
+			assert.strictEqual(service.runAllCount, 1);
 		} finally {
 			panel.dispose();
 		}
@@ -90,6 +93,7 @@ class TestAgentTaskTreeService {
 	private readonly emitter = new Emitter<AgentTaskTree | undefined>();
 	readonly onDidChangeTaskTree = this.emitter.event;
 	continueCount = 0;
+	runAllCount = 0;
 
 	findNextPendingLeaf(tree: AgentTaskTree): AgentTaskNode | undefined {
 		return tree.roots.flatMap(root => root.children ?? []).find(node => node.status === 'pending');
@@ -127,9 +131,22 @@ class TestAgentTaskTreeService {
 		};
 	}
 
-	async continueNextTask(): Promise<never> {
+	setExecutor(): { dispose(): void } {
+		return { dispose() { } };
+	}
+
+	setIxIntegrationService(): { dispose(): void } {
+		return { dispose() { } };
+	}
+
+	async continueNextTask(): Promise<AgentTaskRunResult> {
 		this.continueCount++;
-		throw new Error('not implemented');
+		return { tree: createTree(), status: 'completed' };
+	}
+
+	async runAllTasks(): Promise<AgentTaskRunResult> {
+		this.runAllCount++;
+		return { tree: createTree(), status: 'complete' };
 	}
 
 	async resumeTaskTree(): Promise<void> {

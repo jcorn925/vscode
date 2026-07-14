@@ -93,6 +93,10 @@ export class ModeShellChatSessionManager {
 			return legacy;
 		}
 
+		return this.createNewUISurfaceSessionResource(surfaceId);
+	}
+
+	createNewUISurfaceSessionResource(surfaceId: string): URI {
 		return this.createNewSession(
 			`ModeShellChatSessionManager#createNewUISurfaceSession(${surfaceId})`,
 			resource => this.storeUISurfaceSessionResource(surfaceId, resource),

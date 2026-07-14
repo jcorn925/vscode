@@ -61,6 +61,32 @@ registerAction2(class extends Action2 {
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
+			id: 'custom.agentTaskTree.runAll',
+			title: localize2('custom.agentTaskTree.runAll', 'Agent: Run All Remaining Tasks'),
+			category: CATEGORY,
+			f1: true,
+		});
+	}
+
+	override async run(accessor: ServicesAccessor): Promise<void> {
+		const service = accessor.get(IAgentTaskTreeService);
+		const notifications = accessor.get(INotificationService);
+		const tree = await service.loadLatestResumableTaskTree();
+		if (!tree) {
+			notifications.notify({ severity: Severity.Info, message: localize('custom.agentTaskTree.runAll.none', 'No active or paused task tree was found.') });
+			return;
+		}
+		const result = await service.runAllTasks(tree.id);
+		notifications.notify({
+			severity: result.status === 'complete' ? Severity.Info : Severity.Warning,
+			message: localize('custom.agentTaskTree.runAll.result', 'Task-tree run {0}: {1}.', result.tree.id, result.status),
+		});
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
 			id: 'custom.agentTaskTree.resume',
 			title: localize2('custom.agentTaskTree.resume', 'Agent: Resume Task Tree'),
 			category: CATEGORY,

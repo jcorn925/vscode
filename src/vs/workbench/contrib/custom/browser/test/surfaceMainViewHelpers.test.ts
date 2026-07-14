@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { resolveDefaultSurfaceMainView, shouldShowSurfaceMainViewToggle } from '../../../../../../custom/agentTaskTree/surfaceMainViewHelpers.js';
+import { resolveDefaultSurfaceMainView, shouldShowSurfaceMainViewToggle, type SurfaceMainView } from '../../../../../../custom/agentTaskTree/surfaceMainViewHelpers.js';
 import type { AgentTaskTree } from '../../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
 
 suite('surfaceMainViewHelpers', () => {
@@ -34,6 +34,12 @@ suite('surfaceMainViewHelpers', () => {
 		const completeTree = createTree('complete');
 		assert.strictEqual(resolveDefaultSurfaceMainView(completeTree, true), 'preview');
 		assert.strictEqual(resolveDefaultSurfaceMainView(completeTree, false), 'taskTree');
+	});
+
+	test('SurfaceMainView accepts the Ix subsystems tab without making it a default', () => {
+		const ixView: SurfaceMainView = 'ixSubsystems';
+		assert.strictEqual(ixView, 'ixSubsystems');
+		assert.notStrictEqual(resolveDefaultSurfaceMainView(createTree('active'), true), ixView);
 	});
 });
 

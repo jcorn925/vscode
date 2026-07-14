@@ -265,6 +265,19 @@ async function upsertManifestSurface(
 	return surface;
 }
 
+export async function registerSurfaceFromBlueprint(
+	fileService: IFileService,
+	workspaceFolder: URI,
+	blueprint: SurfaceBlueprint,
+): Promise<{ readonly localUrl: string; readonly devCommand: string; readonly path: string }> {
+	const surface = await upsertManifestSurface(fileService, workspaceFolder, blueprint, `apps/${blueprint.surfaceId}`);
+	return {
+		localUrl: surface.localUrl,
+		devCommand: surface.devCommand,
+		path: surface.path,
+	};
+}
+
 function normalizeWorkspaceManifest(raw: Record<string, unknown>): Record<string, unknown> {
 	const normalized: Record<string, unknown> = { ...raw };
 	const goalRaw = isRecord(raw.goal) ? raw.goal : raw;
@@ -1021,7 +1034,7 @@ function withPreferredPort(command: string, localUrl: string): string {
 	if (!port || !Number.isFinite(port)) {
 		return command;
 	}
-	if (/\bPORT=\d{2,5}\b/.test(command) || /\b--port(?:=|\s+)\d{2,5}\b/.test(command) || /\b-p\s+\d{2,5}\b/.test(command)) {
+	if (/\bPORT=\d{2,5}\b/.test(command) || /(?:^|\s)--port(?:=|\s+)\d{2,5}\b/.test(command) || /(?:^|\s)-p\s+\d{2,5}\b/.test(command)) {
 		return command;
 	}
 	if (/\bnext\s+dev\b/i.test(command)) {

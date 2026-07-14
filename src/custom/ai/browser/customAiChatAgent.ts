@@ -453,6 +453,10 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 			let totalResponseChars = 0;
 			let totalToolUses = 0;
 			let retriedToollessSurfaceHandoff = false;
+			const changedFiles: string[] = [];
+			const commandsRun: string[] = [];
+			const verificationEvidence: string[] = [];
+			const responseText: string[] = [];
 
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 				if (token.isCancellationRequested) {
@@ -499,6 +503,7 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 								totalTextChunks++;
 								roundResponseChars += t.value.length;
 								totalResponseChars += t.value.length;
+								responseText.push(t.value);
 								trace.event('chat.response.chunk', {
 									round,
 									chunkChars: t.value.length,
@@ -619,6 +624,21 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 							error: Boolean(toolResult.toolResultError),
 							resultTextChars: toolResultTextCharLength(toolResult),
 						});
+						if (!toolResult.toolResultError) {
+							commandsRun.push(tu.name);
+							const parameters = tu.parameters && typeof tu.parameters === 'object'
+								? tu.parameters as Record<string, unknown>
+								: undefined;
+							if (tu.name.toLowerCase().includes('editfile') && typeof parameters?.uri === 'string') {
+								changedFiles.push(parameters.uri);
+							}
+							if (tu.name.toLowerCase().includes('verify')) {
+								const evidence = toolResultText(toolResult);
+								if (evidence) {
+									verificationEvidence.push(evidence);
+								}
+							}
+						}
 					} catch (err) {
 						this._logService.error('[CustomAi] Tool invocation failed', err);
 						trace.event('chat.tool_call.failed', {
@@ -647,7 +667,16 @@ export class CustomAiChatAgent extends Disposable implements IChatAgentImplement
 				totalToolUses,
 				finalMessageSummary: summarizeTraceMessages(messages),
 			});
-			return {};
+			return {
+				metadata: {
+					customAiTaskExecution: {
+						changedFiles: uniqueStrings(changedFiles),
+						commandsRun: uniqueStrings(commandsRun),
+						verification: verificationEvidence.join('\n\n') || responseText.join('').trim().slice(-4000),
+						notes: responseText.join('').trim().slice(-2000),
+					},
+				},
+			};
 		} catch (err) {
 			trace?.fail(err, { phase: 'catch' });
 			if (isCustomAiOpenAiCompatibleModelId(modelId) && err instanceof CustomAiInvalidApiKeyError && !retryAfterKeyUpdate) {
@@ -1255,6 +1284,18 @@ function toolResultTextCharLength(result: IToolResult): number {
 		}
 	}
 	return total;
+}
+
+function toolResultText(result: IToolResult): string {
+	return result.content
+		.filter((part): part is IToolResultTextPart => part.kind === 'text')
+		.map(part => part.value)
+		.join('\n')
+		.trim();
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+	return [...new Set(values.filter(Boolean))];
 }
 
 function toolResultToChatParts(result: IToolResult): IChatResponseTextPart[] {

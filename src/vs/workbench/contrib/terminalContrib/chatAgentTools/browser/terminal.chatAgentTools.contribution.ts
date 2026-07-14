@@ -5,19 +5,27 @@
 
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../../base/common/lifecycle.js';
-import { localize } from '../../../../../nls.js';
-import { MenuId } from '../../../../../platform/actions/common/actions.js';
+import { localize, localize2 } from '../../../../../nls.js';
+import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { AgentSandboxSettingId } from '../../../../../platform/sandbox/common/settings.js';
 import { TerminalSettingId } from '../../../../../platform/terminal/common/terminal.js';
+import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { registerWorkbenchContribution2, WorkbenchPhase, type IWorkbenchContribution } from '../../../../common/contributions.js';
-import { IChatWidgetService } from '../../../chat/browser/chat.js';
+import { IChatContextPickService, IChatContextValueItem } from '../../../chat/browser/attachments/chatContextPickService.js';
 import { ChatContextKeys } from '../../../chat/common/actions/chatContextKeys.js';
+import { ChatAgentLocation } from '../../../chat/common/constants.js';
+import { IChatWidget } from '../../../chat/browser/chat.js';
+import { IChatRequestVariableEntry } from '../../../chat/common/attachments/chatVariableEntries.js';
+import { IChatExecuteActionContext } from '../../../chat/browser/actions/chatExecuteActions.js';
+import { CHAT_CATEGORY } from '../../../chat/browser/actions/chatActions.js';
+import { ITerminalService } from '../../../terminal/browser/terminal.js';
+import { addTerminalSelectionToChat, createTerminalSelectionAttachment } from './addTerminalSelectionToChat.js';
 import { ILanguageModelToolsService } from '../../../chat/common/tools/languageModelToolsService.js';
 import { IToolResultCompressor } from '../../../chat/common/tools/toolResultCompressor.js';
-import { registerActiveInstanceAction, sharedWhenClause } from '../../../terminal/browser/terminalActions.js';
+import { sharedWhenClause } from '../../../terminal/browser/terminalActions.js';
 import { TerminalContextMenuGroup } from '../../../terminal/browser/terminalMenus.js';
 import { TerminalContextKeys } from '../../../terminal/common/terminalContextKey.js';
 import { TerminalChatAgentToolsCommandId } from '../common/terminal.chatAgentTools.js';
@@ -198,43 +206,82 @@ registerWorkbenchContribution2(AgentHostSandboxForwarder.ID, AgentHostSandboxFor
 
 // #endregion Contributions
 
-// #region Actions
+class TerminalSelectionContextValuePick implements IChatContextValueItem {
+	readonly type = 'valuePick';
+	readonly label = localize('terminalSelection', 'Terminal Selection');
+	readonly icon = Codicon.terminal;
+	readonly ordinal = 750;
+	readonly commandId = TerminalChatAgentToolsCommandId.ChatAddTerminalSelection;
 
-registerActiveInstanceAction({
-	id: TerminalChatAgentToolsCommandId.ChatAddTerminalSelection,
-	title: localize('addTerminalSelection', 'Add Terminal Selection to Chat'),
-	precondition: ContextKeyExpr.and(ChatContextKeys.enabled, sharedWhenClause.terminalAvailable),
-	menu: [
-		{
-			id: MenuId.TerminalInstanceContext,
-			group: TerminalContextMenuGroup.Chat,
-			order: 1,
-			when: ContextKeyExpr.and(ChatContextKeys.enabled, TerminalContextKeys.textSelected)
-		},
-	],
-	run: async (activeInstance, _c, accessor) => {
-		const chatWidgetService = accessor.get(IChatWidgetService);
+	constructor(@ITerminalService private readonly _terminalService: ITerminalService) { }
 
-		const selection = activeInstance.selection;
+	isEnabled(_widget: IChatWidget): boolean {
+		return !!this._terminalService.activeInstance?.selection;
+	}
+
+	async asAttachment(_widget: IChatWidget): Promise<IChatRequestVariableEntry | undefined> {
+		const selection = this._terminalService.activeInstance?.selection;
+		return selection ? createTerminalSelectionAttachment(selection) : undefined;
+	}
+}
+
+class TerminalSelectionChatContextContribution extends Disposable implements IWorkbenchContribution {
+	static readonly ID = 'workbench.contrib.terminalSelectionChatContext';
+
+	constructor(
+		@IInstantiationService instantiationService: IInstantiationService,
+		@IChatContextPickService contextPickService: IChatContextPickService,
+	) {
+		super();
+		this._register(contextPickService.registerChatContextItem(instantiationService.createInstance(TerminalSelectionContextValuePick)));
+	}
+}
+
+registerWorkbenchContribution2(TerminalSelectionChatContextContribution.ID, TerminalSelectionChatContextContribution, WorkbenchPhase.AfterRestored);
+
+class AttachTerminalSelectionToChatAction extends Action2 {
+	constructor() {
+		super({
+			id: TerminalChatAgentToolsCommandId.ChatAddTerminalSelection,
+			title: localize2('addTerminalSelection', 'Add Terminal Selection to Chat'),
+			icon: Codicon.terminal,
+			category: CHAT_CATEGORY,
+			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, TerminalContextKeys.textSelected),
+			menu: [{
+				id: MenuId.TerminalInstanceContext,
+				group: TerminalContextMenuGroup.Chat,
+				order: 1,
+				when: ContextKeyExpr.and(ChatContextKeys.enabled, TerminalContextKeys.textSelected, sharedWhenClause.terminalAvailable)
+			}, {
+				when: ContextKeyExpr.and(
+					ChatContextKeys.inQuickChat.negate(),
+					ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
+					TerminalContextKeys.textSelected,
+					ContextKeyExpr.or(
+						ChatContextKeys.lockedToCodingAgent.negate(),
+						ChatContextKeys.agentSupportsAttachments
+					)
+				),
+				id: MenuId.ChatInput,
+				group: 'navigation',
+				order: 0
+			}],
+		});
+	}
+
+	override async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+		const context = args[0] as IChatExecuteActionContext | undefined;
+		const terminalService = accessor.get(ITerminalService);
+		const selection = terminalService.activeInstance?.selection;
 		if (!selection) {
 			return;
 		}
-
-		const chatView = chatWidgetService.lastFocusedWidget ?? await chatWidgetService.revealWidget();
-		if (!chatView) {
-			return;
-		}
-
-		chatView.attachmentModel.addContext({
-			id: `terminal-selection-${Date.now()}`,
-			kind: 'generic' as const,
-			name: localize('terminalSelection', 'Terminal Selection'),
-			fullName: localize('terminalSelection', 'Terminal Selection'),
-			value: selection,
-			icon: Codicon.terminal
-		});
-		chatView.focusInput();
+		await addTerminalSelectionToChat(accessor, selection, context?.widget);
 	}
-});
+}
+
+// #region Actions
+
+registerAction2(AttachTerminalSelectionToChatAction);
 
 // #endregion Actions

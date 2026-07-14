@@ -4,8 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { VSBuffer } from '../../vs/base/common/buffer.js';
+import { CancellationTokenSource } from '../../vs/base/common/cancellation.js';
 import { Emitter, Event } from '../../vs/base/common/event.js';
-import { Disposable } from '../../vs/base/common/lifecycle.js';
+import { Disposable, type IDisposable, toDisposable } from '../../vs/base/common/lifecycle.js';
 import { joinPath } from '../../vs/base/common/resources.js';
 import { URI } from '../../vs/base/common/uri.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
@@ -13,11 +14,9 @@ import { createDecorator } from '../../vs/platform/instantiation/common/instanti
 import { InstantiationType, registerSingleton } from '../../vs/platform/instantiation/common/extensions.js';
 import { IWorkspaceContextService } from '../../vs/platform/workspace/common/workspace.js';
 import { AGENT_CONTEXT_FOLDER, WORKSPACE_MANIFEST } from '../goalWorkspace/ConsoleService.js';
-import { blueprintResource, createBlueprintFromTemplateId, readBlueprint, writeBlueprint } from '../goalWorkspace/surfaceBlueprintService.js';
-import { scaffoldSurfaceFromBlueprint } from '../goalWorkspace/surfaceBlueprintScaffold.js';
 import { discoverIxSubsystemRegions } from '../goalWorkspace/surfaceBlueprintIxDiscovery.js';
 import type { IxSubsystemRegion } from '../goalWorkspace/surfaceIxMatch.js';
-import type { IIxIntegrationService } from '../ix/IxIntegrationService.js';
+import { IIxIntegrationService } from '../ix/IxIntegrationService.js';
 import { appendIxValidationRepairLeaves, buildAgentTaskTreeIxValidation } from './agentTaskTreeIxValidation.js';
 import {
 	buildSurfaceCoreBuildPlanScaffold,
@@ -38,6 +37,7 @@ import type {
 import type { SurfaceBlueprint, SurfaceBlueprintTemplate } from '../goalWorkspace/surfaceBlueprintTypes.js';
 
 export const AGENT_TASK_TREES_FOLDER = 'task-trees';
+const MAX_IX_VALIDATION_ATTEMPTS = 3;
 
 export const IAgentTaskTreeService = createDecorator<IAgentTaskTreeService>('agentTaskTreeService');
 
@@ -55,7 +55,10 @@ export interface IAgentTaskTreeService {
 	loadLatestTaskTreeForSurface(surfaceId: string): Promise<AgentTaskTree | undefined>;
 	findNextPendingLeaf(tree: AgentTaskTree): AgentTaskNode | undefined;
 	validateSurfaceTaskTreeShape(surfaceId: string, options: ValidateSurfaceTaskTreeShapeOptions): Promise<AgentTaskTreeIxValidation>;
+	setExecutor(executor: AgentTaskExecutor): IDisposable;
+	setIxIntegrationService(service: IIxIntegrationService): IDisposable;
 	continueNextTask(treeId: string): Promise<AgentTaskRunResult>;
+	runAllTasks(treeId: string): Promise<AgentTaskRunResult>;
 	resumeTaskTree(treeId: string): Promise<void>;
 	pauseTaskTree(treeId: string): Promise<void>;
 	retryTask(treeId: string, nodeId: string): Promise<void>;
@@ -74,19 +77,38 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 
 	private readonly _onDidChangeTaskTree = this._register(new Emitter<AgentTaskTree | undefined>());
 	readonly onDidChangeTaskTree = this._onDidChangeTaskTree.event;
-	private executor: AgentTaskExecutor;
+	private executor: AgentTaskExecutor = new BlockingAgentTaskExecutor();
+	private ixIntegrationService: IIxIntegrationService | undefined;
 	private activeRun = false;
+	private activeRunCts: CancellationTokenSource | undefined;
 
 	constructor(
 		@IFileService private readonly fileService: IFileService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
-		this.executor = new SurfaceScaffoldAgentTaskExecutor(fileService, workspaceContextService);
 	}
 
 	setExecutorForTesting(executor: AgentTaskExecutor): void {
 		this.executor = executor;
+	}
+
+	setExecutor(executor: AgentTaskExecutor): IDisposable {
+		this.executor = executor;
+		return toDisposable(() => {
+			if (this.executor === executor) {
+				this.executor = new BlockingAgentTaskExecutor();
+			}
+		});
+	}
+
+	setIxIntegrationService(service: IIxIntegrationService): IDisposable {
+		this.ixIntegrationService = service;
+		return toDisposable(() => {
+			if (this.ixIntegrationService === service) {
+				this.ixIntegrationService = undefined;
+			}
+		});
 	}
 
 	async generateTaskTree(prompt: string, metadata?: AgentTaskTreeSurfaceMetadata): Promise<AgentTaskTree> {
@@ -225,10 +247,20 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 			ixSubsystems: ixSubsystems ?? [],
 			command,
 		});
+		const attempt = (tree.ixValidationAttempts ?? 0) + 1;
+		const validationApplied = validation.status === 'passed'
+			? appendIxValidationRepairLeaves(tree, validation)
+			: attempt >= MAX_IX_VALIDATION_ATTEMPTS
+				? { ...tree, ixValidation: validation, status: 'failed' as const }
+				: appendIxValidationRepairLeaves(tree, validation);
 		const updated = deriveParentStatuses({
-			...appendIxValidationRepairLeaves(tree, validation),
+			...validationApplied,
+			ixValidationAttempts: attempt,
 			updatedAt: new Date().toISOString(),
 		});
+		if (validation.status !== 'passed' && attempt >= MAX_IX_VALIDATION_ATTEMPTS) {
+			updated.status = 'failed';
+		}
 		await this.writeTaskTree(workspaceFolder, updated);
 		this._onDidChangeTaskTree.fire(updated);
 		return validation;
@@ -244,6 +276,8 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 			throw new Error(`Task tree ${treeId} was not found.`);
 		}
 		this.activeRun = true;
+		const runCts = new CancellationTokenSource();
+		this.activeRunCts = runCts;
 		try {
 			let tree = loaded.status === 'paused' ? withTreeStatus(loaded, 'active') : loaded;
 			if (tree.status !== 'active') {
@@ -251,8 +285,25 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 			}
 			const task = findNextPendingLeaf(tree);
 			if (!task) {
+				if (tree.surfaceId && tree.ixValidation?.status !== 'passed') {
+					if ((tree.ixValidationAttempts ?? 0) >= MAX_IX_VALIDATION_ATTEMPTS) {
+						tree.status = 'failed';
+						await this.writeTaskTree(workspaceFolder, tree);
+						this._onDidChangeTaskTree.fire(tree);
+						return { tree, status: 'blocked' };
+					}
+					await this.validateSurfaceTaskTreeShape(tree.surfaceId, { ixIntegrationService: this.ixIntegrationService });
+					tree = await this.loadTaskTree(tree.id) ?? tree;
+					if (tree.ixValidation?.status !== 'passed') {
+						return {
+							tree,
+							status: tree.status === 'failed' ? 'blocked' : 'completed',
+						};
+					}
+				}
 				tree = markTreeComplete(tree);
 				await this.writeTaskTree(workspaceFolder, tree);
+				this._onDidChangeTaskTree.fire(tree);
 				return { tree, status: 'complete' };
 			}
 
@@ -267,16 +318,37 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 			}));
 			tree.cursor = { ...tree.cursor, currentNodeId: task.id };
 			await this.writeTaskTree(workspaceFolder, tree);
+			this._onDidChangeTaskTree.fire(tree);
 
 			const inProgressTask = findNode(tree, task.id) ?? task;
 			try {
-				const result = await this.executor.executeTask(tree, inProgressTask);
+				const result = await this.executor.executeTask(tree, inProgressTask, runCts.token);
+				if (runCts.token.isCancellationRequested) {
+					throw new AgentTaskPausedError();
+				}
+				const missingPaths = await findMissingExpectedPaths(this.fileService, workspaceFolder, inProgressTask.expectedPaths ?? []);
+				if (missingPaths.length) {
+					throw new AgentTaskBlockedError(`Agent completed without creating expected path(s): ${missingPaths.join(', ')}`);
+				}
+				if ((inProgressTask.expectedPaths?.length || inProgressTask.acceptanceChecks?.length) && !result.commandsRun?.length) {
+					throw new AgentTaskBlockedError('Agent completed without successful tool execution evidence.');
+				}
+				if (inProgressTask.acceptanceChecks?.length && !result.verification?.trim()) {
+					throw new AgentTaskBlockedError('Agent completed without returning acceptance verification evidence.');
+				}
 				tree = markTaskComplete(tree, inProgressTask.id, result);
 				tree = deriveParentStatuses(tree);
 				await this.writeTaskTree(workspaceFolder, tree);
 				this._onDidChangeTaskTree.fire(tree);
 				return { tree, task: findNode(tree, inProgressTask.id), status: 'completed' };
 			} catch (error) {
+				if (error instanceof AgentTaskPausedError || runCts.token.isCancellationRequested) {
+					const latest = await this.loadTaskTree(tree.id) ?? tree;
+					tree = withTreeStatus(latest, 'paused');
+					await this.writeTaskTree(workspaceFolder, tree);
+					this._onDidChangeTaskTree.fire(tree);
+					return { tree, task: findNode(tree, inProgressTask.id), status: 'paused' };
+				}
 				tree = markTaskError(tree, inProgressTask.id, error);
 				tree = deriveParentStatuses(tree);
 				await this.writeTaskTree(workspaceFolder, tree);
@@ -284,7 +356,21 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 				return { tree, task: findNode(tree, inProgressTask.id), status: error instanceof AgentTaskBlockedError ? 'blocked' : 'failed' };
 			}
 		} finally {
+			runCts.dispose();
+			if (this.activeRunCts === runCts) {
+				this.activeRunCts = undefined;
+			}
 			this.activeRun = false;
+		}
+	}
+
+	async runAllTasks(treeId: string): Promise<AgentTaskRunResult> {
+		let lastResult: AgentTaskRunResult | undefined;
+		while (true) {
+			lastResult = await this.continueNextTask(treeId);
+			if (lastResult.status !== 'completed') {
+				return lastResult;
+			}
 		}
 	}
 
@@ -294,6 +380,7 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 	}
 
 	async pauseTaskTree(treeId: string): Promise<void> {
+		this.activeRunCts?.cancel();
 		const tree = await this.requireTaskTree(treeId);
 		await this.persistTree(withTreeStatus(tree, 'paused'));
 	}
@@ -377,94 +464,36 @@ export class AgentTaskBlockedError extends Error {
 	}
 }
 
-class SurfaceScaffoldAgentTaskExecutor implements AgentTaskExecutor {
-	constructor(
-		private readonly fileService: IFileService,
-		private readonly workspaceContextService: IWorkspaceContextService,
-	) { }
-
-	async executeTask(tree: AgentTaskTree, task: AgentTaskNode): Promise<AgentTaskExecutionResult> {
-		if (!tree.surfaceId || !tree.surfaceName || !tree.templateId) {
-			throw this.blocked();
-		}
-		const workspaceFolder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
-		if (!workspaceFolder) {
-			throw new AgentTaskBlockedError('Open a workspace before executing surface task trees.');
-		}
-
-		const expectedPaths = [...(task.expectedPaths ?? [])];
-		let missingPaths = await this.findMissingPaths(workspaceFolder, expectedPaths);
-		let changedFiles: string[] = [];
-		let scaffolded = false;
-
-		if (missingPaths.length) {
-			const blueprint = await this.loadOrCreateBlueprint(workspaceFolder, tree);
-			const result = await scaffoldSurfaceFromBlueprint(this.fileService, workspaceFolder, blueprint);
-			scaffolded = true;
-			changedFiles = [...result.createdFiles, blueprintResource(workspaceFolder, blueprint.surfaceId).path.slice(workspaceFolder.path.length + 1)];
-			blueprint.status = 'scaffolded';
-			await writeBlueprint(this.fileService, workspaceFolder, blueprint);
-			missingPaths = await this.findMissingPaths(workspaceFolder, expectedPaths);
-		}
-
-		if (missingPaths.length) {
-			throw new AgentTaskBlockedError(`Surface scaffold did not create expected path(s): ${missingPaths.join(', ')}`);
-		}
-
-		return {
-			changedFiles: uniqueStrings(changedFiles.length ? changedFiles : expectedPaths),
-			commandsRun: scaffolded
-				? [`scaffoldSurfaceFromBlueprint(${tree.surfaceId})`]
-				: [`verifyExpectedPaths(${tree.surfaceId}:${task.id})`],
-			verification: expectedPaths.length
-				? `Verified expected path(s): ${expectedPaths.join(', ')}`
-				: `Executed surface task ${task.title}.`,
-			notes: scaffolded
-				? `Generated runnable ${tree.surfaceName} scaffold from the ${tree.templateId} blueprint template.`
-				: `Expected files for ${task.title} were already present.`,
-		};
+export class AgentTaskPausedError extends Error {
+	constructor() {
+		super('Task execution was paused.');
+		this.name = 'AgentTaskPausedError';
 	}
+}
 
-	private blocked(): AgentTaskBlockedError {
-		throw new AgentTaskBlockedError('Autonomous Custom AI task execution is not connected yet. Resume from the task-tree UI and run the task through Custom AI.');
+class BlockingAgentTaskExecutor implements AgentTaskExecutor {
+	async executeTask(): Promise<AgentTaskExecutionResult> {
+		throw new AgentTaskBlockedError('Custom AI task execution is not available yet.');
 	}
+}
 
-	private async loadOrCreateBlueprint(workspaceFolder: URI, tree: AgentTaskTree): Promise<SurfaceBlueprint> {
-		const existing = await readBlueprint(this.fileService, blueprintResource(workspaceFolder, tree.surfaceId!));
-		if (existing) {
-			return existing;
-		}
-		const created = await createBlueprintFromTemplateId(this.fileService, workspaceFolder, tree.templateId!, {
-			surfaceId: tree.surfaceId,
-			surfaceName: tree.surfaceName,
-		});
-		if (!created) {
-			throw new AgentTaskBlockedError(`No surface blueprint template found for ${tree.templateId}.`);
-		}
-		return created.blueprint;
-	}
-
-	private async findMissingPaths(workspaceFolder: URI, expectedPaths: readonly string[]): Promise<string[]> {
-		const missing: string[] = [];
-		for (const expectedPath of expectedPaths) {
-			if (await this.existsExpectedPath(workspaceFolder, expectedPath)) {
-				continue;
-			}
-			missing.push(expectedPath);
-		}
-		return missing;
-	}
-
-	private async existsExpectedPath(workspaceFolder: URI, expectedPath: string): Promise<boolean> {
+export async function findMissingExpectedPaths(
+	fileService: IFileService,
+	workspaceFolder: URI,
+	expectedPaths: readonly string[],
+): Promise<string[]> {
+	const missing: string[] = [];
+	for (const expectedPath of expectedPaths) {
 		const resource = joinPath(workspaceFolder, ...expectedPath.split('/').filter(Boolean));
-		if (await this.fileService.exists(resource)) {
-			return true;
+		if (await fileService.exists(resource)) {
+			continue;
 		}
-		if (!/\.[a-z0-9]+$/i.test(expectedPath)) {
-			return this.fileService.exists(joinPath(resource, 'page.tsx'));
+		if (!/\.[a-z0-9]+$/i.test(expectedPath) && await fileService.exists(joinPath(resource, 'page.tsx'))) {
+			continue;
 		}
-		return false;
+		missing.push(expectedPath);
 	}
+	return missing;
 }
 
 export function taskTreesFolder(workspaceFolder: URI): URI {
@@ -517,6 +546,9 @@ export function parseTaskTree(raw: unknown): AgentTaskTree | undefined {
 	const surfaceName = optionalString(raw.surfaceName);
 	const templateId = optionalString(raw.templateId);
 	const ixValidation = parseIxValidation(raw.ixValidation);
+	const ixValidationAttempts = typeof raw.ixValidationAttempts === 'number' && Number.isInteger(raw.ixValidationAttempts)
+		? Math.max(0, raw.ixValidationAttempts)
+		: undefined;
 	return deriveParentStatuses({
 		version: 1,
 		id,
@@ -530,6 +562,7 @@ export function parseTaskTree(raw: unknown): AgentTaskTree | undefined {
 		surfaceName,
 		templateId,
 		ixValidation,
+		ixValidationAttempts,
 	});
 }
 
@@ -847,20 +880,6 @@ function createTreeId(prompt: string): string {
 
 function slugify(value: string): string {
 	return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-}
-
-function uniqueStrings(values: readonly string[]): string[] {
-	const seen = new Set<string>();
-	const result: string[] = [];
-	for (const value of values) {
-		const trimmed = value.trim();
-		if (!trimmed || seen.has(trimmed)) {
-			continue;
-		}
-		seen.add(trimmed);
-		result.push(trimmed);
-	}
-	return result;
 }
 
 function isTreeStatus(value: unknown): value is AgentTaskTree['status'] {

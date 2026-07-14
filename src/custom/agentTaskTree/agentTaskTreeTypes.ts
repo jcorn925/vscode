@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import type { CancellationToken } from '../../vs/base/common/cancellation.js';
+
 export type AgentTaskTreeStatus = 'draft' | 'active' | 'paused' | 'complete' | 'failed';
 export type AgentTaskNodeStatus = 'pending' | 'in_progress' | 'blocked' | 'complete' | 'failed' | 'skipped';
 export type AgentTaskNodeType = 'root' | 'branch' | 'leaf';
@@ -83,6 +85,7 @@ export interface AgentTaskTree {
 	readonly surfaceName?: string;
 	readonly templateId?: string;
 	readonly ixValidation?: AgentTaskTreeIxValidation;
+	readonly ixValidationAttempts?: number;
 }
 
 export interface AgentTaskRunResult {
@@ -99,5 +102,5 @@ export interface AgentTaskExecutionResult {
 }
 
 export interface AgentTaskExecutor {
-	executeTask(tree: AgentTaskTree, task: AgentTaskNode): Promise<AgentTaskExecutionResult>;
+	executeTask(tree: AgentTaskTree, task: AgentTaskNode, token: CancellationToken): Promise<AgentTaskExecutionResult>;
 }

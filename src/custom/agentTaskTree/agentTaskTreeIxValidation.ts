@@ -134,7 +134,7 @@ export const IX_VALIDATION_REPAIR_ROOT_ID = 'ix-validation-repair';
 export function appendIxValidationRepairLeaves(tree: AgentTaskTree, validation: AgentTaskTreeIxValidation): AgentTaskTree {
 	const rootsWithoutPriorRepair = tree.roots.filter(root => root.id !== IX_VALIDATION_REPAIR_ROOT_ID);
 	if (!validation.gaps.length) {
-		return { ...tree, roots: rootsWithoutPriorRepair, ixValidation: validation };
+		return { ...tree, roots: tree.roots, ixValidation: validation };
 	}
 	const maxOrder = Math.max(0, ...flattenNodes(rootsWithoutPriorRepair).map(node => node.order));
 	const root: AgentTaskNode = {
@@ -152,6 +152,9 @@ export function appendIxValidationRepairLeaves(tree: AgentTaskTree, validation: 
 			type: 'leaf',
 			status: 'pending',
 			order: maxOrder + 2 + index,
+			subsystemId: gap.expectedId,
+			expectedPaths: [...gap.expectedPaths],
+			acceptanceChecks: ['Ix validation no longer reports this gap'],
 		})),
 	};
 	return {
