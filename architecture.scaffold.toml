@@ -1,0 +1,178 @@
+# Ix scaffold verification contract.
+#
+# Defines stable module IDs and explicit path ownership for the Task
+# Tracker reference app (examples/reference-app/), plus phased checkpoints
+# aligned to specs/001 through specs/007.
+#
+# Module identity here is authoritative: `id`, `paths`, and `excludes` are
+# hand-authored and never inferred from Ix's own cluster/region labels or
+# region UUIDs, because Ix may rename or regroup those over time. Ix region
+# hints on checkpoints are advisory only (see `[checkpoints.*.advisory]`).
+#
+# Read by scripts/ix_scaffold_check.py.
+
+schema_version = 1
+
+[project]
+name = "ix-scaffold-reference-app"
+description = "Task Tracker reference app used to exercise the Ix scaffold verification framework."
+root = "examples/reference-app"
+
+# --- Module ownership -------------------------------------------------
+
+[[modules]]
+id = "backend"
+paths = ["backend/**"]
+excludes = ["backend/agent/tools/**"]
+
+[[modules]]
+id = "frontend"
+paths = ["frontend/**"]
+
+[[modules]]
+id = "database"
+paths = ["database/**"]
+
+[[modules]]
+id = "tests"
+paths = ["tests/**"]
+
+[[modules]]
+id = "infrastructure"
+paths = ["infra/**", "backend/agent/tools/**"]
+
+# --- Checkpoints --------------------------------------------------------
+
+[[checkpoints]]
+id = "001"
+spec = "specs/001-backend-skeleton.md"
+active_modules = ["backend", "database"]
+allowed_scope = ["backend/**", "database/**"]
+required_files = [
+    "backend/__init__.py",
+    "backend/app.py",
+    "database/schema.sql",
+]
+advisory = { ix_region_hints = ["backend-core"], min_confidence = 0.0 }
+
+[[checkpoints]]
+id = "002"
+spec = "specs/002-domain-models-and-migrations.md"
+active_modules = ["backend", "database"]
+allowed_scope = ["backend/**", "database/**"]
+required_files = [
+    "backend/__init__.py",
+    "backend/app.py",
+    "backend/models.py",
+    "database/schema.sql",
+    "database/migrations/0001_init.sql",
+]
+advisory = { ix_region_hints = ["backend-core"], min_confidence = 0.0 }
+
+[[checkpoints]]
+id = "003"
+spec = "specs/003-api-and-agent-hooks.md"
+active_modules = ["backend", "database", "infrastructure"]
+allowed_scope = ["backend/**", "database/**", "infra/**"]
+required_files = [
+    "backend/__init__.py",
+    "backend/app.py",
+    "backend/models.py",
+    "backend/api.py",
+    "backend/agent/__init__.py",
+    "backend/agent/tools/README.md",
+    "database/schema.sql",
+    "database/migrations/0001_init.sql",
+]
+advisory = { ix_region_hints = ["backend-core", "backend-automation"], min_confidence = 0.0 }
+
+# NOTE: `frontend/index.html` is intentionally absent from every
+# `required_files` list below. Empirically, `ix map`/`ix inventory` do not
+# ingest plain `.html` files as file entities in this environment (verified
+# live: `ix map examples/reference-app` does not pick up index.html even
+# after a forced re-map, while `.py`/`.js`/`.sql`/`.md`/`.yml` all are
+# ingested normally). Since required_files is a hard gate sourced from Ix
+# evidence (not a raw filesystem scan), a file Ix cannot see must not be
+# required — it is still part of the `frontend` module and present on disk,
+# just not an Ix-verifiable checkpoint gate. See README.md.
+
+[[checkpoints]]
+id = "004"
+spec = "specs/004-frontend-scaffold.md"
+active_modules = ["backend", "database", "infrastructure", "frontend"]
+allowed_scope = ["backend/**", "database/**", "infra/**", "frontend/**"]
+required_files = [
+    "backend/__init__.py",
+    "backend/app.py",
+    "backend/models.py",
+    "backend/api.py",
+    "backend/agent/__init__.py",
+    "backend/agent/tools/README.md",
+    "database/schema.sql",
+    "database/migrations/0001_init.sql",
+    "frontend/app.js",
+]
+advisory = { ix_region_hints = ["backend-core", "backend-automation", "frontend-ui"], min_confidence = 0.0 }
+
+[[checkpoints]]
+id = "005"
+spec = "specs/005-frontend-backend-integration.md"
+active_modules = ["backend", "database", "infrastructure", "frontend"]
+allowed_scope = ["backend/**", "database/**", "infra/**", "frontend/**"]
+required_files = [
+    "backend/__init__.py",
+    "backend/app.py",
+    "backend/models.py",
+    "backend/api.py",
+    "backend/agent/__init__.py",
+    "backend/agent/tools/README.md",
+    "database/schema.sql",
+    "database/migrations/0001_init.sql",
+    "frontend/app.js",
+    "frontend/api-client.cjs",
+]
+advisory = { ix_region_hints = ["backend-core", "backend-automation", "frontend-ui"], min_confidence = 0.0 }
+
+[[checkpoints]]
+id = "006"
+spec = "specs/006-reference-app-test-suite.md"
+active_modules = ["backend", "database", "infrastructure", "frontend", "tests"]
+allowed_scope = ["backend/**", "database/**", "infra/**", "frontend/**", "tests/**"]
+required_files = [
+    "backend/__init__.py",
+    "backend/app.py",
+    "backend/models.py",
+    "backend/api.py",
+    "backend/agent/__init__.py",
+    "backend/agent/tools/README.md",
+    "database/schema.sql",
+    "database/migrations/0001_init.sql",
+    "frontend/app.js",
+    "frontend/api-client.cjs",
+    "tests/backend/test_api.py",
+    "tests/frontend/test_app.cjs",
+]
+advisory = { ix_region_hints = ["backend-core", "backend-automation", "frontend-ui", "reference-app-tests"], min_confidence = 0.0 }
+
+[[checkpoints]]
+id = "007"
+spec = "specs/007-infra-ci-finalization.md"
+active_modules = ["backend", "database", "infrastructure", "frontend", "tests"]
+allowed_scope = ["backend/**", "database/**", "infra/**", "frontend/**", "tests/**"]
+required_files = [
+    "backend/__init__.py",
+    "backend/app.py",
+    "backend/models.py",
+    "backend/api.py",
+    "backend/agent/__init__.py",
+    "backend/agent/tools/README.md",
+    "database/schema.sql",
+    "database/migrations/0001_init.sql",
+    "frontend/app.js",
+    "frontend/api-client.cjs",
+    "tests/backend/test_api.py",
+    "tests/frontend/test_app.cjs",
+    "infra/Dockerfile",
+    "infra/ci.yml",
+]
+advisory = { ix_region_hints = ["backend-core", "backend-automation", "frontend-ui", "reference-app-tests", "infra"], min_confidence = 0.0 }

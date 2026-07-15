@@ -453,7 +453,10 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 
 		if (this.lastSurfaceTargets.length > 0) {
 			const activeUrl = this.devServerService.getActiveUrl();
-			if (activeUrl) {
+			const activeSurfaceTarget = activeUrl
+				? this.lastSurfaceTargets.find(target => target.localUrl === activeUrl)
+				: undefined;
+			if (activeUrl && activeSurfaceTarget) {
 				step.status = 'success';
 				step.detail = localize('appLaunchGuide.devServer.surface.active', 'Serving at {0}', activeUrl);
 				return;
@@ -462,7 +465,7 @@ export class AppLaunchGuideService extends Disposable implements IAppLaunchGuide
 				if (!target.localUrl) {
 					continue;
 				}
-				const reachable = await this.devServerService.findRunningDevServerUrl(target.localUrl);
+				const reachable = await this.devServerService.findRunningDevServerUrl(target.localUrl, { allowNearbyPorts: false });
 				if (reachable) {
 					step.status = 'success';
 					step.detail = localize('appLaunchGuide.devServer.surface.reachable', 'Surface app reachable at {0}', reachable);

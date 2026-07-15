@@ -17,6 +17,7 @@ import { AGENT_CONTEXT_FOLDER, WORKSPACE_MANIFEST } from '../goalWorkspace/Conso
 import { discoverIxSubsystemRegions } from '../goalWorkspace/surfaceBlueprintIxDiscovery.js';
 import type { IxSubsystemRegion } from '../goalWorkspace/surfaceIxMatch.js';
 import { IIxIntegrationService } from '../ix/IxIntegrationService.js';
+import { buildGraphProposalFromPlan, writeGraphProposal, type BuildGraphProposalFromPlanOptions } from './agentTaskTreeGraphProposal.js';
 import { appendIxValidationRepairLeaves, buildAgentTaskTreeIxValidation } from './agentTaskTreeIxValidation.js';
 import {
 	buildSurfaceCoreBuildPlanScaffold,
@@ -135,6 +136,7 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 			templateId: metadata?.templateId,
 		});
 		await this.writeTaskTree(workspaceFolder, tree);
+		await this.writeGraphProposalForTree(workspaceFolder, { tree });
 		this._onDidChangeTaskTree.fire(tree);
 		return tree;
 	}
@@ -171,6 +173,7 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 			templateId: metadata.templateId,
 		});
 		await this.writeTaskTree(workspaceFolder, tree);
+		await this.writeGraphProposalForTree(workspaceFolder, { tree, subsystems: planSource.subsystems });
 		this._onDidChangeTaskTree.fire(tree);
 		return tree;
 	}
@@ -444,6 +447,21 @@ export class AgentTaskTreeService extends Disposable implements IAgentTaskTreeSe
 		await writeTaskTree(this.fileService, workspaceFolder, deriveParentStatuses({ ...tree, updatedAt: new Date().toISOString() }));
 	}
 
+	/**
+	 * Persists the proposed ix graph delta next to the tree so
+	 * `scripts/ix_graph_compare.py --proposal` can verify it after implementation.
+	 */
+	private async writeGraphProposalForTree(
+		workspaceFolder: URI,
+		options: Omit<BuildGraphProposalFromPlanOptions, 'planRef'>,
+	): Promise<void> {
+		const proposal = buildGraphProposalFromPlan({
+			...options,
+			planRef: `${AGENT_CONTEXT_FOLDER}/${AGENT_TASK_TREES_FOLDER}/${options.tree.id}.json`,
+		});
+		await writeGraphProposal(this.fileService, taskTreesFolder(workspaceFolder), proposal);
+	}
+
 	private getWorkspaceFolder(): URI | undefined {
 		return this.workspaceContextService.getWorkspace().folders[0]?.uri;
 	}
@@ -585,6 +603,11 @@ export function findRetryableLeaf(tree: AgentTaskTree): AgentTaskNode | undefine
 	return flattenNodes(tree.roots)
 		.filter(node => node.type === 'leaf' && (node.status === 'failed' || node.status === 'blocked' || node.status === 'in_progress'))
 		.sort((a, b) => a.order - b.order)[0];
+}
+
+/** Leaf the surface chat composer should mirror: active/failed first, else next pending. */
+export function resolveCurrentTaskTreeStep(tree: AgentTaskTree): AgentTaskNode | undefined {
+	return findRetryableLeaf(tree) ?? findNextPendingLeaf(tree);
 }
 
 export function findRegenerableNodes(tree: AgentTaskTree): AgentTaskNode[] {

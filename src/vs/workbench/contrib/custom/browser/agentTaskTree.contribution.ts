@@ -336,16 +336,17 @@ class AgentTaskTreeResumeContribution extends Disposable implements IWorkbenchCo
 			),
 			[
 				{
-					label: localize('custom.agentTaskTree.resume.action', 'Resume'),
-					run: () => this.agentTaskTreeService.resumeTaskTree(tree.id),
-				},
-				{
-					label: localize('custom.agentTaskTree.continue.action', 'Continue Next Task'),
-					run: () => this.agentTaskTreeService.continueNextTask(tree.id),
-				},
-				{
-					label: localize('custom.agentTaskTree.show.action', 'Show Tree'),
-					run: () => this.commandService.executeCommand('custom.agentTaskTree.show'),
+					label: localize('custom.agentTaskTree.view.action', 'View'),
+					run: () => {
+						if (!tree.surfaceId) {
+							this.notificationService.notify({
+								severity: Severity.Warning,
+								message: localize('custom.agentTaskTree.view.noSurface', 'This task tree is not linked to a surface tab.'),
+							});
+							return;
+						}
+						void this.commandService.executeCommand('custom.modeShell.viewSurface', tree.surfaceId);
+					},
 				},
 			],
 		);

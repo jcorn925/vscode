@@ -217,5 +217,11 @@
 		".claude/skills/.local": true,
 	},
 	"custom.ai.observability.langfuse.baseUrl": "https://us.cloud.langfuse.com",
-	"js/ts.tsserver.experimental.useBundledNode": true
+	"js/ts.tsserver.experimental.useBundledNode": true,
+	// --- Python ---
+	// Stop cursorpyright from analyzing files ("N files to analyze" in the status bar)
+	"cursorpyright.analysis.exclude": [
+		"**"
+	],
+	"cursorpyright.disablePullDiagnostics": true
 }

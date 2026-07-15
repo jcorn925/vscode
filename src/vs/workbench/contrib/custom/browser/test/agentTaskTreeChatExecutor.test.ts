@@ -74,6 +74,64 @@ suite('CustomAiAgentTaskExecutor', () => {
 		assert.deepStrictEqual(result.changedFiles, ['apps/booking/app/page.tsx']);
 		assert.strictEqual(result.verification, 'route exists');
 	});
+
+	test('persists customAiGraphProposal metadata as speculative proposal enrichment', async () => {
+		const workspace = URI.file('/workspace');
+		const session = URI.parse('vscode-chat:/surface');
+		const chatService = {
+			acquireOrLoadSession: async () => ({ object: { sessionResource: session }, dispose() { } }),
+			sendRequest: async () => ({
+				kind: 'sent' as const,
+				data: {
+					agent: {} as never,
+					responseCreatedPromise: Promise.resolve({
+						state: ResponseModelState.Complete,
+						isCanceled: false,
+						result: {
+							metadata: {
+								customAiTaskExecution: { changedFiles: [], commandsRun: ['editFile'], verification: 'done' },
+								customAiGraphProposal: {
+									add_nodes: ['function:apps/booking/app/page.tsx::BookingPage'],
+									add_edges: [{
+										src: 'function:apps/booking/app/page.tsx::BookingPage',
+										predicate: 'CALLS',
+										dst: 'function:packages/domain/index.ts::listSlots',
+									}],
+								},
+							},
+						},
+					} as never),
+					responseCompletePromise: Promise.resolve(),
+				},
+			}),
+			cancelCurrentRequestForSession: async () => { },
+		} as unknown as IChatService;
+		const manager = {
+			getOrCreateUISurfaceSessionResource: () => session,
+		} as unknown as ModeShellChatSessionManager;
+		const written = new Map<string, string>();
+		const fileService = {
+			exists: async () => false,
+			createFolder: async () => undefined,
+			writeFile: async (resource: URI, content: { toString(): string }) => {
+				written.set(resource.path, content.toString());
+			},
+		} as unknown as IFileService;
+		const workspaceService = {
+			getWorkspace: () => ({ folders: [{ uri: workspace }] }),
+		} as unknown as IWorkspaceContextService;
+		const executor = new CustomAiAgentTaskExecutor(chatService, manager, fileService, workspaceService);
+		const tree = createTree();
+
+		await executor.executeTask(tree, tree.roots[0].children![0], CancellationToken.None);
+
+		const proposalPath = '/workspace/.agent/task-trees/booking-tree.graph-proposal.json';
+		assert.ok(written.has(proposalPath), 'graph proposal enrichment is persisted next to the tree');
+		const proposal = JSON.parse(written.get(proposalPath)!);
+		assert.strictEqual(proposal.tree_id, 'booking-tree');
+		assert.deepStrictEqual(proposal.add_nodes, ['function:apps/booking/app/page.tsx::BookingPage']);
+		assert.strictEqual(proposal.add_edges[0].confidence, 'speculative');
+	});
 });
 
 function createTree(): AgentTaskTree {

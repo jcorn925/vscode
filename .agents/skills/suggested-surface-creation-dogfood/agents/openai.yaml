@@ -1,0 +1,4 @@
+interface:
+  display_name: "Suggested Surface Creation Dogfood"
+  short_description: "Console starter click → task tree → verify output"
+  default_prompt: "Use $suggested-surface-creation-dogfood to create a suggested surface from Console, run its task tree, and verify the output with screenshots."

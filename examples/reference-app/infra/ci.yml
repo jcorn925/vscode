@@ -1,0 +1,21 @@
+# Illustrative CI config for the Task Tracker reference app itself.
+# This file is part of the reference app's own scaffold (module:
+# infrastructure) and is not wired into this repo's real GitHub Actions —
+# it exists so checkpoint 007 has a concrete "infra finalized" artifact for
+# the Ix scaffold verifier to check for.
+#
+# Introduced at checkpoint 007 (specs/007-infra-ci-finalization.md).
+
+name: reference-app-ci
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run backend tests
+        run: python3 -m pytest examples/reference-app/tests/backend
+      - name: Run frontend smoke test
+        run: node examples/reference-app/tests/frontend/test_app.cjs

@@ -12,7 +12,7 @@ import { Disposable, DisposableStore, type IDisposable, toDisposable } from '../
 import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { isMacintosh, isWeb, isWindows } from '../../../../base/common/platform.js';
 import { URI, UriComponents } from '../../../../base/common/uri.js';
-import { basename, extUri, isEqualOrParent, joinPath, resolvePath } from '../../../../base/common/resources.js';
+import { basename, extUri, isEqual, isEqualOrParent, joinPath, resolvePath } from '../../../../base/common/resources.js';
 import { localize } from '../../../../nls.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
@@ -109,17 +109,19 @@ import { registerModeShellChatTarget } from './modeShellChatTarget.js';
 import { SurfaceTaskTreePanel } from './surfaceTaskTreePanel.js';
 import { CustomAiAgentTaskExecutor } from './agentTaskTreeChatExecutor.js';
 import { SurfaceIxSubsystemsPanel } from './surfaceIxSubsystemsPanel.js';
-import { IAgentTaskTreeService } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
+import { IAgentTaskTreeService, resolveCurrentTaskTreeStep } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import type { AgentTaskTree } from '../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
 import { resolveDefaultSurfaceMainView, shouldShowSurfaceMainViewToggle, type SurfaceMainView } from '../../../../../custom/agentTaskTree/surfaceMainViewHelpers.js';
 import type { WorkflowSpec, WorkflowStep } from '../../../../../custom/goalWorkspace/workflowCatalogTypes.js';
+import { buildTaskPrompt } from './agentTaskTreeChatExecutor.js';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
 const STORAGE_CONTEXT_GATHERING_OPEN = 'modeShell.contextGatheringOpen';
 const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
 const STORAGE_ACTIVE_UI_CHAT_SURFACE = 'modeShell.activeUiChatSurface';
+const STORAGE_UI_CHAT_DRAFT_PREFIX = 'modeShell.uiChatDraft.';
 const STORAGE_SURFACE_MAIN_VIEW_PREFIX = 'modeShell.surfaceMainView.';
 const STORAGE_SURFACE_FEATURE_CHECKLIST_HIDDEN = 'modeShell.surfaceFeatureChecklistHidden';
 const ADD_SURFACE_ID = '__add_surface__';
@@ -299,6 +301,8 @@ class ModeShellContribution extends Disposable {
 	private readonly uiChatTitleEl: HTMLElement;
 	private readonly uiChatNewButton: HTMLButtonElement;
 	private activeUiChatSurfaceId: string | undefined;
+	/** Surface id currently bound to the shared UI chat widget (composer state). */
+	private boundUiChatSurfaceId: string | undefined;
 	private readonly uiChatReopenBtn: HTMLButtonElement;
 	private readonly styleSheet = createStyleSheet();
 	private readonly uiBrowser: HTMLElement & { src: string };
@@ -2244,7 +2248,7 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench .custom-mode-ui-surface-starter-card {
 				position: relative;
 				display: block;
-				min-height: 200px;
+				min-height: 176px;
 				padding: 0;
 				border: 1px solid var(--vscode-panel-border);
 				border-radius: 10px;
@@ -2353,11 +2357,11 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench .custom-mode-ui-surface-starter-card-description {
 				display: flex;
 				flex-direction: column;
-				justify-content: flex-end;
+				justify-content: flex-start;
 				gap: 8px;
 				width: 100%;
 				height: 100%;
-				padding: 12px 14px 14px;
+				padding: 52px 14px 14px;
 				box-sizing: border-box;
 			}
 
@@ -2495,8 +2499,13 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-new {
+				display: flex;
+				flex-direction: column;
 				align-items: center;
 				justify-content: center;
+				gap: 10px;
+				padding: 24px;
+				box-sizing: border-box;
 				text-align: center;
 				border-style: dashed;
 				background: transparent;
@@ -2510,7 +2519,11 @@ class ModeShellContribution extends Disposable {
 				flex-direction: column;
 				align-items: center;
 				justify-content: center;
-				gap: 12px;
+				gap: 10px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starter-card-new .custom-mode-ui-surface-starter-card-title {
+				flex: 0 1 auto;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-new .custom-mode-ui-surface-starter-card-icon.codicon {
@@ -4083,6 +4096,7 @@ class ModeShellContribution extends Disposable {
 				this.surfaceMainView = resolveDefaultSurfaceMainView(tree, this.isSelectedSurfacePreviewReachable());
 			}
 			this.syncSurfaceMainView();
+			this.syncUiChatInputToTaskTreeStep(tree);
 		}));
 		this.uiSurfaceSetupDashboard = this.createSurfaceSetupDashboard();
 		this.uiSurfaceEmptyTitle = $('div.custom-mode-ui-surface-empty-title');
@@ -5111,13 +5125,30 @@ class ModeShellContribution extends Disposable {
 
 	private async startNewUiChatConversation(): Promise<void> {
 		const surfaceId = this.getActiveUISurfaceChatKey();
+		this.clearStoredUiChatDraft(surfaceId);
 		this.chatSessionManager.createNewUISurfaceSessionResource(surfaceId);
 		await this.ensureEmbeddedChatModel('UI', surfaceId);
+		this.syncUiChatInputToTaskTreeStep(this.selectedSurfaceTaskTree);
 		this.uiChatWidget.focusInput();
 	}
 
 	async refreshEmbeddedChatForCurrentMode(): Promise<void> {
 		await this.updateEmbeddedChat(this.modeService.getMode());
+	}
+
+	/**
+	 * Switch to Console/UI, select the surface tab, and show its task tree.
+	 * Returns false when the surface is not in the workspace manifest.
+	 */
+	viewSurfaceTab(surfaceId: string): boolean {
+		const surface = this.consoleService.getSurface(surfaceId);
+		if (!surface) {
+			return false;
+		}
+		this.modeService.setMode('UI');
+		this.selectGoalSurface(surface.id);
+		this.setSurfaceMainView('taskTree');
+		return true;
 	}
 
 	getPreferredChatWidgetForTerminalAttachment(): ChatWidget | undefined {
@@ -5131,10 +5162,76 @@ class ModeShellContribution extends Disposable {
 		return undefined;
 	}
 
+	private uiChatDraftStorageKey(surfaceId: string): string {
+		return `${STORAGE_UI_CHAT_DRAFT_PREFIX}${surfaceId}`;
+	}
+
+	private clearStoredUiChatDraft(surfaceId: string): void {
+		this.storageService.remove(this.uiChatDraftStorageKey(surfaceId), StorageScope.WORKSPACE);
+	}
+
+	private clearTransientUiChatAttachments(): void {
+		try {
+			if (!this.embeddedChatRefs.UI.value) {
+				return;
+			}
+			const attachmentModel = this.uiChatWidget.input.attachmentModel;
+			const toDelete = attachmentModel.attachments
+				.filter(a => a.id.startsWith('surface-handoff:') || a.id.startsWith('vscode-ui-map:'))
+				.map(a => a.id);
+			if (toDelete.length > 0) {
+				attachmentModel.delete(...toDelete);
+			}
+		} catch {
+			// Chat session may not be bound yet.
+		}
+	}
+
+	/**
+	 * Keep the shared UI chat composer aligned with the selected surface's current task-tree step.
+	 * Also clears handoff/UI-map chips so another surface's context cannot linger.
+	 */
+	private syncUiChatInputToTaskTreeStep(tree?: AgentTaskTree): void {
+		try {
+			if (!this.embeddedChatRefs.UI.value) {
+				return;
+			}
+			this.clearTransientUiChatAttachments();
+			const activeSurfaceId = this.getActiveUISurfaceChatKey();
+			if (activeSurfaceId === ADD_SURFACE_ID) {
+				this.uiChatWidget.setInput('');
+				return;
+			}
+			const stepTree = tree?.surfaceId === activeSurfaceId
+				? tree
+				: (this.selectedSurfaceTaskTree?.surfaceId === activeSurfaceId ? this.selectedSurfaceTaskTree : undefined);
+			const step = stepTree ? resolveCurrentTaskTreeStep(stepTree) : undefined;
+			this.uiChatWidget.setInput(step && stepTree ? buildTaskPrompt(stepTree, step) : '');
+		} catch {
+			// Chat session may not be bound yet.
+		}
+	}
+
+	private async syncUiChatInputForSurface(surfaceId: string): Promise<void> {
+		if (surfaceId === ADD_SURFACE_ID) {
+			this.syncUiChatInputToTaskTreeStep(undefined);
+			return;
+		}
+		const tree = this.selectedSurfaceTaskTree?.surfaceId === surfaceId
+			? this.selectedSurfaceTaskTree
+			: await this.agentTaskTreeService.loadLatestTaskTreeForSurface(surfaceId);
+		this.syncUiChatInputToTaskTreeStep(tree);
+	}
+
 	private async ensureEmbeddedChatModel(mode: 'UI' | 'Process', surfaceId?: string): Promise<void> {
 		const token = this.chatSessionsCts.token;
+		const resolvedSurfaceId = mode === 'UI' ? (surfaceId ?? this.getActiveUISurfaceChatKey()) : undefined;
+		const previousBoundSurfaceId = mode === 'UI' ? this.boundUiChatSurfaceId : undefined;
+		const previousSessionResource = mode === 'UI' ? this.embeddedChatRefs.UI.value?.object.sessionResource : undefined;
+		const surfaceChanged = mode === 'UI' && resolvedSurfaceId !== undefined && resolvedSurfaceId !== previousBoundSurfaceId;
+
 		const resource = mode === 'UI'
-			? this.chatSessionManager.getOrCreateUISurfaceSessionResource(surfaceId ?? this.getActiveUISurfaceChatKey())
+			? this.chatSessionManager.getOrCreateUISurfaceSessionResource(resolvedSurfaceId!)
 			: this.chatSessionManager.getOrCreateSessionResource(mode);
 		const ref = await this.chatService.acquireOrLoadSession(resource, ChatAgentLocation.Chat, token, `ModeShellContribution#ensureEmbeddedChatModel(${mode})`);
 		if (!ref) {
@@ -5142,11 +5239,27 @@ class ModeShellContribution extends Disposable {
 		}
 
 		const holder = this.embeddedChatRefs[mode];
+		const widget = mode === 'UI' ? this.uiChatWidget : this.processChatWidget;
+		const sessionChanged = mode === 'UI' && (!previousSessionResource || !isEqual(previousSessionResource, ref.object.sessionResource));
+
+		if (mode === 'UI' && (surfaceChanged || sessionChanged) && holder.value) {
+			// Flush the outgoing unsent draft into its input model before releasing the ref.
+			widget.setModel(undefined);
+		}
+
 		holder.value?.dispose();
 		holder.value = ref;
-
-		const widget = mode === 'UI' ? this.uiChatWidget : this.processChatWidget;
 		widget.setModel(ref.object);
+
+		if (mode === 'UI' && resolvedSurfaceId !== undefined) {
+			this.boundUiChatSurfaceId = resolvedSurfaceId;
+			if (sessionChanged && !surfaceChanged) {
+				this.clearStoredUiChatDraft(resolvedSurfaceId);
+			}
+			if (surfaceChanged || sessionChanged) {
+				await this.syncUiChatInputForSurface(resolvedSurfaceId);
+			}
+		}
 	}
 
 	private refreshUiChatTabsAndSession(): void {
@@ -5787,7 +5900,7 @@ class ModeShellContribution extends Disposable {
 			let runningUrl: string | undefined;
 			if (created && surface?.localUrl) {
 				try {
-					runningUrl = await this.devServerService.findRunningDevServerUrl(surface.localUrl);
+					runningUrl = await this.devServerService.findRunningDevServerUrl(surface.localUrl, { allowNearbyPorts: false });
 				} catch {
 					runningUrl = undefined;
 				}
@@ -6074,9 +6187,13 @@ class ModeShellContribution extends Disposable {
 			void this.surfaceFeatureChecklistService.refresh();
 			this.endSurfaceSetupHandoff();
 			this.ensureWorkspaceView();
+			// New surface always starts a fresh chat instance so prior drafts/history cannot leak in.
+			this.clearStoredUiChatDraft(surfaceId);
+			this.chatSessionManager.createNewUISurfaceSessionResource(surfaceId);
 			await this.selectUiChatSurfaceAsync(surfaceId);
 			this.selectGoalSurface(surfaceId);
 			this.setSurfaceMainView('taskTree');
+			this.syncUiChatInputToTaskTreeStep(tree);
 			this.notificationService.info(localize('customMode.surfaceTaskTreeReady', '{0} task tree is ready. Continue the next task or run all.', surfaceName));
 		} catch (e: unknown) {
 			this.pushUiRuntimeLog(`[surface-setup:task-tree] failed to create task tree: ${String((e as Error)?.message ?? e)}`);
@@ -6167,7 +6284,7 @@ class ModeShellContribution extends Disposable {
 		this.syncContextGatheringUi();
 	}
 
-	private applySurfaceSelection(surfaceId: string, options?: { contextGathering?: boolean }): void {
+	private applySurfaceSelection(surfaceId: string, options?: { contextGathering?: boolean; deferPreviewRouting?: boolean }): void {
 		if (options?.contextGathering !== undefined) {
 			this.contextGatheringOpen = options.contextGathering;
 			this.persistContextGatheringOpen();
@@ -6181,17 +6298,25 @@ class ModeShellContribution extends Disposable {
 				this.surfaceMainView = storedView;
 			}
 		}
-		this.refreshSelectedSurfaceTaskTreeAndRoute();
+		this.refreshSelectedSurfaceTaskTreeAndRoute(!options?.deferPreviewRouting);
 		this.refreshStartCommandHints();
 		this.setActiveUiChatSurfaceFromSurfaceTab(surfaceId);
 	}
 
-	private refreshSelectedSurfaceTaskTreeAndRoute(): void {
+	private refreshSelectedSurfaceTaskTreeAndRoute(routePreview = true): void {
+		const selectedSurfaceId = this.selectedSurfaceId;
 		void this.loadSelectedSurfaceTaskTree().then(() => {
+			if (this.selectedSurfaceId !== selectedSurfaceId) {
+				return;
+			}
 			if (this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID && !this.getStoredSurfaceMainView(this.selectedSurfaceId)) {
 				this.surfaceMainView = resolveDefaultSurfaceMainView(this.selectedSurfaceTaskTree, this.isSelectedSurfacePreviewReachable());
 			}
-			this.routeSelectedSurfacePreview();
+			if (routePreview) {
+				this.routeSelectedSurfacePreview();
+			} else {
+				this.syncSurfaceMainView();
+			}
 		});
 	}
 
@@ -6235,8 +6360,11 @@ class ModeShellContribution extends Disposable {
 		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, this.selectedSurfaceId, StorageScope.WORKSPACE, StorageTarget.USER);
 
 		this.renderGoalSurfaceButtons(surfaces);
-		this.refreshSelectedSurfaceTaskTreeAndRoute();
-		void this.freeWorkspaceSurfacePortsAtStartup(surfaces);
+		this.clearEmbeddedUiUrl();
+		this.setAppReachable(false);
+		void this.freeWorkspaceSurfacePortsAtStartup(surfaces).then(() => {
+			this.refreshSelectedSurfaceTaskTreeAndRoute();
+		});
 		this.refreshStartCommandHints();
 		this.refreshUiChatTabsAndSession();
 	}
@@ -6367,8 +6495,14 @@ class ModeShellContribution extends Disposable {
 
 		this.selectedSurfaceId = surface.id;
 		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
-		this.applySurfaceSelection(surfaceId, { contextGathering: false });
-		void this.ensureSurfaceServerStarted(surface); // gated on verified scaffold / no blueprint
+		this.clearEmbeddedUiUrl();
+		this.setAppReachable(false);
+		this.applySurfaceSelection(surfaceId, { contextGathering: false, deferPreviewRouting: true });
+		void this.ensureSurfaceServerStarted(surface, { force: true }).then(started => {
+			if (started && this.selectedSurfaceId === surface.id) {
+				this.refreshSelectedSurfaceTaskTreeAndRoute();
+			}
+		}); // gated on verified scaffold / no blueprint
 	}
 
 	private async deleteGoalSurface(surfaceId: string): Promise<void> {
@@ -6392,6 +6526,10 @@ class ModeShellContribution extends Disposable {
 					message: localize('customMode.surfaceDeleteMissing', 'Could not find {0} in workspace.goal.json.', surface.name)
 				});
 				return;
+			}
+			this.clearStoredUiChatDraft(surfaceId);
+			if (this.boundUiChatSurfaceId === surfaceId) {
+				this.boundUiChatSurfaceId = undefined;
 			}
 			this.chatSessionManager.removeUISurfaceSession(surfaceId);
 			if (this.selectedSurfaceId === surfaceId) {
@@ -6557,11 +6695,13 @@ class ModeShellContribution extends Disposable {
 		if (!this.selectedSurfaceId || this.selectedSurfaceId === ADD_SURFACE_ID) {
 			this.selectedSurfaceTaskTree = undefined;
 			this.surfaceTaskTreePanel?.render(undefined);
+			this.syncUiChatInputToTaskTreeStep(undefined);
 			return;
 		}
 		const tree = await this.agentTaskTreeService.loadLatestTaskTreeForSurface(this.selectedSurfaceId);
 		this.selectedSurfaceTaskTree = tree;
 		this.surfaceTaskTreePanel?.render(tree);
+		this.syncUiChatInputToTaskTreeStep(tree);
 	}
 
 	private isSelectedSurfacePreviewReachable(): boolean {
@@ -7290,20 +7430,22 @@ class ModeShellContribution extends Disposable {
 		return blueprint.status === 'verified';
 	}
 
-	private async ensureSurfaceServerStarted(surface: WorkspaceSurface): Promise<void> {
+	private async ensureSurfaceServerStarted(surface: WorkspaceSurface, options?: { force?: boolean }): Promise<boolean> {
 		const command = surface.devCommand?.trim();
 		const workspaceFolder = this.getWorkspaceFolderUri();
 		if (!command || !workspaceFolder) {
-			return;
+			return false;
 		}
 		if (!(await this.isSurfaceReadyForDevServerAutoStart(surface))) {
 			this.pushUiRuntimeLog(`[surface-autostart:deferred] ${surface.id}: waiting for verified scaffold before starting dev server`);
-			return;
+			return false;
 		}
 		try {
-			await this.runSurfaceCommandInTerminal(surface.id, workspaceFolder, surface.name, command, surface.localUrl);
+			await this.runSurfaceCommandInTerminal(surface.id, workspaceFolder, surface.name, command, surface.localUrl, options);
+			return true;
 		} catch (error: unknown) {
 			this.pushUiRuntimeLog(`[surface-autostart:error] ${surface.id}: ${String((error as Error)?.message ?? error)}`);
+			return false;
 		}
 	}
 
@@ -9010,6 +9152,28 @@ function withModeShellChatManager(accessor: ServicesAccessor, fn: (mgr: ModeShel
 	const mgr = new ModeShellChatSessionManager(chatService, chatWidgetService, storageService);
 	return fn(mgr);
 }
+
+registerAction2(class ViewSurfaceTabAction extends Action2 {
+	constructor() {
+		super({
+			id: 'custom.modeShell.viewSurface',
+			title: { value: localize('customMode.viewSurface', 'Custom: View Surface Tab'), original: 'Custom: View Surface Tab' },
+			f1: false,
+		});
+	}
+	override async run(accessor: ServicesAccessor, surfaceId?: string): Promise<void> {
+		if (typeof surfaceId !== 'string' || !surfaceId.trim()) {
+			return;
+		}
+		const instance = ModeShellContribution.getActiveInstance();
+		if (!instance?.viewSurfaceTab(surfaceId.trim())) {
+			accessor.get(INotificationService).notify({
+				severity: Severity.Warning,
+				message: localize('customMode.viewSurface.missing', 'Could not find surface "{0}" in workspace.goal.json.', surfaceId),
+			});
+		}
+	}
+});
 
 registerAction2(class SwitchChatToUiAction extends Action2 {
 	constructor() {

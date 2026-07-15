@@ -1059,7 +1059,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 				this.setPhase('error', detail);
 				this.notificationService.notify({
 					severity: Severity.Error,
-					message: localize('ix.notify.docker', 'Ix Docker backend failed to start. See Process tab for details.'),
+					message: localize('ix.notify.docker', 'Ix Docker backend failed to start. Make sure Docker is running, then retry.'),
 				});
 				return;
 			}

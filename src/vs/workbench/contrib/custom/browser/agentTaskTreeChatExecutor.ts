@@ -9,7 +9,8 @@ import type { URI } from '../../../../base/common/uri.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import type { AgentTaskExecutionResult, AgentTaskExecutor, AgentTaskNode, AgentTaskTree } from '../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
-import { AgentTaskBlockedError, AgentTaskPausedError, taskTreeResource } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
+import { mergeAndPersistGraphProposalEnrichment, parseGraphProposalEnrichment } from '../../../../../custom/agentTaskTree/agentTaskTreeGraphProposal.js';
+import { AgentTaskBlockedError, AgentTaskPausedError, taskTreeResource, taskTreesFolder } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import { blueprintResource } from '../../../../../custom/goalWorkspace/surfaceBlueprintService.js';
 import type { IChatRequestFileEntry } from '../../chat/common/attachments/chatVariableEntries.js';
 import { ChatAgentLocation, ChatModeKind, ChatPermissionLevel } from '../../chat/common/constants.js';
@@ -84,6 +85,7 @@ export class CustomAiAgentTaskExecutor implements AgentTaskExecutor {
 			}
 
 			const metadata = parseTaskExecutionMetadata(response.result?.metadata?.customAiTaskExecution);
+			await this.persistGraphProposalEnrichment(workspaceFolder, tree, response.result?.metadata?.customAiGraphProposal);
 			return {
 				changedFiles: metadata?.changedFiles ?? [],
 				commandsRun: metadata?.commandsRun ?? [],
@@ -93,6 +95,29 @@ export class CustomAiAgentTaskExecutor implements AgentTaskExecutor {
 		} finally {
 			cancellation.dispose();
 			sessionRef.dispose();
+		}
+	}
+
+	/**
+	 * Merges an agent-provided graph-delta payload (snake_case node/edge entries; see
+	 * agentTaskTreeGraphProposal.ts) into the tree's persisted proposal. Invalid or
+	 * absent payloads are ignored — enrichment must never fail the task itself.
+	 */
+	private async persistGraphProposalEnrichment(workspaceFolder: URI, tree: AgentTaskTree, rawProposal: unknown): Promise<void> {
+		const enrichment = parseGraphProposalEnrichment(rawProposal);
+		if (!enrichment) {
+			return;
+		}
+		try {
+			await mergeAndPersistGraphProposalEnrichment(
+				this.fileService,
+				taskTreesFolder(workspaceFolder),
+				tree,
+				taskTreeResource(workspaceFolder, tree.id).path.slice(workspaceFolder.path.length + 1),
+				enrichment,
+			);
+		} catch {
+			// Proposal enrichment is best-effort; task success is decided by execution metadata.
 		}
 	}
 
@@ -125,7 +150,7 @@ export class CustomAiAgentTaskExecutor implements AgentTaskExecutor {
 	}
 }
 
-function buildTaskPrompt(tree: AgentTaskTree, task: AgentTaskNode): string {
+export function buildTaskPrompt(tree: AgentTaskTree, task: AgentTaskNode): string {
 	const lines = [
 		`Execute exactly one task-tree leaf for objective "${tree.prompt}".`,
 		`Task ID: ${task.id}`,

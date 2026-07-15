@@ -1,0 +1,9 @@
+{
+	"mcpServers": {
+		"ix-graph": {
+			"type": "stdio",
+			"command": "python3",
+			"args": ["scripts/ix_graph_mcp.py"]
+		}
+	}
+}

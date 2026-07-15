@@ -1,0 +1,60 @@
+name: Ix Scaffold Verifier Tests
+
+on:
+  push:
+    paths:
+      - 'architecture.scaffold.toml'
+      - 'scripts/__init__.py'
+      - 'scripts/ix_scaffold_check.py'
+      - 'scripts/ix_graph_compare.py'
+      - 'scripts/ix_clone_loop.py'
+      - 'scripts/ix_graph_mcp.py'
+      - 'tests/test_ix_scaffold.py'
+      - 'tests/test_ix_graph_compare.py'
+      - 'tests/test_ix_clone_loop.py'
+      - 'tests/test_ix_graph_mcp.py'
+      - 'specs/**'
+      - 'examples/reference-app/**'
+      - '.github/workflows/ix-scaffold-tests.yml'
+  pull_request:
+    paths:
+      - 'architecture.scaffold.toml'
+      - 'scripts/__init__.py'
+      - 'scripts/ix_scaffold_check.py'
+      - 'scripts/ix_graph_compare.py'
+      - 'scripts/ix_clone_loop.py'
+      - 'scripts/ix_graph_mcp.py'
+      - 'tests/test_ix_scaffold.py'
+      - 'tests/test_ix_graph_compare.py'
+      - 'tests/test_ix_clone_loop.py'
+      - 'tests/test_ix_graph_mcp.py'
+      - 'specs/**'
+      - 'examples/reference-app/**'
+      - '.github/workflows/ix-scaffold-tests.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pytest
+        run: python3 -m pip install pytest
+
+      # These tests mock every `ix` subprocess call and every Arango HTTP
+      # request, so neither an Ix install nor a live ArangoDB is required on
+      # the runner — only the contract-parsing/ownership logic in
+      # scripts/ix_scaffold_check.py and the canonicalization/diff logic in
+      # scripts/ix_graph_compare.py are exercised.
+      - name: Run Ix scaffold verifier tests
+        run: python3 -m pytest tests/ -v

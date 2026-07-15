@@ -18,8 +18,11 @@ import {
 	findRegenerableNodes,
 	findRetryableLeaf,
 	parseTaskTree,
+	resolveCurrentTaskTreeStep,
 	taskTreeResource,
+	taskTreesFolder,
 } from '../../../../../../custom/agentTaskTree/agentTaskTreeService.js';
+import { graphProposalResource } from '../../../../../../custom/agentTaskTree/agentTaskTreeGraphProposal.js';
 import type { IIxIntegrationService } from '../../../../../../custom/ix/IxIntegrationService.js';
 import { registerSurfaceFromBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintScaffold.js';
 import type { SurfaceBlueprint } from '../../../../../../custom/goalWorkspace/surfaceBlueprintTypes.js';
@@ -42,6 +45,56 @@ suite('agentTaskTreeService', () => {
 			assert.strictEqual(tree.status, 'active');
 			assert.ok(tree.roots.length > 0);
 			assert.ok(await fileService.exists(taskTreeResource(workspaceFolder, tree.id)));
+			const proposalUri = graphProposalResource(taskTreesFolder(workspaceFolder), tree.id);
+			assert.ok(await fileService.exists(proposalUri), 'graph proposal is persisted next to the tree');
+			const proposal = JSON.parse((await fileService.readFile(proposalUri)).value.toString());
+			assert.strictEqual(proposal.version, 1);
+			assert.strictEqual(proposal.tree_id, tree.id);
+			assert.strictEqual(proposal.plan_ref, `.agent/task-trees/${tree.id}.json`);
+		} finally {
+			service.dispose();
+		}
+	});
+
+	test('surface build plan persists a graph proposal derived from subsystem paths', async () => {
+		const fileService = new TestFileService();
+		const service = new AgentTaskTreeService(fileService as unknown as IFileService, workspaceService() as unknown as IWorkspaceContextService);
+		const blueprint: SurfaceBlueprint = {
+			version: 1,
+			surfaceId: 'marketing',
+			surfaceName: 'Marketing Site',
+			templateId: 'marketing',
+			status: 'scaffolded',
+			createdAt: '2026-01-01T00:00:00.000Z',
+			subsystems: [
+				{ id: 'home-route', label: 'Marketing Home Route', kind: 'route', paths: ['apps/marketing/app/page.tsx'], minFiles: 1 },
+				{ id: 'shared', label: 'Shared Components', kind: 'shared', paths: ['apps/marketing/components'], minFiles: 1 },
+			],
+			manifest: { capabilities: [], events: [], entities: [], ixSubsystems: [] },
+			acceptance: {
+				requiredRoutes: [],
+				requiredWorkflows: [],
+				requiredUiSignals: [],
+				requiredBusinessTerms: [],
+				minimumFiles: 1,
+				minimumTotalLines: 1,
+				minimumInteractiveControls: 0,
+			},
+		};
+
+		try {
+			const tree = await service.generateSurfaceCoreBuildPlanTree(
+				'Build marketing surface',
+				{ surfaceId: 'marketing', surfaceName: 'Marketing Site', templateId: 'marketing' },
+				{ blueprint },
+			);
+
+			const proposalUri = graphProposalResource(taskTreesFolder(workspaceFolder), tree.id);
+			assert.ok(await fileService.exists(proposalUri));
+			const proposal = JSON.parse((await fileService.readFile(proposalUri)).value.toString());
+			assert.ok(proposal.add_nodes.includes('file:apps/marketing/app/page.tsx'), 'blueprint file path becomes a file node');
+			assert.ok(proposal.node_prefixes.includes('apps/marketing/components'), 'blueprint directory path becomes a prefix');
+			assert.deepStrictEqual(proposal.add_edges, [], 'deterministic builder never guesses edges');
 		} finally {
 			service.dispose();
 		}
@@ -214,6 +267,19 @@ suite('agentTaskTreeService', () => {
 
 		tree.cursor = {};
 		assert.strictEqual(findRetryableLeaf(tree)?.id, 'leaf-2');
+	});
+
+	test('resolveCurrentTaskTreeStep prefers failed/current leaf over next pending', () => {
+		const tree = createTree();
+		assert.strictEqual(resolveCurrentTaskTreeStep(tree)?.id, 'leaf-1');
+
+		tree.roots[0].children![0].status = 'failed';
+		tree.cursor = { currentNodeId: 'leaf-1' };
+		assert.strictEqual(resolveCurrentTaskTreeStep(tree)?.id, 'leaf-1');
+
+		tree.roots[0].children![0].status = 'complete';
+		tree.cursor = {};
+		assert.strictEqual(resolveCurrentTaskTreeStep(tree)?.id, 'leaf-2');
 	});
 
 	test('findRegenerableNodes returns roots with children', () => {

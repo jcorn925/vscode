@@ -494,6 +494,7 @@ export function parseWorkspaceManifest(raw: unknown, workspaceFolder: URI, manif
 		diagnostics.push({ path: '$.surfaces', message: 'Surfaces must be an array.' });
 	} else {
 		const seenSurfaceIds = new Set<string>();
+		const surfaceIndexByLocalOrigin = new Map<string, number>();
 		for (let i = 0; i < surfacesRaw.length; i++) {
 			const surface = parseSurface(surfacesRaw[i], i, diagnostics);
 			if (!surface) {
@@ -504,6 +505,18 @@ export function parseWorkspaceManifest(raw: unknown, workspaceFolder: URI, manif
 				continue;
 			}
 			seenSurfaceIds.add(surface.id);
+			if (surface.localUrl) {
+				const origin = new URL(surface.localUrl).origin;
+				const existingIndex = surfaceIndexByLocalOrigin.get(origin);
+				if (existingIndex !== undefined) {
+					diagnostics.push({
+						path: `$.surfaces[${i}].localUrl`,
+						message: `Local preview address "${origin}" is already assigned to surface ${existingIndex + 1}. Each surface must use a unique localhost address.`
+					});
+				} else {
+					surfaceIndexByLocalOrigin.set(origin, i);
+				}
+			}
 			surfaces.push(surface);
 		}
 	}

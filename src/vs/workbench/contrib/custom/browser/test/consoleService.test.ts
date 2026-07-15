@@ -197,6 +197,22 @@ suite('ConsoleService', () => {
 		]);
 	});
 
+	test('requires a unique local preview address for each surface', () => {
+		const state = parseWorkspaceManifest({
+			goal: { id: 'personal-training-business', name: 'Online Personal Training Business' },
+			surfaces: [
+				{ id: 'trainer-admin', name: 'Trainer Admin', localUrl: 'http://localhost:3001' },
+				{ id: 'content-scheduler', name: 'Content Scheduler', localUrl: 'http://localhost:3001/calendar' }
+			]
+		}, workspaceFolder, manifestResource);
+
+		assert.strictEqual(state.status, 'invalid');
+		assert.deepStrictEqual(state.diagnostics, [{
+			path: '$.surfaces[1].localUrl',
+			message: 'Local preview address "http://localhost:3001" is already assigned to surface 1. Each surface must use a unique localhost address.'
+		}]);
+	});
+
 	test('service exposes goal and normalized surfaces', async () => {
 		const fileService = new TestConsoleFileService(manifestResource, createManifest('booking', 'Booking'));
 		const service = disposables.add(new ConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));

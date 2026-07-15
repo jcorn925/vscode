@@ -258,9 +258,10 @@ export class DevServerService extends Disposable implements IDevServerService {
 			this.onWorkspaceChanged();
 		}
 
-		const reachableUrl = await this.findRunningDevServerUrl(preferredUrl);
-		if (reachableUrl) {
-			this.command = explicitCommand;
+		const alignedCommand = this.alignCommandToPreferredPort(explicitCommand, preferredUrl);
+		const reachableUrl = await this.findRunningDevServerUrl(preferredUrl, { allowNearbyPorts: false });
+		const ownsReachableUrl = reachableUrl === this.activeUrl && Boolean(this.command?.endsWith(alignedCommand));
+		if (reachableUrl && ownsReachableUrl) {
 			this.setActiveUrl(reachableUrl);
 			this.setPhase('running');
 			this.started = true;
@@ -272,7 +273,6 @@ export class DevServerService extends Disposable implements IDevServerService {
 		await this.terminalService.revealTerminal(instance, true);
 		this.attachTerminalDataListener(instance);
 
-		const alignedCommand = this.alignCommandToPreferredPort(explicitCommand, preferredUrl);
 		const commandToRun = await this.resolveCommandWithSurfaceInstall(workspaceFolder, alignedCommand);
 
 		this.script = undefined;
@@ -285,7 +285,7 @@ export class DevServerService extends Disposable implements IDevServerService {
 
 		this.started = true;
 		if (preferredUrl) {
-			const detectedUrl = await this.findRunningDevServerUrl(preferredUrl);
+			const detectedUrl = await this.findRunningDevServerUrl(preferredUrl, { allowNearbyPorts: false });
 			if (detectedUrl) {
 				this.setActiveUrl(detectedUrl);
 				this.setPhase('running');
