@@ -7,6 +7,8 @@ Cursor, this fork's workbench) can drive the compare/repair loop itself:
 
 - ``compare_graphs``   — compare a clone workspace against a reference
   workspace in the live Arango graph; returns recall metrics and the gap list.
+- ``compare_proposal`` — verify a workspace against a graph-proposal JSON file
+  (the plan contract) instead of a reference workspace; plan-first builds.
 - ``remap_and_wait``   — run ``ix map`` on a directory and poll Arango until
   the async ingest settles, so the next compare never scores stale state.
 - ``list_workspaces``  — list workspace ids and root paths from ~/.ix/config.yaml.
@@ -41,6 +43,7 @@ PROTOCOL_VERSION = "2024-11-05"
 DEFAULT_TOOL_MAX_GAPS = 50
 # Per-run recall history for the compare_graphs `run_id` progress signal.
 RUNS_DIR = Path(".ix-scaffold/graph-compare/runs")
+PROPOSAL_SNAPSHOT_DIR = Path(".ix-scaffold/graph-compare")
 
 JSONRPC_PARSE_ERROR = -32700
 JSONRPC_INVALID_REQUEST = -32600
@@ -91,6 +94,42 @@ TOOLS: list[dict[str, Any]] = [
                 },
             },
             "required": ["reference_workspace", "clone_workspace"],
+        },
+    },
+    {
+        "name": "compare_proposal",
+        "description": (
+            "Verify a workspace against a graph-proposal JSON file (the plan contract) instead of a "
+            "reference workspace — use this for plan-first builds where no reference repo exists. "
+            "The proposal predicts nodes/edges that should exist after implementation "
+            "(.agent/task-trees/<id>.graph-proposal.json). Recall-oriented: extra structure in the "
+            "workspace never fails; missing proposed nodes/structural edges and still-present "
+            "removals do. Speculative edges and node_prefixes are advisory only. "
+            "Run remap_and_wait after editing files, or this scores the pre-edit graph."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "proposal_path": {"type": "string", "description": "Absolute path to the graph-proposal JSON file."},
+                "clone_workspace": {"type": "string", "description": "Workspace id of the implementation under test."},
+                "root_b": {"type": "string", "description": "Path prefix to scope/strip on the workspace side (default: the proposal's own root)."},
+                "exclude": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Globs (relative to root) dropped from the workspace side, e.g. tests/**.",
+                },
+                "min_node_recall": {"type": "number", "description": "Proposed-node recall required for passed=true (default 1.0; proposals are curated, so full coverage is the natural bar — lower it per plan phase if the plan says so)."},
+                "min_edge_recall": {"type": "number", "description": "Structural-edge recall required for passed=true (default 1.0; trivially satisfied when the proposal declares no structural edges)."},
+                "max_gaps": {"type": "integer", "description": f"Cap on gap-list entries (default {DEFAULT_TOOL_MAX_GAPS})."},
+                "run_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional session id for convergence tracking across repeated compares; adds a "
+                        "`progress` block. Stop when passed is true OR rounds_without_improvement >= 2."
+                    ),
+                },
+            },
+            "required": ["proposal_path", "clone_workspace"],
         },
     },
     {
@@ -168,9 +207,13 @@ def _record_progress(run_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(history, list):
             raise ToolError(f"run history {run_path} is malformed (expected a JSON array)")
 
+    # Workspace-vs-workspace snapshots report edges.overall; proposal
+    # snapshots report edges.structural. Track whichever gates the pass.
+    edges = snapshot["comparison"]["edges"]
+    edge_recall = (edges.get("overall") or edges["structural"])["recall"]
     history.append({
         "node_recall": snapshot["comparison"]["nodes"]["recall"],
-        "edge_recall": snapshot["comparison"]["edges"]["overall"]["recall"],
+        "edge_recall": edge_recall,
         "passed": snapshot["passed"],
     })
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
@@ -244,6 +287,51 @@ def tool_compare_graphs(args: dict[str, Any]) -> dict[str, Any]:
     return snapshot
 
 
+def tool_compare_proposal(args: dict[str, Any]) -> dict[str, Any]:
+    proposal_path = Path(_require_str(args, "proposal_path"))
+    if not proposal_path.is_file():
+        raise ToolError(f"proposal file {proposal_path} does not exist")
+    try:
+        proposal = igc.load_graph_proposal(proposal_path)
+    except igc.GraphCompareError as exc:
+        raise ToolError(f"invalid proposal: {exc}") from exc
+    if not proposal.add_nodes and not proposal.structural_edges and not proposal.remove_nodes and not proposal.remove_edges:
+        raise ToolError(
+            f"proposal {proposal_path} declares nothing verifiable "
+            "(no add_nodes, structural add_edges, or removals)."
+        )
+
+    root_b = args.get("root_b")
+    side_b = igc.SideConfig(
+        label="clone", endpoint=igc.DEFAULT_ENDPOINT, db=igc.DEFAULT_DB,
+        workspace_id=_require_str(args, "clone_workspace"),
+        root=(str(root_b) if isinstance(root_b, str) else proposal.root).strip("/"),
+        kinds=igc.DEFAULT_KINDS,
+        excludes=_str_tuple(args, "exclude", ()),
+    )
+    try:
+        snapshot = igc.run_proposal_compare(
+            proposal, side_b,
+            min_node_recall=float(args.get("min_node_recall", 1.0)),
+            min_edge_recall=float(args.get("min_edge_recall", 1.0)),
+            max_gaps=int(args.get("max_gaps", DEFAULT_TOOL_MAX_GAPS)),
+        )
+    except igc.GraphCompareError as exc:
+        raise ToolError(f"proposal compare failed: {exc}") from exc
+
+    try:
+        named_path, latest_path = igc.write_proposal_snapshot(snapshot, PROPOSAL_SNAPSHOT_DIR)
+    except OSError as exc:
+        raise ToolError(f"could not write proposal snapshot: {exc}") from exc
+    snapshot["snapshot_path"] = str(named_path)
+    snapshot["latest_snapshot_path"] = str(latest_path)
+
+    run_id = args.get("run_id")
+    if isinstance(run_id, str) and run_id.strip():
+        snapshot["progress"] = _record_progress(run_id.strip(), snapshot)
+    return snapshot
+
+
 def tool_remap_and_wait(args: dict[str, Any]) -> dict[str, Any]:
     directory = Path(_require_str(args, "directory")).resolve()
     if not directory.is_dir():
@@ -284,6 +372,7 @@ def tool_list_workspaces(_args: dict[str, Any]) -> dict[str, Any]:
 
 TOOL_HANDLERS = {
     "compare_graphs": tool_compare_graphs,
+    "compare_proposal": tool_compare_proposal,
     "remap_and_wait": tool_remap_and_wait,
     "list_workspaces": tool_list_workspaces,
 }

@@ -71,12 +71,12 @@ def test_initialized_notification_gets_no_response() -> None:
     assert mcp.handle_request({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
 
 
-def test_tools_list_names_all_three_tools() -> None:
+def test_tools_list_names_all_tools() -> None:
     response = mcp.handle_request(_request("tools/list"))
 
     assert response is not None
     names = [t["name"] for t in response["result"]["tools"]]
-    assert names == ["compare_graphs", "remap_and_wait", "list_workspaces"]
+    assert names == ["compare_graphs", "compare_proposal", "remap_and_wait", "list_workspaces"]
     for tool in response["result"]["tools"]:
         assert tool["inputSchema"]["type"] == "object"
         assert tool["description"].strip()
@@ -262,6 +262,166 @@ def test_corrupt_run_history_fails_closed(monkeypatch: pytest.MonkeyPatch, runs_
     assert response is not None
     assert response["result"]["isError"] is True
     assert "unreadable" in _tool_payload(response)["error"]
+
+
+# --------------------------------------------------------------------------
+# compare_proposal tool
+# --------------------------------------------------------------------------
+
+
+def _proposal_snapshot(node_recall: float, passed: bool) -> dict[str, Any]:
+    return {
+        "proposal": {"path": "northstar.graph-proposal.json", "tree_id": "northstar"},
+        "clone": {"workspace_id": "ws-clone", "canonical_nodes": 12, "canonical_edges": 8},
+        "comparison": {
+            "nodes": {"recall": node_recall, "missing_in_clone": ["file:app/tools/kb_search.py"]},
+            "edges": {"structural": {"recall": 1.0}, "speculative": {"recall": 0.5}},
+            "removals": {"nodes_still_present": [], "edges_still_present": []},
+        },
+        "hard_failures": [] if passed else [f"proposed node recall {node_recall} is below --min-node-recall 1.0"],
+        "passed": passed,
+    }
+
+
+@pytest.fixture
+def proposal_file(tmp_path: Path) -> Path:
+    path = tmp_path / "northstar.graph-proposal.json"
+    path.write_text(json.dumps({
+        "version": 1,
+        "tree_id": "northstar",
+        "root": "app",
+        "add_nodes": ["file:app/main.py", "file:app/tools/kb_search.py"],
+        "add_edges": [
+            {"src": "file:app/main.py", "dst": "file:app/tools/kb_search.py", "predicate": "IMPORTS", "confidence": "structural"},
+        ],
+    }))
+    return path
+
+
+def test_compare_proposal_returns_snapshot(monkeypatch: pytest.MonkeyPatch, proposal_file: Path, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    written: list[Path] = []
+    snap_dir = tmp_path / "graph-compare"
+    monkeypatch.setattr(mcp, "PROPOSAL_SNAPSHOT_DIR", snap_dir)
+
+    def fake_run(proposal: igc.GraphProposal, side_b: igc.SideConfig, **kwargs: Any) -> dict[str, Any]:
+        captured["tree_id"] = proposal.tree_id
+        captured["clone"] = side_b.workspace_id
+        captured["root_b"] = side_b.root
+        captured["kwargs"] = kwargs
+        return _proposal_snapshot(0.5, passed=False)
+
+    def fake_write(snapshot: dict[str, Any], snapshot_dir: Path) -> tuple[Path, Path]:
+        written.append(snapshot_dir)
+        named = snapshot_dir / "proposal_northstar_vs_ws-clone.json"
+        latest = snapshot_dir / "latest-proposal.json"
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        named.write_text("{}")
+        latest.write_text("{}")
+        return named, latest
+
+    monkeypatch.setattr(igc, "run_proposal_compare", fake_run)
+    monkeypatch.setattr(igc, "write_proposal_snapshot", fake_write)
+
+    response = mcp.handle_request(_call("compare_proposal", {
+        "proposal_path": str(proposal_file), "clone_workspace": "ws-clone",
+    }))
+
+    assert response is not None
+    assert response["result"]["isError"] is False
+    payload = _tool_payload(response)
+    assert payload["comparison"]["nodes"]["missing_in_clone"] == ["file:app/tools/kb_search.py"]
+    assert payload["snapshot_path"].endswith("proposal_northstar_vs_ws-clone.json")
+    assert payload["latest_snapshot_path"].endswith("latest-proposal.json")
+    assert written == [snap_dir]
+    assert captured["tree_id"] == "northstar"
+    assert captured["clone"] == "ws-clone"
+    assert captured["root_b"] == "app"  # defaults to the proposal's own root
+    assert captured["kwargs"]["min_node_recall"] == 1.0
+    assert captured["kwargs"]["min_edge_recall"] == 1.0
+    assert captured["kwargs"]["max_gaps"] == mcp.DEFAULT_TOOL_MAX_GAPS
+
+
+def test_compare_proposal_root_b_overrides_proposal_root(monkeypatch: pytest.MonkeyPatch, proposal_file: Path, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(mcp, "PROPOSAL_SNAPSHOT_DIR", tmp_path / "graph-compare")
+
+    def fake_run(proposal: igc.GraphProposal, side_b: igc.SideConfig, **kwargs: Any) -> dict[str, Any]:
+        captured["root_b"] = side_b.root
+        return _proposal_snapshot(1.0, passed=True)
+
+    monkeypatch.setattr(igc, "run_proposal_compare", fake_run)
+    monkeypatch.setattr(igc, "write_proposal_snapshot", lambda snap, d: (d / "a.json", d / "latest-proposal.json"))
+
+    response = mcp.handle_request(_call("compare_proposal", {
+        "proposal_path": str(proposal_file), "clone_workspace": "ws-clone", "root_b": "src/app/",
+    }))
+
+    assert response is not None
+    assert response["result"]["isError"] is False
+    assert captured["root_b"] == "src/app"
+
+
+def test_compare_proposal_missing_file_is_tool_error(tmp_path: Path) -> None:
+    response = mcp.handle_request(_call("compare_proposal", {
+        "proposal_path": str(tmp_path / "nope.json"), "clone_workspace": "ws-clone",
+    }))
+
+    assert response is not None
+    assert response["result"]["isError"] is True
+    assert "does not exist" in _tool_payload(response)["error"]
+
+
+def test_compare_proposal_invalid_document_is_tool_error(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"version": 2, "tree_id": "x"}))
+
+    response = mcp.handle_request(_call("compare_proposal", {
+        "proposal_path": str(bad), "clone_workspace": "ws-clone",
+    }))
+
+    assert response is not None
+    assert response["result"]["isError"] is True
+    assert "invalid proposal" in _tool_payload(response)["error"]
+
+
+def test_compare_proposal_with_nothing_verifiable_fails_closed(tmp_path: Path) -> None:
+    empty = tmp_path / "empty.json"
+    empty.write_text(json.dumps({"version": 1, "tree_id": "x", "root": "app"}))
+
+    response = mcp.handle_request(_call("compare_proposal", {
+        "proposal_path": str(empty), "clone_workspace": "ws-clone",
+    }))
+
+    assert response is not None
+    assert response["result"]["isError"] is True
+    assert "nothing verifiable" in _tool_payload(response)["error"]
+
+
+def test_compare_proposal_run_id_tracks_structural_edge_recall(
+    monkeypatch: pytest.MonkeyPatch, runs_dir: Path, proposal_file: Path, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(mcp, "PROPOSAL_SNAPSHOT_DIR", tmp_path / "graph-compare")
+    monkeypatch.setattr(igc, "write_proposal_snapshot", lambda snap, d: (d / "a.json", d / "latest-proposal.json"))
+
+    def compare_at(node_recall: float, passed: bool = False) -> dict[str, Any]:
+        monkeypatch.setattr(igc, "run_proposal_compare", lambda *a, **k: _proposal_snapshot(node_recall, passed))
+        response = mcp.handle_request(_call("compare_proposal", {
+            "proposal_path": str(proposal_file), "clone_workspace": "ws-clone", "run_id": "plan-1",
+        }))
+        assert response is not None
+        assert response["result"]["isError"] is False
+        return _tool_payload(response)
+
+    first = compare_at(0.5)
+    second = compare_at(0.8)
+    third = compare_at(1.0, passed=True)
+
+    assert first["progress"]["round"] == 1
+    assert second["progress"]["node_recall_delta"] == pytest.approx(0.3)
+    assert third["progress"]["recommendation"] == "converged: thresholds met"
+    history = json.loads((runs_dir / "plan-1.json").read_text())
+    assert [entry["edge_recall"] for entry in history] == [1.0, 1.0, 1.0]
 
 
 # --------------------------------------------------------------------------

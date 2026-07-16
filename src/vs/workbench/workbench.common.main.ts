@@ -431,6 +431,7 @@ import './contrib/custom/browser/startupGuide.contribution.js';
 import './contrib/custom/browser/appLaunchGuide.contribution.js';
 import './contrib/custom/browser/surfaceFeatureChecklist.contribution.js';
 import './contrib/custom/browser/ix.contribution.js';
+import './contrib/custom/browser/proposalGraphDiff.contribution.js';
 import './contrib/custom/browser/customAi.contribution.js';
 import './contrib/custom/browser/agentTaskTree.contribution.js';
 

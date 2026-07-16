@@ -352,11 +352,16 @@ class ModeShellContribution extends Disposable {
 	private uiSurfaceSetupBusinessContext!: HTMLElement;
 	private uiSurfaceSetupBusinessContextToggle!: HTMLButtonElement;
 	private uiSurfaceSetupBusinessContextChevron!: HTMLElement;
+	private uiSurfaceSetupSurfacesSection!: HTMLElement;
+	private uiSurfaceSetupSurfacesToggle!: HTMLButtonElement;
+	private uiSurfaceSetupSurfacesChevron!: HTMLElement;
+	private uiSurfaceSetupSurfacesBody!: HTMLElement;
 	private readonly uiSurfaceSetupSections = new Map<SurfaceSetupStep, HTMLElement>();
 	private surfaceSetupBrandLogoPath: string | undefined;
 	private surfaceSetupBrandLogoMarkPath: string | undefined;
 	private surfaceSetupCurrentStep: SurfaceSetupStep = 'goal';
 	private surfaceSetupBusinessContextOpen = false;
+	private surfaceSetupSurfacesSectionOpen = false;
 	private surfaceSetupDraftDirty = false;
 	private surfaceSetupHydrating = false;
 	private readonly surfaceSetupAutosaveScheduler = this._register(new RunOnceScheduler(() => void this.autosaveSurfaceSetupBuilder(), 600));
@@ -2180,26 +2185,68 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-section[data-section="surfaces"] {
-				gap: 16px;
+				display: flex;
+				flex-direction: column;
+				gap: 12px;
 				padding-top: 24px;
 				padding-bottom: 16px;
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-starters-header {
-				display: grid;
-				grid-template-columns: minmax(0, 1fr) auto;
+			.monaco-workbench .custom-mode-ui-surface-surfaces-toggle {
+				display: flex;
 				align-items: center;
-				column-gap: 12px;
-				row-gap: 4px;
+				gap: 6px;
+				width: fit-content;
+				padding: 0;
+				border: 0;
+				background: transparent;
+				color: var(--vscode-foreground);
+				font-size: 15px;
+				font-weight: 650;
+				line-height: 1.3;
+				font-family: inherit;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-surfaces-toggle:hover {
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-surfaces-toggle:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: 2px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-surfaces-chevron {
+				color: var(--vscode-descriptionForeground);
+				font-size: 14px;
+				line-height: 1;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-surfaces-body {
+				display: flex;
+				flex-direction: column;
+				gap: 14px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-setup-section[data-section="surfaces"]:not(.open) .custom-mode-ui-surface-surfaces-body {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starters-header {
+				display: flex;
+				align-items: flex-start;
+				justify-content: space-between;
+				gap: 12px;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starters-subtitle {
-				grid-column: 1 / -1;
+				flex: 1 1 auto;
+				min-width: 0;
 			}
 
 			.monaco-workbench .custom-mode-start-all-surfaces {
-				grid-row: 1;
-				grid-column: 2;
+				flex: 0 0 auto;
 				height: 28px;
 				padding: 0 10px;
 				border-radius: 6px;
@@ -5286,13 +5333,23 @@ class ModeShellContribution extends Disposable {
 		starterGrid.appendChild(this.createNewSurfaceCard());
 		this.uiStartAllSurfacesButton = $('button.custom-mode-start-all-surfaces', { type: 'button' }, localize('customMode.startAllSurfaces', 'Start all surfaces')) as HTMLButtonElement;
 		this._register(addDisposableListener(this.uiStartAllSurfacesButton, 'click', () => void this.onStartAllSurfacesClicked()));
-		const starterButtons = $('div.custom-mode-ui-surface-starters', undefined,
-			$('div.custom-mode-ui-surface-starters-header', undefined,
-				$('div.custom-mode-ui-surface-starters-title', undefined, localize('customMode.surfaceSetupStartersTitle', 'Surfaces')),
-				$('div.custom-mode-ui-surface-starters-subtitle', undefined, localize('customMode.surfaceSetupStartersSubtitle', 'Choose where to start. Each surface becomes a deployable app in your workspace.')),
-				this.uiStartAllSurfacesButton,
+		this.uiSurfaceSetupSurfacesChevron = $('span.custom-mode-ui-surface-surfaces-chevron.codicon' + ThemeIcon.asCSSSelector(Codicon.chevronRight));
+		this.uiSurfaceSetupSurfacesToggle = $('button.custom-mode-ui-surface-surfaces-toggle', {
+			type: 'button',
+			'aria-expanded': 'false',
+			'aria-controls': 'surface-setup-surfaces-body',
+		}, this.uiSurfaceSetupSurfacesChevron, localize('customMode.surfaceSetupStartersTitle', 'Surfaces')) as HTMLButtonElement;
+		this._register(addDisposableListener(this.uiSurfaceSetupSurfacesToggle, 'click', () => {
+			this.setSurfaceSetupSurfacesSectionOpen(!this.surfaceSetupSurfacesSectionOpen);
+		}));
+		this.uiSurfaceSetupSurfacesBody = $('div.custom-mode-ui-surface-surfaces-body', { id: 'surface-setup-surfaces-body' },
+			$('div.custom-mode-ui-surface-starters', undefined,
+				$('div.custom-mode-ui-surface-starters-header', undefined,
+					$('div.custom-mode-ui-surface-starters-subtitle', undefined, localize('customMode.surfaceSetupStartersSubtitle', 'Choose where to start. Each surface becomes a deployable app in your workspace.')),
+					this.uiStartAllSurfacesButton,
+				),
+				starterGrid,
 			),
-			starterGrid,
 		);
 
 		this.uiSurfaceSetupGoalNameInput = $('input.custom-mode-ui-surface-goal-input', {
@@ -5366,9 +5423,12 @@ class ModeShellContribution extends Disposable {
 				this.uiSurfaceSetupBusinessContext,
 			)
 		);
-		const surfacesSection = $('section.custom-mode-ui-surface-setup-section', { id: 'surface-setup-section-surfaces', 'data-section': 'surfaces' },
-			starterButtons
+		this.uiSurfaceSetupSurfacesSection = $('section.custom-mode-ui-surface-setup-section', { id: 'surface-setup-section-surfaces', 'data-section': 'surfaces' },
+			this.uiSurfaceSetupSurfacesToggle,
+			this.uiSurfaceSetupSurfacesBody,
 		);
+		this.applySurfaceSetupSurfacesSectionOpenState();
+		const surfacesSection = this.uiSurfaceSetupSurfacesSection;
 		for (const [step, section] of [
 			['goal', goalSection],
 			['brand', this.uiSurfaceSetupBusinessContext],
@@ -6060,10 +6120,30 @@ class ModeShellContribution extends Disposable {
 		].join(' ');
 	}
 
+	private setSurfaceSetupSurfacesSectionOpen(open: boolean): void {
+		if (this.surfaceSetupSurfacesSectionOpen === open) {
+			return;
+		}
+		this.surfaceSetupSurfacesSectionOpen = open;
+		this.applySurfaceSetupSurfacesSectionOpenState();
+	}
+
+	private applySurfaceSetupSurfacesSectionOpenState(): void {
+		this.uiSurfaceSetupSurfacesSection.classList.toggle('open', this.surfaceSetupSurfacesSectionOpen);
+		this.uiSurfaceSetupSurfacesToggle.setAttribute('aria-expanded', String(this.surfaceSetupSurfacesSectionOpen));
+		this.uiSurfaceSetupSurfacesChevron.className = [
+			'custom-mode-ui-surface-surfaces-chevron',
+			ThemeIcon.asClassName(this.surfaceSetupSurfacesSectionOpen ? Codicon.chevronDown : Codicon.chevronRight),
+		].join(' ');
+	}
+
 	private focusSurfaceSetupSection(step: SurfaceSetupStep, options?: { scroll?: boolean }): void {
 		this.surfaceSetupCurrentStep = step;
 		if (step === 'brand') {
 			this.setSurfaceSetupBusinessContextOpen(true);
+		}
+		if (step === 'surfaces') {
+			this.setSurfaceSetupSurfacesSectionOpen(true);
 		}
 		if (options?.scroll === false) {
 			return;

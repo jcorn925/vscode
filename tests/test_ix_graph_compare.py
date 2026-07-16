@@ -526,6 +526,8 @@ def test_proposal_fully_present_in_clone_passes(monkeypatch: pytest.MonkeyPatch,
     assert snapshot["passed"] is True
     assert snapshot["hard_failures"] == []
     assert snapshot["comparison"]["nodes"]["recall"] == 1.0
+    assert snapshot["comparison"]["nodes"]["matched_in_clone"] == sorted(proposal.add_nodes)
+    assert snapshot["comparison"]["nodes"]["missing_in_clone"] == []
     assert snapshot["comparison"]["edges"]["structural"]["recall"] == 1.0
     assert snapshot["comparison"]["gaps"] == []
 

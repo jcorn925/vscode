@@ -598,9 +598,11 @@ def compare_proposal(
 ) -> dict[str, Any]:
     node_metrics = _recall_metrics(proposal.add_nodes, nodes_b.ids)
     missing_nodes = sorted(proposal.add_nodes - nodes_b.ids)
+    matched_nodes = sorted(proposal.add_nodes & nodes_b.ids)
 
     structural_metrics = _recall_metrics(proposal.structural_edges, edges_b.triples)
     missing_structural = sorted(proposal.structural_edges - edges_b.triples)
+    matched_structural = sorted(proposal.structural_edges & edges_b.triples)
 
     speculative_metrics = _recall_metrics(proposal.speculative_edges, edges_b.triples)
     missing_speculative = sorted(proposal.speculative_edges - edges_b.triples)
@@ -630,11 +632,13 @@ def compare_proposal(
     return {
         "nodes": {
             **node_metrics,
+            "matched_in_clone": matched_nodes[:max_gaps],
             "missing_in_clone": missing_nodes[:max_gaps],
         },
         "edges": {
             "structural": {
                 **structural_metrics,
+                "matched_in_clone": [_edge_label(t) for t in matched_structural[:max_gaps]],
                 "missing_in_clone": [_edge_label(t) for t in missing_structural[:max_gaps]],
             },
             "speculative": {
