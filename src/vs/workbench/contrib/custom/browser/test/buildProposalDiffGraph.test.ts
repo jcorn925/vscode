@@ -7,6 +7,7 @@ import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import {
 	buildProposalDiffGraph,
+	buildProposalPreviewGraph,
 	displayLabelForCanonicalId,
 	kindForCanonicalId,
 } from '../proposalGraphDiff/buildProposalDiffGraph.js';
@@ -23,6 +24,22 @@ suite('buildProposalDiffGraph', () => {
 		);
 		assert.strictEqual(kindForCanonicalId('class:a.py::Foo'), 'symbol');
 		assert.strictEqual(kindForCanonicalId('file:a.py'), 'file');
+	});
+
+	test('preview graph accepts from/to/type edge aliases', () => {
+		const proposal: GraphProposalDocument = {
+			version: 1,
+			tree_id: 'cadre',
+			add_nodes: ['file:apps/cadre/app/layout.tsx', 'file:apps/cadre/app/page.tsx'],
+			add_edges: [
+				{ from: 'file:apps/cadre/app/layout.tsx', to: 'file:apps/cadre/app/page.tsx', type: 'renders' } as never,
+			],
+		};
+		const graph = buildProposalPreviewGraph(proposal);
+		assert.strictEqual(graph.nodes.length, 2);
+		assert.strictEqual(graph.edges.length, 1);
+		assert.strictEqual(graph.edges[0].predicate, 'RENDERS');
+		assert.strictEqual(graph.edges[0].status, 'matched');
 	});
 
 	test('colors matched and missing nodes from snapshot lists', () => {

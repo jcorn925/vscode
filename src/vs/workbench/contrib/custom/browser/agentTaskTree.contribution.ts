@@ -5,14 +5,9 @@
 
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
-import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
-import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
-import { Disposable } from '../../../../base/common/lifecycle.js';
-import { WorkbenchPhase, registerWorkbenchContribution2 } from '../../../common/contributions.js';
-import { IWorkbenchContribution } from '../../../common/contributions.js';
 import { findRegenerableNodes, findRetryableLeaf, IAgentTaskTreeService } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import type { AgentTaskNode, AgentTaskTree } from '../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
 import { formatNodeDetail, statusIconQuickPick } from '../../../../../custom/agentTaskTree/surfaceTaskTreeUiHelpers.js';
@@ -297,60 +292,3 @@ function pushNode(items: IQuickPickItem[], node: AgentTaskNode, depth: number): 
 	}
 }
 
-class AgentTaskTreeResumeContribution extends Disposable implements IWorkbenchContribution {
-	static readonly ID = 'workbench.contrib.agentTaskTreeResume';
-
-	private promptedForSession = false;
-
-	constructor(
-		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
-		@IAgentTaskTreeService private readonly agentTaskTreeService: IAgentTaskTreeService,
-		@INotificationService private readonly notificationService: INotificationService,
-		@ICommandService private readonly commandService: ICommandService,
-	) {
-		super();
-		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.maybePromptResume()));
-		queueMicrotask(() => this.maybePromptResume());
-	}
-
-	private async maybePromptResume(): Promise<void> {
-		if (this.promptedForSession) {
-			return;
-		}
-		if (!this.workspaceContextService.getWorkspace().folders.length) {
-			return;
-		}
-		const tree = await this.agentTaskTreeService.loadLatestResumableTaskTree();
-		if (!tree) {
-			return;
-		}
-		this.promptedForSession = true;
-		const nextTask = this.agentTaskTreeService.findNextPendingLeaf(tree);
-		this.notificationService.prompt(
-			Severity.Info,
-			localize(
-				'custom.agentTaskTree.resume.prompt',
-				'Found resumable task tree "{0}". Next task: {1}.',
-				tree.prompt,
-				nextTask?.title ?? localize('custom.agentTaskTree.resume.noNext', 'none remaining'),
-			),
-			[
-				{
-					label: localize('custom.agentTaskTree.view.action', 'View'),
-					run: () => {
-						if (!tree.surfaceId) {
-							this.notificationService.notify({
-								severity: Severity.Warning,
-								message: localize('custom.agentTaskTree.view.noSurface', 'This task tree is not linked to a surface tab.'),
-							});
-							return;
-						}
-						void this.commandService.executeCommand('custom.modeShell.viewSurface', tree.surfaceId);
-					},
-				},
-			],
-		);
-	}
-}
-
-registerWorkbenchContribution2(AgentTaskTreeResumeContribution.ID, AgentTaskTreeResumeContribution, WorkbenchPhase.AfterRestored);

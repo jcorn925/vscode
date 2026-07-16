@@ -37,7 +37,8 @@ test/componentFixtures/.screenshots/*
 dist
 .playwright-cli
 .playwright-mcp
-.claude/
+.claude/*
+!.claude/settings.json
 .agents/agents/*.local.md
 .github/agents/*.local.md
 .agents/agents/*.local.agent.md

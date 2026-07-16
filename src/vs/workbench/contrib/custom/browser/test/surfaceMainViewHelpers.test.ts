@@ -41,6 +41,17 @@ suite('surfaceMainViewHelpers', () => {
 		assert.strictEqual(ixView, 'ixSubsystems');
 		assert.notStrictEqual(resolveDefaultSurfaceMainView(createTree('active'), true), ixView);
 	});
+
+	test('resolveDefaultSurfaceMainView prefers Plan when only a plan exists', () => {
+		assert.strictEqual(resolveDefaultSurfaceMainView(undefined, false, true), 'plan');
+		const planView: SurfaceMainView = 'plan';
+		assert.strictEqual(planView, 'plan');
+	});
+
+	test('SurfaceMainView accepts the CLAUDE.md tab', () => {
+		const claudeView: SurfaceMainView = 'claudeMd';
+		assert.strictEqual(claudeView, 'claudeMd');
+	});
 });
 
 function createTree(status: AgentTaskTree['status']): AgentTaskTree {

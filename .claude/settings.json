@@ -1,0 +1,56 @@
+{
+	"$schema": "https://json.schemastore.org/claude-code-settings.json",
+	"permissions": {
+		"allow": [
+			"Bash(python3 scripts/claude_inspect_goal_workspace.py)",
+			"Bash(python3 scripts/claude_inspect_goal_workspace.py *)",
+			"Bash(python3 .claude/scripts/inspect_goal_workspace.py)",
+			"Bash(python3 .claude/scripts/inspect_goal_workspace.py *)",
+			"Bash(git status)",
+			"Bash(git status *)",
+			"Bash(git log *)",
+			"Bash(git diff *)",
+			"Bash(git show *)",
+			"Bash(git branch *)",
+			"Bash(git rev-parse *)",
+			"Bash(ls *)",
+			"Bash(find .agent *)",
+			"Bash(find apps *)",
+			"Bash(head *)",
+			"Bash(wc *)",
+			"Bash(cat workspace.goal.json)",
+			"Bash(cat CLAUDE.md)",
+			"Bash(cat plan.md)",
+			"Bash(cat .agent/surfaces/*)",
+			"Bash(cat .agent/task-trees/*)",
+			"Bash(jq *)",
+			"Read(./workspace.goal.json)",
+			"Read(./CLAUDE.md)",
+			"Read(./plan.md)",
+			"Read(./.agent/**)",
+			"mcp__ix-graph__compare_graphs",
+			"mcp__ix-graph__compare_proposal",
+			"mcp__ix-graph__remap_and_wait",
+			"mcp__ix-graph__list_workspaces"
+		],
+		"ask": [
+			"Bash(git push *)",
+			"Bash(git commit *)",
+			"Bash(git checkout *)",
+			"Bash(git switch *)",
+			"Bash(git merge *)",
+			"Bash(git rebase *)"
+		],
+		"deny": [
+			"Bash(rm -rf *)",
+			"Bash(git push --force *)",
+			"Bash(git push -f *)",
+			"Bash(git reset --hard *)",
+			"Bash(git clean -fd *)",
+			"Bash(sudo *)",
+			"Read(./.env)",
+			"Read(./.env.*)",
+			"Read(./secrets/**)"
+		]
+	}
+}

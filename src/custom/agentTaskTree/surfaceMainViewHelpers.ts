@@ -6,7 +6,7 @@
 import type { AgentTaskTree } from './agentTaskTreeTypes.js';
 import { treeHasActiveWork } from './agentTaskTreeService.js';
 
-export type SurfaceMainView = 'taskTree' | 'preview' | 'ixSubsystems';
+export type SurfaceMainView = 'plan' | 'claudeMd' | 'taskTree' | 'preview' | 'ixSubsystems';
 
 export function shouldShowSurfaceMainViewToggle(options: {
 	readonly selectedSurfaceId: string | undefined;
@@ -22,9 +22,16 @@ export function shouldShowSurfaceMainViewToggle(options: {
 	return true;
 }
 
-export function resolveDefaultSurfaceMainView(tree: AgentTaskTree | undefined, previewReachable: boolean): SurfaceMainView {
+export function resolveDefaultSurfaceMainView(
+	tree: AgentTaskTree | undefined,
+	previewReachable: boolean,
+	hasPlan = false,
+): SurfaceMainView {
+	if (!tree && hasPlan) {
+		return 'plan';
+	}
 	if (!tree) {
-		return 'taskTree';
+		return hasPlan ? 'plan' : 'taskTree';
 	}
 	if (treeHasActiveWork(tree)) {
 		return 'taskTree';
@@ -32,5 +39,12 @@ export function resolveDefaultSurfaceMainView(tree: AgentTaskTree | undefined, p
 	if (tree.status === 'complete' && previewReachable) {
 		return 'preview';
 	}
+	if (hasPlan && tree.status !== 'complete') {
+		return 'plan';
+	}
 	return 'taskTree';
+}
+
+export function isSurfaceMainView(value: string | undefined): value is SurfaceMainView {
+	return value === 'plan' || value === 'claudeMd' || value === 'taskTree' || value === 'preview' || value === 'ixSubsystems';
 }

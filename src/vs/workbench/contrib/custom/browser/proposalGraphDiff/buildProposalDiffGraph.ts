@@ -65,6 +65,63 @@ function edgeId(src: string, predicate: string, dst: string, confidence: string)
 }
 
 /**
+ * Builds a preview graph from a proposal alone (no compare snapshot).
+ * Structural nodes/edges render as matched; speculative edges are dashed advisory.
+ */
+export function buildProposalPreviewGraph(proposal: GraphProposalDocument): ProposalDiffGraph {
+	const addNodes = [...(proposal.add_nodes ?? [])];
+	// Normalize omitted confidence to structural so preview edges are solid (agents often omit it).
+	// Also accept from/to/type aliases that Claude sometimes writes instead of src/dst/predicate.
+	const normalizedEdges = (proposal.add_edges ?? [])
+		.map(normalizePreviewEdge)
+		.filter((e): e is GraphProposalEdgeDocument => Boolean(e));
+	const labelOf = (e: GraphProposalEdgeDocument) => `${e.src} --${e.predicate.toUpperCase()}--> ${e.dst}`;
+	const structuralLabels = normalizedEdges
+		.filter(e => e.confidence === 'structural')
+		.map(labelOf);
+	const speculativeLabels = normalizedEdges
+		.filter(e => e.confidence === 'speculative')
+		.map(labelOf);
+	return buildProposalDiffGraph({ ...proposal, add_edges: normalizedEdges }, {
+		passed: true,
+		proposal: { tree_id: proposal.tree_id },
+		comparison: {
+			nodes: {
+				recall: 1,
+				matched_in_clone: addNodes,
+				missing_in_clone: [],
+			},
+			edges: {
+				structural: {
+					recall: 1,
+					matched_in_clone: structuralLabels,
+					missing_in_clone: [],
+				},
+				speculative: {
+					recall: 1,
+					missing_in_clone: speculativeLabels,
+				},
+			},
+		},
+	});
+}
+
+function normalizePreviewEdge(raw: GraphProposalEdgeDocument): GraphProposalEdgeDocument | undefined {
+	const src = (raw.src || raw.from || '').trim();
+	const dst = (raw.dst || raw.to || '').trim();
+	const predicate = (raw.predicate || raw.type || '').trim();
+	if (!src || !dst || !predicate) {
+		return undefined;
+	}
+	return {
+		src,
+		dst,
+		predicate: predicate.toUpperCase(),
+		confidence: raw.confidence === 'speculative' ? 'speculative' : 'structural',
+	};
+}
+
+/**
  * Builds a status-colored graph from a proposal document + proposal-compare snapshot.
  * Pure: no I/O. Prefer snapshot `matched_in_clone` when present; otherwise derive
  * matched = proposed − missing.

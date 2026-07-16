@@ -66,6 +66,10 @@ export interface GraphProposalEdgeDocument {
 	readonly dst: string;
 	readonly predicate: string;
 	readonly confidence?: string;
+	/** Agent-authored proposals sometimes use from/to/type instead of src/dst/predicate. */
+	readonly from?: string;
+	readonly to?: string;
+	readonly type?: string;
 }
 
 /** Subset of the proposal-compare snapshot used by the visualizer. */
