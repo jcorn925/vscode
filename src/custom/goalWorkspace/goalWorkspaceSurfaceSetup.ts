@@ -9,6 +9,11 @@ import { joinPath } from '../../vs/base/common/resources.js';
 import { IFileService } from '../../vs/platform/files/common/files.js';
 import type { WorkspaceBrand, WorkspaceShared } from './ConsoleService.js';
 import { AGENT_CONTEXT_FOLDER, WORKSPACE_MANIFEST } from './ConsoleService.js';
+import {
+	surfaceGraphProposalDraftResource,
+	surfaceGraphProposalResource,
+	surfacePlanResource,
+} from './surfacePlanPaths.js';
 
 export const GOAL_WORKSPACE_BUILDER_DRAFT_FILE = 'builder-draft.json';
 export const GOAL_WORKSPACE_BRAND_SUBFOLDER = 'brand';
@@ -319,6 +324,11 @@ export async function deleteGoalWorkspaceSurface(
 	workspaceFolder: URI,
 	surfaceId: string,
 ): Promise<boolean> {
+	const id = surfaceId.trim();
+	if (!id) {
+		return false;
+	}
+
 	const manifestResource = joinPath(workspaceFolder, WORKSPACE_MANIFEST);
 	let raw: Record<string, unknown> = {};
 	try {
@@ -335,11 +345,12 @@ export async function deleteGoalWorkspaceSurface(
 		return false;
 	}
 
+	const existing = raw.surfaces.find(surface => isRecord(surface) && surface.id === id);
 	const nextSurfaces = raw.surfaces.filter(surface => {
 		if (!isRecord(surface)) {
 			return true;
 		}
-		return surface.id !== surfaceId;
+		return surface.id !== id;
 	});
 	if (nextSurfaces.length === raw.surfaces.length) {
 		return false;
@@ -347,6 +358,34 @@ export async function deleteGoalWorkspaceSurface(
 
 	raw.surfaces = nextSurfaces;
 	await fileService.writeFile(manifestResource, VSBuffer.fromString(JSON.stringify(raw, null, '\t')));
+
+	// Drop planning/verification artifacts so delete does not leave orphan plans.
+	const artifactResources: URI[] = [
+		surfacePlanResource(workspaceFolder, id),
+		joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER, 'surfaces', `${id}.blueprint.json`),
+		joinPath(workspaceFolder, AGENT_CONTEXT_FOLDER, 'surfaces', `${id}.memory.md`),
+		surfaceGraphProposalResource(workspaceFolder, id),
+		surfaceGraphProposalDraftResource(workspaceFolder, id),
+	];
+	for (const resource of artifactResources) {
+		try {
+			await fileService.del(resource);
+		} catch {
+			// Missing artifacts are fine — surface may never have reached plan/proposal.
+		}
+	}
+
+	const appPath = isRecord(existing) && typeof existing.path === 'string'
+		? existing.path.trim().replace(/^\/+|\/+$/g, '')
+		: `apps/${id}`;
+	if (appPath && !appPath.includes('..') && !appPath.startsWith('/')) {
+		try {
+			await fileService.del(joinPath(workspaceFolder, ...appPath.split('/')), { recursive: true });
+		} catch {
+			// App folder may not exist yet (plan-only surfaces).
+		}
+	}
+
 	return true;
 }
 

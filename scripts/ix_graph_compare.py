@@ -49,6 +49,7 @@ import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -721,6 +722,149 @@ def run_compare(
         "hard_failures": hard_failures,
         "passed": not hard_failures,
     }
+
+
+def draft_proposal_from_workspace(
+    side: SideConfig,
+    predicates: tuple[str, ...] = DEFAULT_PREDICATES,
+    *,
+    tree_id: str,
+    surface_id: str | None = None,
+    plan_ref: str | None = None,
+    rewrite_root_from: str = "",
+    rewrite_root_to: str = "",
+    max_nodes: int = 400,
+    max_edges: int = 800,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    """Export a live workspace graph as a draft graph-proposal document.
+
+    Used during planning: map a comparable reference checkout, draft its shape,
+    then rewrite/adapt the draft to the surface Plan lock before writing the
+    final ``.graph-proposal.json``. Does not invent architecture — it only
+    serializes what Ix already ingested.
+    """
+
+    if not tree_id.strip():
+        raise GraphCompareError("tree_id is required for draft_proposal_from_workspace")
+
+    nodes = canonicalize_nodes(fetch_node_docs(side, timeout), side.root, side.excludes)
+    edges = canonicalize_edges(fetch_edge_docs(side, predicates, timeout), nodes)
+    if not nodes.ids:
+        raise GraphCompareError(
+            f"workspace {side.workspace_id} has no canonical nodes; "
+            "run remap_and_wait first, or check root/exclude filters."
+        )
+
+    from_prefix = rewrite_root_from.strip().strip("/")
+    to_prefix = rewrite_root_to.strip().strip("/")
+
+    def rewrite_id(node_id: str) -> str | None:
+        kind_sep = node_id.find(":")
+        if kind_sep <= 0:
+            return None
+        kind = node_id[:kind_sep]
+        rest = node_id[kind_sep + 1:]
+        if kind in ("file", "module"):
+            path = rest
+            symbol = ""
+        else:
+            symbol_sep = rest.find("::")
+            if symbol_sep <= 0:
+                return None
+            path = rest[:symbol_sep]
+            symbol = rest[symbol_sep:]
+        if from_prefix:
+            if path == from_prefix:
+                path = to_prefix
+            elif path.startswith(from_prefix + "/"):
+                path = (to_prefix + "/" if to_prefix else "") + path[len(from_prefix) + 1:]
+            else:
+                return None
+        elif to_prefix:
+            path = f"{to_prefix}/{path}"
+        rewritten = f"{kind}:{path}{symbol}"
+        return rewritten if is_valid_proposal_pathish(path) else None
+
+    # Prefer path-level nodes for surface proposals; keep symbols only when asked.
+    preferred = [n for n in nodes.ids if n.startswith("file:") or n.startswith("module:")]
+    preferred_set = set(preferred) if preferred else set(nodes.ids)
+    rewritten_nodes: list[str] = []
+    seen: set[str] = set()
+    truncated_nodes = 0
+    for node_id in sorted(preferred_set):
+        rewritten = rewrite_id(node_id)
+        if rewritten is None or rewritten in seen:
+            continue
+        if len(rewritten_nodes) >= max_nodes:
+            truncated_nodes += 1
+            continue
+        seen.add(rewritten)
+        rewritten_nodes.append(rewritten)
+
+    add_edges: list[dict[str, str]] = []
+    truncated_edges = 0
+    for src, predicate, dst in sorted(edges.triples):
+        if src not in preferred_set or dst not in preferred_set:
+            continue
+        new_src = rewrite_id(src)
+        new_dst = rewrite_id(dst)
+        if not new_src or not new_dst or new_src not in seen or new_dst not in seen:
+            continue
+        if len(add_edges) >= max_edges:
+            truncated_edges += 1
+            continue
+        add_edges.append({
+            "src": new_src,
+            "dst": new_dst,
+            "predicate": predicate,
+            "confidence": "structural",
+        })
+
+    prefixes: set[str] = set()
+    for node_id in rewritten_nodes:
+        kind_sep = node_id.find(":")
+        path = node_id[kind_sep + 1:].split("::", 1)[0]
+        parts = path.split("/")
+        for i in range(1, min(len(parts), 4)):
+            prefixes.add("/".join(parts[:i]))
+
+    root_value = f"file:{to_prefix}" if to_prefix else (f"file:{side.root}" if side.root else "")
+    proposal = {
+        "version": 1,
+        "tree_id": tree_id.strip(),
+        "surface_id": surface_id.strip() if isinstance(surface_id, str) and surface_id.strip() else None,
+        "plan_ref": plan_ref.strip() if isinstance(plan_ref, str) and plan_ref.strip() else None,
+        "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "root": root_value,
+        "add_nodes": rewritten_nodes,
+        "add_edges": add_edges,
+        "remove_nodes": [],
+        "remove_edges": [],
+        "node_prefixes": sorted(prefixes),
+        "draft_meta": {
+            "source_workspace_id": side.workspace_id,
+            "source_root": side.root,
+            "rewrite_root_from": from_prefix or None,
+            "rewrite_root_to": to_prefix or None,
+            "source_canonical_nodes": len(nodes.ids),
+            "source_canonical_edges": len(edges.triples),
+            "exported_nodes": len(rewritten_nodes),
+            "exported_edges": len(add_edges),
+            "truncated_nodes": truncated_nodes,
+            "truncated_edges": truncated_edges,
+            "note": (
+                "RAW DRAFT from a mapped reference workspace. Adapt paths/nodes to the "
+                "surface Plan lock before promoting to the final graph-proposal.json."
+            ),
+        },
+    }
+    # Drop null optional fields for cleaner agent edits.
+    return {k: v for k, v in proposal.items() if v is not None}
+
+
+def is_valid_proposal_pathish(path: str) -> bool:
+    return bool(path) and not path.startswith("/") and not path.endswith("/") and "\\" not in path
 
 
 def run_proposal_compare(

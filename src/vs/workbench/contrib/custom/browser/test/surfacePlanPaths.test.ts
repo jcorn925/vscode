@@ -6,7 +6,12 @@
 import assert from 'assert';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { surfacePlanCandidateResources, surfacePlanResource } from '../../../../../../custom/goalWorkspace/surfacePlanPaths.js';
+import {
+	surfaceGraphProposalDraftResource,
+	surfaceGraphProposalResource,
+	surfacePlanCandidateResources,
+	surfacePlanResource,
+} from '../../../../../../custom/goalWorkspace/surfacePlanPaths.js';
 
 suite('surfacePlanPaths', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -17,5 +22,11 @@ suite('surfacePlanPaths', () => {
 		assert.strictEqual(candidates[0]!.path, surfacePlanResource(root, 'cadre').path);
 		assert.ok(candidates.some(uri => uri.path.endsWith('/apps/cadre/plan.md')));
 		assert.ok(candidates.some(uri => uri.path.endsWith('/plan.md') && !uri.path.includes('/apps/')));
+	});
+
+	test('proposal paths use task-trees/<id>.graph-proposal(.draft).json', () => {
+		const root = URI.file('/tmp/ws');
+		assert.ok(surfaceGraphProposalResource(root, 'cadre-bot').path.endsWith('/.agent/task-trees/cadre-bot.graph-proposal.json'));
+		assert.ok(surfaceGraphProposalDraftResource(root, 'cadre-bot').path.endsWith('/.agent/task-trees/cadre-bot.graph-proposal.draft.json'));
 	});
 });

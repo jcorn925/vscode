@@ -12,6 +12,16 @@ export function surfacePlanResource(workspaceFolder: URI, surfaceId: string): UR
 	return joinPath(workspaceFolder, '.agent', 'surfaces', `${surfaceId}.plan.md`);
 }
 
+/** Final graph-proposal contract for a surface. */
+export function surfaceGraphProposalResource(workspaceFolder: URI, surfaceId: string): URI {
+	return joinPath(workspaceFolder, '.agent', 'task-trees', `${surfaceId}.graph-proposal.json`);
+}
+
+/** Raw Ix draft written during planning Research (before Plan-lock adapt). */
+export function surfaceGraphProposalDraftResource(workspaceFolder: URI, surfaceId: string): URI {
+	return joinPath(workspaceFolder, '.agent', 'task-trees', `${surfaceId}.graph-proposal.draft.json`);
+}
+
 /**
  * Candidate plan.md locations for a surface, preferred first.
  * Root `plan.md` remains for early Claude sessions that wrote a workspace-level plan.

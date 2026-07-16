@@ -5,19 +5,17 @@
 
 import { $, addDisposableListener } from '../../../../base/browser/dom.js';
 import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
-import { dirname, joinPath } from '../../../../base/common/resources.js';
+import { dirname } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
-import { INativeEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
-import { isDark } from '../../../../platform/theme/common/theme.js';
-import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { graphProposalResource } from '../../../../../custom/agentTaskTree/agentTaskTreeGraphProposal.js';
 import { taskTreesFolder } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import { IWebviewService } from '../../webview/browser/webview.js';
 import { buildProposalPreviewGraph } from './proposalGraphDiff/buildProposalDiffGraph.js';
-import { ProposalGraphDiffCytoscapeView } from './proposalGraphDiff/proposalGraphDiffCytoscapeView.js';
-import type { GraphProposalDocument, ProposalDiffGraph } from './proposalGraphDiff/proposalGraphDiffTypes.js';
+import { partitionProposalWorkstreams } from './proposalGraphDiff/partitionProposalWorkstreams.js';
+import type { GraphProposalDocument } from './proposalGraphDiff/proposalGraphDiffTypes.js';
+import { SurfaceProposalTreeView } from './surfaceProposalTreeView.js';
 
 export interface SurfaceProposalGraphPanelLoadOptions {
 	readonly surfaceId: string;
@@ -33,20 +31,16 @@ export class SurfaceProposalGraphPanel extends Disposable {
 	private readonly refreshButton: HTMLButtonElement;
 	private readonly bodyEl: HTMLElement;
 	private readonly emptyEl: HTMLElement;
-	private readonly graphAnchor: HTMLElement;
-	private readonly view: ProposalGraphDiffCytoscapeView;
+	private readonly treeAnchor: HTMLElement;
+	private readonly treeView: SurfaceProposalTreeView;
 	private readonly watcher = this._register(new MutableDisposable());
 	private lastOptions: SurfaceProposalGraphPanelLoadOptions | undefined;
-	private lastGraph: ProposalDiffGraph | undefined;
 	private loadGeneration = 0;
-	private htmlReady = false;
 
 	constructor(
 		private readonly root: HTMLElement,
 		private readonly fileService: IFileService,
 		webviewService: IWebviewService,
-		environmentService: INativeEnvironmentService,
-		themeService: IThemeService,
 	) {
 		super();
 
@@ -60,54 +54,13 @@ export class SurfaceProposalGraphPanel extends Disposable {
 		const header = $('div.custom-mode-surface-proposal-graph-header', undefined, headerTop, this.pathEl, this.statusEl);
 		this.bodyEl = $('div.custom-mode-surface-proposal-graph-body');
 		this.emptyEl = $('div.custom-mode-surface-proposal-graph-empty');
-		this.graphAnchor = $('div.custom-mode-surface-proposal-graph-anchor');
+		this.treeAnchor = $('div.custom-mode-surface-proposal-graph-anchor');
 		this.bodyEl.appendChild(this.emptyEl);
-		this.bodyEl.appendChild(this.graphAnchor);
+		this.bodyEl.appendChild(this.treeAnchor);
 		this.root.appendChild($('div.custom-mode-surface-proposal-graph', undefined, header, this.bodyEl));
 
-		const appRoot = environmentService.appRoot
-			? URI.file(environmentService.appRoot)
-			: undefined;
-		const cytoscapeRoot = appRoot ? joinPath(appRoot, 'node_modules', 'cytoscape', 'dist') : undefined;
-		const layoutBaseRoot = appRoot ? joinPath(appRoot, 'node_modules', 'layout-base') : undefined;
-		const coseBaseRoot = appRoot ? joinPath(appRoot, 'node_modules', 'cose-base') : undefined;
-		const fcoseRoot = appRoot ? joinPath(appRoot, 'node_modules', 'cytoscape-fcose') : undefined;
-		const roots = [cytoscapeRoot, layoutBaseRoot, coseBaseRoot, fcoseRoot].filter((uri): uri is URI => Boolean(uri));
-
-		this.view = this._register(new ProposalGraphDiffCytoscapeView(webviewService, roots, () => {
-			// Webview scripts finish after first setGraph may have been dropped — re-push.
-			if (this.lastGraph) {
-				this.view.setGraph(this.lastGraph);
-			}
-		}));
-		this.view.attach(this.graphAnchor, this.bodyEl);
-		if (cytoscapeRoot && layoutBaseRoot && coseBaseRoot && fcoseRoot) {
-			this.view.setHtml(
-				joinPath(cytoscapeRoot, 'cytoscape.min.js'),
-				joinPath(layoutBaseRoot, 'layout-base.js'),
-				joinPath(coseBaseRoot, 'cose-base.js'),
-				joinPath(fcoseRoot, 'cytoscape-fcose.js'),
-			);
-			this.htmlReady = true;
-			this.view.setTheme(isDark(themeService.getColorTheme().type) ? 'dark' : 'light');
-		}
-		this._register(themeService.onDidColorThemeChange(() => {
-			this.view.setTheme(isDark(themeService.getColorTheme().type) ? 'dark' : 'light');
-		}));
-
-		// Overlay webview often attaches while the panel is display:none (0×0). Re-push
-		// the graph once the body first gets a real size so Cytoscape can layout.
-		let hadSize = false;
-		const resizeObserver = new ResizeObserver(() => {
-			const hasSize = this.bodyEl.clientWidth > 0 && this.bodyEl.clientHeight > 0;
-			if (hasSize && !hadSize && this.lastGraph) {
-				this.view.setGraph(this.lastGraph);
-			}
-			hadSize = hasSize;
-		});
-		resizeObserver.observe(this.bodyEl);
-		this._register(toDisposable(() => resizeObserver.disconnect()));
-
+		this.treeView = this._register(new SurfaceProposalTreeView(webviewService, () => this.treeView.republish()));
+		this.treeView.attach(this.treeAnchor);
 		this._register(addDisposableListener(this.refreshButton, 'click', () => {
 			if (this.lastOptions) {
 				void this.load({ ...this.lastOptions });
@@ -127,10 +80,6 @@ export class SurfaceProposalGraphPanel extends Disposable {
 
 		if (!workspaceFolder) {
 			this.showEmpty(localize('surfaceProposalGraph.noWorkspace', 'Open a workspace folder to load the proposal graph.'));
-			return;
-		}
-		if (!this.htmlReady) {
-			this.showEmpty(localize('surfaceProposalGraph.noAssets', 'Cytoscape assets unavailable (no app root).'));
 			return;
 		}
 
@@ -159,17 +108,23 @@ export class SurfaceProposalGraphPanel extends Disposable {
 			}
 			const proposal = JSON.parse(content.value.toString()) as GraphProposalDocument;
 			const graph = buildProposalPreviewGraph(proposal);
+			const partition = partitionProposalWorkstreams(proposal);
 			this.pathEl.textContent = resource.path;
+			const parallelSafe = partition.workstreams.filter(w => w.parallelSafe).length;
 			this.statusEl.textContent = localize(
-				'surfaceProposalGraph.loaded',
-				'Proposal loaded · {0} nodes · {1} edges',
+				'surfaceProposalGraph.loadedWithWorkstreams',
+				'Proposal loaded · {0} nodes · {1} edges · {2} workstreams{3}',
 				String(graph.nodes.length),
 				String(graph.edges.length),
+				String(partition.workstreams.length),
+				partition.canParallelize
+					? localize('surfaceProposalGraph.parallelHint', ' · {0} parallel-safe', String(parallelSafe))
+					: '',
 			);
 			this.emptyEl.classList.add('hidden');
 			this.emptyEl.textContent = '';
-			this.graphAnchor.classList.remove('hidden');
-			this.publishGraph(graph);
+			this.treeAnchor.classList.remove('hidden');
+			this.treeView.setDocument(proposal, graph, partition);
 		} catch {
 			if (generation !== this.loadGeneration) {
 				return;
@@ -177,17 +132,6 @@ export class SurfaceProposalGraphPanel extends Disposable {
 			this.pathEl.textContent = resource.path;
 			this.showEmpty(localize('surfaceProposalGraph.readFailed', 'Could not read the proposal graph for {0}.', surfaceId));
 		}
-	}
-
-	private publishGraph(graph: ProposalDiffGraph): void {
-		this.lastGraph = graph;
-		this.view.setGraph(graph);
-		// Second push after layout so the overlay has non-zero bounds.
-		requestAnimationFrame(() => {
-			if (this.lastGraph === graph) {
-				this.view.setGraph(graph);
-			}
-		});
 	}
 
 	private async resolveProposalResource(workspaceFolder: URI, surfaceId: string, treeId?: string): Promise<URI | undefined> {
@@ -226,18 +170,6 @@ export class SurfaceProposalGraphPanel extends Disposable {
 		this.statusEl.textContent = '';
 		this.emptyEl.textContent = message;
 		this.emptyEl.classList.remove('hidden');
-		this.graphAnchor.classList.add('hidden');
-		this.publishGraph({
-			nodes: [],
-			edges: [],
-			summary: {
-				passed: true,
-				nodeRecall: 0,
-				structuralEdgeRecall: 0,
-				matchedNodes: 0,
-				missingNodes: 0,
-				removalNodes: 0,
-			},
-		});
+		this.treeAnchor.classList.add('hidden');
 	}
 }

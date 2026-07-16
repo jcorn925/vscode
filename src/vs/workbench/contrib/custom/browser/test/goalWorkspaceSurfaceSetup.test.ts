@@ -10,7 +10,15 @@ import { joinPath } from '../../../../../base/common/resources.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import type { IFileContent, IFileService } from '../../../../../platform/files/common/files.js';
 import { WORKSPACE_MANIFEST } from '../../../../../../custom/goalWorkspace/ConsoleService.js';
-import { upsertImportedGoalWorkspaceSurface } from '../../../../../../custom/goalWorkspace/goalWorkspaceSurfaceSetup.js';
+import {
+	deleteGoalWorkspaceSurface,
+	upsertImportedGoalWorkspaceSurface,
+} from '../../../../../../custom/goalWorkspace/goalWorkspaceSurfaceSetup.js';
+import {
+	surfaceGraphProposalDraftResource,
+	surfaceGraphProposalResource,
+	surfacePlanResource,
+} from '../../../../../../custom/goalWorkspace/surfacePlanPaths.js';
 
 suite('goalWorkspaceSurfaceSetup', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -95,6 +103,42 @@ suite('goalWorkspaceSurfaceSetup', () => {
 		assert.strictEqual(raw.surfaces[0].customField, true);
 	});
 
+	test('deleteGoalWorkspaceSurface removes manifest entry and plan/proposal artifacts', async () => {
+		const fileService = new TestSurfaceSetupFileService();
+		fileService.setFile(manifest, JSON.stringify({
+			goal: { id: 'goal', name: 'Goal' },
+			surfaces: [{
+				id: 'cadre-bot',
+				name: 'Cadre bot',
+				type: 'web-app',
+				path: 'apps/cadre-bot',
+				purpose: 'Planning surface.',
+				capabilities: [],
+				events: [],
+				entities: [],
+				ixSubsystems: [],
+			}],
+			shared: {},
+		}));
+		const plan = surfacePlanResource(workspaceFolder, 'cadre-bot');
+		const proposal = surfaceGraphProposalResource(workspaceFolder, 'cadre-bot');
+		const draft = surfaceGraphProposalDraftResource(workspaceFolder, 'cadre-bot');
+		const appIndex = joinPath(workspaceFolder, 'apps', 'cadre-bot', 'package.json');
+		fileService.setFile(plan, '# plan');
+		fileService.setFile(proposal, '{}');
+		fileService.setFile(draft, '{}');
+		fileService.setFile(appIndex, '{}');
+
+		const deleted = await deleteGoalWorkspaceSurface(fileService as unknown as IFileService, workspaceFolder, 'cadre-bot');
+		assert.strictEqual(deleted, true);
+		const raw = JSON.parse(fileService.getFile(manifest));
+		assert.deepStrictEqual(raw.surfaces, []);
+		assert.strictEqual(fileService.hasFile(plan), false);
+		assert.strictEqual(fileService.hasFile(proposal), false);
+		assert.strictEqual(fileService.hasFile(draft), false);
+		assert.strictEqual(fileService.hasFile(appIndex), false);
+	});
+
 	test('rejects invalid workspace-relative paths without writing manifest', async () => {
 		const fileService = new TestSurfaceSetupFileService();
 		const original = JSON.stringify({
@@ -138,6 +182,10 @@ class TestSurfaceSetupFileService {
 		return value!;
 	}
 
+	hasFile(uri: URI): boolean {
+		return this.files.has(uri.toString());
+	}
+
 	async readFile(resource: URI): Promise<IFileContent> {
 		const value = this.files.get(resource.toString());
 		if (value === undefined) {
@@ -148,5 +196,23 @@ class TestSurfaceSetupFileService {
 
 	async writeFile(resource: URI, buffer: VSBuffer): Promise<void> {
 		this.files.set(resource.toString(), buffer.toString());
+	}
+
+	async del(resource: URI, options?: { recursive?: boolean }): Promise<void> {
+		const key = resource.toString();
+		if (this.files.has(key)) {
+			this.files.delete(key);
+			return;
+		}
+		if (options?.recursive) {
+			const prefix = key.endsWith('/') ? key : `${key}/`;
+			for (const candidate of [...this.files.keys()]) {
+				if (candidate === key || candidate.startsWith(prefix)) {
+					this.files.delete(candidate);
+				}
+			}
+			return;
+		}
+		throw new Error(`Missing file ${key}`);
 	}
 }

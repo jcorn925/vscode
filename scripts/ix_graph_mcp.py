@@ -12,6 +12,8 @@ Cursor, this fork's workbench) can drive the compare/repair loop itself:
 - ``remap_and_wait``   — run ``ix map`` on a directory and poll Arango until
   the async ingest settles, so the next compare never scores stale state.
 - ``list_workspaces``  — list workspace ids and root paths from ~/.ix/config.yaml.
+- ``draft_proposal_from_workspace`` — export a mapped workspace as a RAW draft
+  graph-proposal JSON for planning (adapt before finalizing).
 
 Same conventions as the wrapped scripts: Python 3.12+ standard library only
 (newline-delimited JSON-RPC 2.0 over stdio, per the MCP stdio transport), and
@@ -158,6 +160,50 @@ TOOLS: list[dict[str, Any]] = [
             "Use this to resolve which workspace ids to pass to compare_graphs."
         ),
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "draft_proposal_from_workspace",
+        "description": (
+            "Export a mapped ix workspace as a RAW draft graph-proposal JSON (add_nodes / "
+            "add_edges / node_prefixes). Use during PLANNING after remap_and_wait on a "
+            "shallow-cloned comparable GitHub repo under .agent/references/. Optionally rewrite "
+            "path prefixes (rewrite_root_from → rewrite_root_to) toward the target surface app "
+            "path. This is a shape draft — adapt it to the Plan lock (drop out-of-scope nodes, "
+            "rename paths, add surface-specific files) before writing the final "
+            ".agent/task-trees/<id>.graph-proposal.json. Defaults to file/module nodes only."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {"type": "string", "description": "Ix workspace id of the mapped reference checkout."},
+                "tree_id": {"type": "string", "description": "tree_id for the draft proposal (usually the surface id)."},
+                "surface_id": {"type": "string", "description": "Optional surface_id field."},
+                "plan_ref": {"type": "string", "description": "Optional plan_ref path to stamp on the draft."},
+                "root": {"type": "string", "description": "Optional path prefix to scope/strip on the reference workspace."},
+                "rewrite_root_from": {"type": "string", "description": "Reference path prefix to replace (e.g. app or src)."},
+                "rewrite_root_to": {"type": "string", "description": "Target surface path prefix (e.g. apps/cadre-bot)."},
+                "exclude": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Globs dropped from the export, e.g. tests/**, **/*.test.ts.",
+                },
+                "predicates": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Edge predicates to export (default CALLS, IMPORTS, DEFINES, EXTENDS).",
+                },
+                "max_nodes": {"type": "integer", "description": "Cap exported nodes (default 400)."},
+                "max_edges": {"type": "integer", "description": "Cap exported edges (default 800)."},
+                "output_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional absolute path to write the draft JSON "
+                        "(e.g. .../.agent/task-trees/<id>.graph-proposal.draft.json)."
+                    ),
+                },
+            },
+            "required": ["workspace_id", "tree_id"],
+        },
     },
 ]
 
@@ -370,11 +416,62 @@ def tool_list_workspaces(_args: dict[str, Any]) -> dict[str, Any]:
     return {"workspaces": entries}
 
 
+def tool_draft_proposal_from_workspace(args: dict[str, Any]) -> dict[str, Any]:
+    side = igc.SideConfig(
+        label="reference-draft",
+        endpoint=igc.DEFAULT_ENDPOINT,
+        db=igc.DEFAULT_DB,
+        workspace_id=_require_str(args, "workspace_id"),
+        root=str(args.get("root", "")).strip("/"),
+        # Surface proposals are file-level contracts; symbols inflate drafts.
+        kinds=("file", "module"),
+        excludes=_str_tuple(args, "exclude", ("**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**", "**/*.test.*", "**/__tests__/**")),
+    )
+    predicates = tuple(p.upper() for p in _str_tuple(args, "predicates", ("IMPORTS", "DEFINES", "EXTENDS", "CALLS")))
+    try:
+        proposal = igc.draft_proposal_from_workspace(
+            side,
+            predicates,
+            tree_id=_require_str(args, "tree_id"),
+            surface_id=args.get("surface_id") if isinstance(args.get("surface_id"), str) else None,
+            plan_ref=args.get("plan_ref") if isinstance(args.get("plan_ref"), str) else None,
+            rewrite_root_from=str(args.get("rewrite_root_from", "")),
+            rewrite_root_to=str(args.get("rewrite_root_to", "")),
+            max_nodes=int(args.get("max_nodes", 400)),
+            max_edges=int(args.get("max_edges", 800)),
+        )
+    except igc.GraphCompareError as exc:
+        raise ToolError(f"draft proposal failed: {exc}") from exc
+
+    output_path = args.get("output_path")
+    written: str | None = None
+    if isinstance(output_path, str) and output_path.strip():
+        path = Path(output_path.strip())
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(proposal, indent="\t") + "\n")
+        except OSError as exc:
+            raise ToolError(f"could not write draft proposal to {path}: {exc}") from exc
+        written = str(path)
+
+    return {
+        "proposal": proposal,
+        "output_path": written,
+        "next_step": (
+            "Adapt this RAW DRAFT to the surface Plan lock (rewrite paths, drop out-of-scope "
+            "nodes, add surface-specific files/phases/architecture), then write the final "
+            ".agent/task-trees/<id>.graph-proposal.json. Do not copy application source from "
+            "the reference checkout during generate phases."
+        ),
+    }
+
+
 TOOL_HANDLERS = {
     "compare_graphs": tool_compare_graphs,
     "compare_proposal": tool_compare_proposal,
     "remap_and_wait": tool_remap_and_wait,
     "list_workspaces": tool_list_workspaces,
+    "draft_proposal_from_workspace": tool_draft_proposal_from_workspace,
 }
 
 

@@ -55,10 +55,32 @@ export interface ProposalDiffSummary {
 export interface GraphProposalDocument {
 	readonly version?: number;
 	readonly tree_id?: string;
+	readonly surface_id?: string;
+	readonly plan_ref?: string;
+	readonly created_at?: string;
+	readonly root?: string;
 	readonly add_nodes?: readonly string[];
 	readonly add_edges?: readonly GraphProposalEdgeDocument[];
 	readonly remove_nodes?: readonly string[];
 	readonly remove_edges?: readonly GraphProposalEdgeDocument[];
+	readonly node_prefixes?: readonly string[];
+	/** Architecture notes formerly kept in plan § Architecture. */
+	readonly architecture?: GraphProposalArchitectureDocument;
+	/** Phased checklist formerly kept in plan § Phased checklist. */
+	readonly phases?: readonly GraphProposalPhaseDocument[];
+}
+
+export interface GraphProposalArchitectureDocument {
+	/** Short prose / shared-package notes. */
+	readonly summary?: string;
+	/** ASCII or indented folder tree for the surface. */
+	readonly tree?: string;
+}
+
+export interface GraphProposalPhaseDocument {
+	readonly id?: string;
+	readonly title: string;
+	readonly items: readonly string[];
 }
 
 export interface GraphProposalEdgeDocument {

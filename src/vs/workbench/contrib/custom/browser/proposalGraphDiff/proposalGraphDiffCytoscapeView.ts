@@ -4,11 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { mainWindow } from '../../../../../base/browser/window.js';
-import { Disposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { asWebviewUri, webviewGenericCspSource } from '../../../webview/common/webview.js';
-import { IOverlayWebview, IWebviewService, WebviewContentPurpose } from '../../../webview/browser/webview.js';
+import { IWebviewElement, IWebviewService, WebviewContentPurpose } from '../../../webview/browser/webview.js';
 import type { ProposalDiffGraph, ProposalDiffStatus } from './proposalGraphDiffTypes.js';
 
 export type ProposalGraphDiffReadyMessage = { type: 'proposalGraphDiff.ready' };
@@ -22,7 +22,7 @@ const STATUS_COLORS: Record<ProposalDiffStatus, string> = {
 };
 
 export class ProposalGraphDiffCytoscapeView extends Disposable {
-	private readonly webview: IOverlayWebview;
+	private readonly webview: IWebviewElement;
 	private lastGraph: ProposalDiffGraph | undefined;
 
 	constructor(
@@ -31,7 +31,7 @@ export class ProposalGraphDiffCytoscapeView extends Disposable {
 		onMessage: (message: ProposalGraphDiffWebviewMessage) => void,
 	) {
 		super();
-		this.webview = this._register(webviewService.createWebviewOverlay({
+		this.webview = this._register(webviewService.createWebviewElement({
 			title: localize('custom.ix.proposalGraphDiff.title', 'Proposal Graph Diff'),
 			options: {
 				purpose: WebviewContentPurpose.WebviewView,
@@ -46,10 +46,17 @@ export class ProposalGraphDiffCytoscapeView extends Disposable {
 		this._register(this.webview.onMessage(e => onMessage(e.message as ProposalGraphDiffWebviewMessage)));
 	}
 
-	attach(anchor: HTMLElement, clippingContainer: HTMLElement): void {
-		this.webview.claim(this, mainWindow, undefined);
-		this.webview.setAnchorElement(anchor, clippingContainer);
-		this._register(toDisposable(() => this.webview.release(this)));
+	attach(anchor: HTMLElement, _clippingContainer: HTMLElement): void {
+		// This panel is a stable DOM subtree, so mounting directly is both safe and
+		// more reliable than an overlay whose CSS anchor may be measured while hidden.
+		this.webview.mountTo(anchor, mainWindow);
+	}
+
+	/** Reflow Cytoscape after the host panel goes from display:none → visible. */
+	relayout(): void {
+		if (this.lastGraph) {
+			this.setGraph(this.lastGraph);
+		}
 	}
 
 	setGraph(graph: ProposalDiffGraph): void {
@@ -187,6 +194,8 @@ export class ProposalGraphDiffCytoscapeView extends Disposable {
 
 			function setGraph(graph) {
 				ensureCy();
+				// Container often starts at 0×0 (panel was display:none). Must resize before layout.
+				cy.resize();
 				setHeader(graph && graph.summary);
 				const nodes = (graph?.nodes ?? []).map(n => ({
 					data: {
@@ -209,7 +218,16 @@ export class ProposalGraphDiffCytoscapeView extends Disposable {
 				cy.elements().remove();
 				cy.add(nodes);
 				cy.add(edges);
-				cy.layout({ name: 'fcose', animate: false, fit: true, padding: 40 }).run();
+				try {
+					cy.layout({ name: 'fcose', animate: false, fit: true, padding: 40, quality: 'default', randomize: true }).run();
+				} catch (_e1) {
+					try {
+						cy.layout({ name: 'cose', animate: false, fit: true, padding: 40 }).run();
+					} catch (_e2) {
+						cy.layout({ name: 'grid', animate: false, fit: true, padding: 40 }).run();
+					}
+				}
+				cy.fit(undefined, 40);
 			}
 
 			window.addEventListener('message', (event) => {
@@ -225,6 +243,16 @@ export class ProposalGraphDiffCytoscapeView extends Disposable {
 					}
 				}
 			});
+
+			// When the overlay iframe itself is resized (panel shown), reflow Cytoscape.
+			const ro = new ResizeObserver(() => {
+				if (!cy) { return; }
+				const el = document.getElementById('cy');
+				if (!el || el.clientWidth <= 0 || el.clientHeight <= 0) { return; }
+				cy.resize();
+				cy.fit(undefined, 40);
+			});
+			ro.observe(document.documentElement);
 
 			ensureCy();
 		})();

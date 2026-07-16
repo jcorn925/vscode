@@ -38,7 +38,6 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { INativeEnvironmentService } from '../../../../platform/environment/common/environment.js';
-import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { createUiClickOverlayScript, UiClickOverlayMessage } from './uiClickOverlayScript.js';
 import { IChatService, type IChatModelReference } from '../../chat/common/chatService/chatService.js';
 import { IChatWidgetService } from '../../chat/browser/chat.js';
@@ -400,7 +399,6 @@ class ModeShellContribution extends Disposable {
 		@IFileService private readonly fileService: IFileService,
 		@IWebviewService private readonly webviewService: IWebviewService,
 		@INativeEnvironmentService private readonly nativeEnvironmentService: INativeEnvironmentService,
-		@IThemeService private readonly themeService: IThemeService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IIxIntegrationService private readonly ixIntegrationService: IIxIntegrationService,
@@ -1768,6 +1766,9 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-surface-proposal-graph-empty {
+				position: absolute;
+				inset: 0;
+				z-index: 2;
 				display: flex;
 				align-items: center;
 				justify-content: center;
@@ -1775,11 +1776,10 @@ class ModeShellContribution extends Disposable {
 				font-size: 12px;
 				color: var(--vscode-descriptionForeground);
 				text-align: center;
-				height: 100%;
+				background: var(--vscode-editor-background);
 			}
 
-			.monaco-workbench .custom-mode-surface-proposal-graph-empty.hidden,
-			.monaco-workbench .custom-mode-surface-proposal-graph-anchor.hidden {
+			.monaco-workbench .custom-mode-surface-proposal-graph-empty.hidden {
 				display: none;
 			}
 
@@ -4374,8 +4374,6 @@ class ModeShellContribution extends Disposable {
 			this.uiSurfaceTaskTreePanelRoot,
 			this.fileService,
 			this.webviewService,
-			this.nativeEnvironmentService,
-			this.themeService,
 		));
 		this.uiSurfaceIxSubsystemsPanelRoot = $('div.custom-mode-ui-surface-ix-subsystems-panel.hidden');
 		this.uiSurfaceIxSubsystemsPanelRoot.hidden = true;
@@ -6733,14 +6731,22 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private toggleConsoleCodeMode(): void {
-		const onSurface = this.isSurfaceContextSelected();
-
-		if (this.modeService.getMode() === 'Code' || onSurface) {
-			this.selectGoalSurface(ADD_SURFACE_ID);
+		// Top-bar tabs: surface tab → Code; Console toggles Code ↔ Console UI
+		// (surface panels) or Code ↔ Surfaces builder when no surface is selected.
+		if (this.modeService.getMode() === 'Code') {
+			if (this.isSurfaceContextSelected()) {
+				this.ensureWorkspaceView();
+			} else {
+				this.selectGoalSurface(ADD_SURFACE_ID);
+			}
+			this.syncContextGatheringUi();
+			this.updateUiProjectName();
 			return;
 		}
 
 		this.modeService.setMode('Code');
+		this.syncContextGatheringUi();
+		this.updateUiProjectName();
 	}
 
 	private ensureWorkspaceView(): void {
@@ -6773,7 +6779,11 @@ class ModeShellContribution extends Disposable {
 			this.persistContextGatheringOpen();
 			this.syncContextGatheringUi();
 		}
-		this.ensureWorkspaceView();
+		if (surfaceId === ADD_SURFACE_ID) {
+			this.ensureWorkspaceView();
+		} else {
+			this.modeService.setMode('Code');
+		}
 		this.renderGoalSurfaceButtons(this.consoleService.getSurfaces());
 		if (surfaceId !== ADD_SURFACE_ID) {
 			const storedView = this.getStoredSurfaceMainView(surfaceId);
@@ -6787,6 +6797,8 @@ class ModeShellContribution extends Disposable {
 		if (surfaceId !== ADD_SURFACE_ID) {
 			this.syncSurfaceSetupDashboardVisibility();
 		}
+		this.syncContextGatheringUi();
+		this.updateUiProjectName();
 	}
 
 	private refreshSelectedSurfaceTaskTreeAndRoute(routePreview = true): void {
@@ -7187,11 +7199,15 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private setSurfaceMainView(view: SurfaceMainView): void {
+		// Surface content tabs (CLAUDE.md / Plan / Proposal Graph / …) live in Console UI.
+		this.ensureWorkspaceView();
 		this.surfaceMainView = view;
 		if (this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID) {
 			this.persistSurfaceMainView(this.selectedSurfaceId, view);
 		}
 		this.syncSurfaceMainView();
+		this.syncContextGatheringUi();
+		this.updateUiProjectName();
 	}
 
 	private syncSurfaceMainView(): void {
