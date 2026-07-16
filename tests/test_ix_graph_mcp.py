@@ -38,13 +38,20 @@ def _tool_payload(response: dict[str, Any]) -> dict[str, Any]:
     return json.loads(response["result"]["content"][0]["text"])
 
 
-FAKE_SNAPSHOT = {
-    "reference": {"workspace_id": "ws-ref", "canonical_nodes": 509, "canonical_edges": 0},
-    "clone": {"workspace_id": "ws-clone", "canonical_nodes": 508, "canonical_edges": 402},
-    "comparison": {"nodes": {"recall": 0.998, "missing_in_clone": ["function:database/pool.py::_encode_vector"]}},
-    "hard_failures": ["node recall 0.998 is below --min-node-recall 1.0"],
-    "passed": False,
-}
+def _snapshot(node_recall: float, passed: bool) -> dict[str, Any]:
+    return {
+        "reference": {"workspace_id": "ws-ref", "canonical_nodes": 509, "canonical_edges": 0},
+        "clone": {"workspace_id": "ws-clone", "canonical_nodes": 508, "canonical_edges": 402},
+        "comparison": {
+            "nodes": {"recall": node_recall, "missing_in_clone": ["function:database/pool.py::_encode_vector"]},
+            "edges": {"overall": {"recall": 1.0}},
+        },
+        "hard_failures": [] if passed else [f"node recall {node_recall} is below --min-node-recall 1.0"],
+        "passed": passed,
+    }
+
+
+FAKE_SNAPSHOT = _snapshot(0.998, passed=False)
 
 
 # --------------------------------------------------------------------------
@@ -154,6 +161,110 @@ def test_compare_graphs_arango_failure_is_tool_error(monkeypatch: pytest.MonkeyP
 
 
 # --------------------------------------------------------------------------
+# compare_graphs progress tracking (run_id)
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def runs_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    target = tmp_path / "runs"
+    monkeypatch.setattr(mcp, "RUNS_DIR", target)
+    return target
+
+
+def _compare_with_recall(monkeypatch: pytest.MonkeyPatch, node_recall: float, passed: bool = False) -> dict[str, Any]:
+    monkeypatch.setattr(igc, "run_compare", lambda *a, **k: _snapshot(node_recall, passed))
+    response = mcp.handle_request(_call("compare_graphs", {
+        "reference_workspace": "ws-ref", "clone_workspace": "ws-clone", "run_id": "recreate-1",
+    }))
+    assert response is not None
+    assert response["result"]["isError"] is False
+    return _tool_payload(response)
+
+
+def test_no_run_id_means_no_progress_block(monkeypatch: pytest.MonkeyPatch, runs_dir: Path) -> None:
+    monkeypatch.setattr(igc, "run_compare", lambda *a, **k: FAKE_SNAPSHOT)
+
+    response = mcp.handle_request(_call("compare_graphs", {
+        "reference_workspace": "ws-ref", "clone_workspace": "ws-clone",
+    }))
+
+    assert response is not None
+    assert "progress" not in _tool_payload(response)
+    assert not runs_dir.exists()
+
+
+def test_first_round_has_no_delta_and_keeps_iterating(monkeypatch: pytest.MonkeyPatch, runs_dir: Path) -> None:
+    payload = _compare_with_recall(monkeypatch, 0.4)
+
+    progress = payload["progress"]
+    assert progress["round"] == 1
+    assert progress["previous_node_recall"] is None
+    assert progress["node_recall_delta"] is None
+    assert progress["rounds_without_improvement"] == 0
+    assert progress["recommendation"] == "keep iterating"
+    assert (runs_dir / "recreate-1.json").is_file()
+
+
+def test_improving_rounds_reset_plateau_counter(monkeypatch: pytest.MonkeyPatch, runs_dir: Path) -> None:
+    _compare_with_recall(monkeypatch, 0.4)
+    payload = _compare_with_recall(monkeypatch, 0.7)
+
+    progress = payload["progress"]
+    assert progress["round"] == 2
+    assert progress["previous_node_recall"] == 0.4
+    assert progress["node_recall_delta"] == pytest.approx(0.3)
+    assert progress["best_node_recall"] == 0.7
+    assert progress["rounds_without_improvement"] == 0
+    assert progress["recommendation"] == "keep iterating"
+
+
+def test_two_flat_rounds_recommend_stopping(monkeypatch: pytest.MonkeyPatch, runs_dir: Path) -> None:
+    _compare_with_recall(monkeypatch, 0.7)
+    second = _compare_with_recall(monkeypatch, 0.7)
+    third = _compare_with_recall(monkeypatch, 0.69)
+
+    assert second["progress"]["rounds_without_improvement"] == 1
+    assert second["progress"]["recommendation"] == "keep iterating"
+    assert third["progress"]["rounds_without_improvement"] == 2
+    assert "plateaued" in third["progress"]["recommendation"]
+
+
+def test_passed_round_reports_converged_even_after_plateau(monkeypatch: pytest.MonkeyPatch, runs_dir: Path) -> None:
+    _compare_with_recall(monkeypatch, 0.7)
+    _compare_with_recall(monkeypatch, 0.7)
+    payload = _compare_with_recall(monkeypatch, 0.7, passed=True)
+
+    assert payload["progress"]["recommendation"] == "converged: thresholds met"
+
+
+def test_run_ids_are_isolated_and_sanitized(monkeypatch: pytest.MonkeyPatch, runs_dir: Path) -> None:
+    monkeypatch.setattr(igc, "run_compare", lambda *a, **k: _snapshot(0.5, passed=False))
+    for run_id in ("run/a", "run b"):
+        response = mcp.handle_request(_call("compare_graphs", {
+            "reference_workspace": "ws-ref", "clone_workspace": "ws-clone", "run_id": run_id,
+        }))
+        assert response is not None
+        assert _tool_payload(response)["progress"]["round"] == 1
+
+    assert sorted(p.name for p in runs_dir.iterdir()) == ["run-a.json", "run-b.json"]
+
+
+def test_corrupt_run_history_fails_closed(monkeypatch: pytest.MonkeyPatch, runs_dir: Path) -> None:
+    runs_dir.mkdir(parents=True)
+    (runs_dir / "recreate-1.json").write_text("{not json")
+    monkeypatch.setattr(igc, "run_compare", lambda *a, **k: _snapshot(0.5, passed=False))
+
+    response = mcp.handle_request(_call("compare_graphs", {
+        "reference_workspace": "ws-ref", "clone_workspace": "ws-clone", "run_id": "recreate-1",
+    }))
+
+    assert response is not None
+    assert response["result"]["isError"] is True
+    assert "unreadable" in _tool_payload(response)["error"]
+
+
+# --------------------------------------------------------------------------
 # remap_and_wait tool
 # --------------------------------------------------------------------------
 
@@ -177,6 +288,33 @@ def test_remap_and_wait_runs_map_then_polls(monkeypatch: pytest.MonkeyPatch, tmp
     assert payload["workspace_id"] == "ws-clone"
     assert payload["settled_canonical_nodes"] == 509
     assert calls == [f"map:{tmp_path.resolve()}", "wait"]
+
+
+def test_remap_and_wait_bootstraps_never_mapped_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Recreate-from-spec bootstrap: the directory is only registered in the ix
+    config by the first `ix map`, so resolution must happen after the map."""
+
+    mapped = {"done": False}
+
+    def fake_map(directory: Path, timeout: float = 0.0) -> None:
+        mapped["done"] = True
+
+    def fake_resolve(directory: Path, explicit: str | None, config: Path) -> str:
+        if not mapped["done"]:
+            raise icl.CloneLoopError(f"No workspace in {config} has root_path {directory}")
+        return "ws-new"
+
+    monkeypatch.setattr(icl, "_run_ix_map", fake_map)
+    monkeypatch.setattr(icl, "resolve_clone_workspace", fake_resolve)
+    monkeypatch.setattr(icl, "wait_for_ingest", lambda *a, **k: 42)
+
+    response = mcp.handle_request(_call("remap_and_wait", {"directory": str(tmp_path)}))
+
+    assert response is not None
+    assert response["result"]["isError"] is False
+    payload = _tool_payload(response)
+    assert payload["workspace_id"] == "ws-new"
+    assert payload["settled_canonical_nodes"] == 42
 
 
 def test_remap_and_wait_missing_directory_is_tool_error(tmp_path: Path) -> None:

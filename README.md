@@ -109,8 +109,8 @@ The clone workspace id is resolved from `~/.ix/config.yaml` by `root_path` (pass
 
 [scripts/ix_graph_mcp.py](scripts/ix_graph_mcp.py) exposes the compare tooling to any MCP client (Claude Code, the Claude Agent SDK, Cursor, this fork) as a stdlib-only stdio server, so an agent can drive the compare/repair loop itself instead of being driven by `ix_clone_loop.py`:
 
-- `compare_graphs` — reference vs clone workspace compare; returns recall metrics plus the `missing_in_clone` gap list (capped at 50 entries for context-window sanity).
-- `remap_and_wait` — runs `ix map` on a directory and polls Arango until the async ingest settles; call it after editing files or `compare_graphs` scores the pre-edit graph.
+- `compare_graphs` — reference vs clone workspace compare; returns recall metrics plus the `missing_in_clone` gap list (capped at 50 entries for context-window sanity). Pass an optional `run_id` for iterative generation: the result then carries a `progress` block (round number, recall delta, `rounds_without_improvement`) persisted under `.ix-scaffold/graph-compare/runs/`, giving the agent a mechanical stopping rule — stop when `passed` is true or `rounds_without_improvement >= 2`.
+- `remap_and_wait` — runs `ix map` on a directory and polls Arango until the async ingest settles; call it after editing files or `compare_graphs` scores the pre-edit graph. Never-mapped directories are registered on first call (the map runs before workspace resolution), so recreate-from-spec bootstraps work.
 - `list_workspaces` — workspace ids and root paths from `~/.ix/config.yaml`.
 
 Registered in [.mcp.json](.mcp.json) (Claude Code) and [.vscode/mcp.json](.vscode/mcp.json) (workbench). All infrastructure failures surface as `isError` tool results — the server never fabricates metrics. Tests (`tests/test_ix_graph_mcp.py`) mock the compare/loop seams, so CI needs no Arango or ix.

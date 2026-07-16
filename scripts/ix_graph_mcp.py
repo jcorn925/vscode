@@ -23,6 +23,7 @@ Usage (registered in .mcp.json / .vscode/mcp.json):
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, IO
@@ -38,6 +39,8 @@ PROTOCOL_VERSION = "2024-11-05"
 # Tighter than the CLI default (200): tool results go straight into an agent
 # context window, and a gap list that long stops being actionable.
 DEFAULT_TOOL_MAX_GAPS = 50
+# Per-run recall history for the compare_graphs `run_id` progress signal.
+RUNS_DIR = Path(".ix-scaffold/graph-compare/runs")
 
 JSONRPC_PARSE_ERROR = -32700
 JSONRPC_INVALID_REQUEST = -32600
@@ -76,6 +79,16 @@ TOOLS: list[dict[str, Any]] = [
                 "min_node_recall": {"type": "number", "description": "Node recall required for passed=true (default 1.0)."},
                 "min_edge_recall": {"type": "number", "description": "Edge recall required for passed=true (default 0; ix edge tombstoning makes 1.0 unrealistic for identical content)."},
                 "max_gaps": {"type": "integer", "description": f"Cap on gap-list entries (default {DEFAULT_TOOL_MAX_GAPS})."},
+                "run_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional session id for convergence tracking across repeated compares. "
+                        "When set, the result includes a `progress` block (round number, recall delta "
+                        "vs the previous compare, rounds_without_improvement). Recommended stopping "
+                        "rule for iterative generation: stop when passed is true OR "
+                        "rounds_without_improvement >= 2."
+                    ),
+                },
             },
             "required": ["reference_workspace", "clone_workspace"],
         },
@@ -92,7 +105,7 @@ TOOLS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "directory": {"type": "string", "description": "Absolute path of the mapped repo (must be a git repo already known to ix)."},
+                "directory": {"type": "string", "description": "Absolute path of the repo to map (a git repo; first-time directories are registered with ix automatically, but must already contain files or the ingest poll will time out)."},
                 "workspace_id": {"type": "string", "description": "Workspace id to poll; resolved from ~/.ix/config.yaml by root_path when omitted."},
                 "ingest_timeout": {"type": "number", "description": "Max seconds to wait for the ingest to settle (default 120)."},
             },
@@ -136,6 +149,62 @@ def _str_tuple(args: dict[str, Any], key: str, default: tuple[str, ...]) -> tupl
     return cleaned or default
 
 
+def _record_progress(run_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Append this compare's recall to the run history and derive a plateau signal.
+
+    The agent driving an iterative generate/compare loop cannot reliably judge
+    "am I still improving?" from memory — this makes it mechanical: stop when
+    passed is true or rounds_without_improvement >= 2.
+    """
+
+    safe_id = re.sub(r"[^A-Za-z0-9._-]+", "-", run_id)
+    run_path = RUNS_DIR / f"{safe_id}.json"
+    history: list[dict[str, Any]] = []
+    if run_path.exists():
+        try:
+            history = json.loads(run_path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            raise ToolError(f"run history {run_path} is unreadable: {exc}") from exc
+        if not isinstance(history, list):
+            raise ToolError(f"run history {run_path} is malformed (expected a JSON array)")
+
+    history.append({
+        "node_recall": snapshot["comparison"]["nodes"]["recall"],
+        "edge_recall": snapshot["comparison"]["edges"]["overall"]["recall"],
+        "passed": snapshot["passed"],
+    })
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    run_path.write_text(json.dumps(history, indent=2) + "\n")
+
+    best = -1.0
+    rounds_without_improvement = 0
+    for entry in history:
+        recall = float(entry["node_recall"])
+        if recall > best:
+            best = recall
+            rounds_without_improvement = 0
+        else:
+            rounds_without_improvement += 1
+
+    current = history[-1]["node_recall"]
+    previous = history[-2]["node_recall"] if len(history) > 1 else None
+    return {
+        "run_id": run_id,
+        "round": len(history),
+        "node_recall": current,
+        "previous_node_recall": previous,
+        "node_recall_delta": round(current - previous, 6) if previous is not None else None,
+        "best_node_recall": best,
+        "rounds_without_improvement": rounds_without_improvement,
+        "recommendation": (
+            "converged: thresholds met" if snapshot["passed"]
+            else "plateaued: no node-recall improvement in "
+                 f"{rounds_without_improvement} round(s); consider stopping" if rounds_without_improvement >= 2
+            else "keep iterating"
+        ),
+    }
+
+
 def tool_compare_graphs(args: dict[str, Any]) -> dict[str, Any]:
     endpoint = igc.DEFAULT_ENDPOINT
     db = igc.DEFAULT_DB
@@ -168,6 +237,10 @@ def tool_compare_graphs(args: dict[str, Any]) -> dict[str, Any]:
             f"reference workspace {side_a.workspace_id} has no canonical nodes; "
             "wrong workspace id, or its ingest has not landed."
         )
+
+    run_id = args.get("run_id")
+    if isinstance(run_id, str) and run_id.strip():
+        snapshot["progress"] = _record_progress(run_id.strip(), snapshot)
     return snapshot
 
 
@@ -178,12 +251,15 @@ def tool_remap_and_wait(args: dict[str, Any]) -> dict[str, Any]:
     explicit = args.get("workspace_id")
     ingest_timeout = float(args.get("ingest_timeout", icl.DEFAULT_INGEST_TIMEOUT))
     try:
+        # Map before resolving: a never-mapped directory (recreate-from-spec
+        # bootstrap) only gets its workspace registered in ~/.ix/config.yaml
+        # by the first `ix map` run.
+        icl._run_ix_map(directory)
         workspace_id = icl.resolve_clone_workspace(
             directory,
             explicit if isinstance(explicit, str) and explicit.strip() else None,
             igc.DEFAULT_IX_CONFIG,
         )
-        icl._run_ix_map(directory)
         settled = icl.wait_for_ingest(
             igc.DEFAULT_ENDPOINT, igc.DEFAULT_DB, workspace_id, igc.DEFAULT_KINDS,
             ingest_timeout=ingest_timeout,
