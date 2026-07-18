@@ -46,28 +46,58 @@ Planning comes before code. Graph verification gates "done."
    To throw away a surface, delete it in the Console UI (that removes the
    manifest entry, plan, proposal, and app folder) and create a fresh one.
 
+## Workspace planning (Console home)
+
+When the user kicks off planning from the **Console Surfaces home** (business
+brief / PDF, not a single named surface):
+
+1. Read attachments under \`.agent/workspace/attachments/\` and any intent text.
+2. Write \`.agent/workspace.plan.md\` — goal summary, who is served, surface-split
+   rationale, what is deferred.
+3. Write \`.agent/workspace.surfaces.suggested.json\` with \`status: "draft"\` and a
+   \`surfaces\` array. Each entry needs \`id\`, \`name\`, \`purpose\`,
+   \`primaryUsers\`, \`keyCapabilities\`, \`dependsOn\`, plus \`suggested\` /
+   \`selected\` (mark the surfaces you recommend with both \`true\`; include
+   optional alternates with \`suggested: false\` / \`selected: false\`).
+4. **Stop.** Do **not** create \`apps/\`, per-surface \`plan.md\`, or graph
+   proposals yet. The Console UI shows suggestion cards; the human confirms
+   which surfaces to create. Per-surface Research (below) starts only after a
+   surface exists and the user opens its Plan flow.
+
 ## Research recipe (planning only)
 
 Draft graph shape from a real comparable repo **first**, then adapt it to this
 surface's Plan lock:
 
-1. **Find priors.** Use \`gh search repos\` / \`gh api\` / \`gh repo view\` to pick
-   1–2 public repos closest to the locked workflow (not random stars).
-2. **Shallow clone** into \`.agent/references/<owner>-<repo>/\` only
-   (\`git clone --depth 1 https://github.com/<owner>/<repo> .agent/references/<owner>-<repo>\`).
-3. **Map.** \`remap_and_wait\` on that reference directory; note the returned
-   \`workspace_id\`.
-4. **Draft shape.** Call \`draft_proposal_from_workspace\` with that workspace id,
+1. **Find priors.** Use \`gh search repos\` / \`gh api\` / \`gh repo view\` to
+   survey several comparable public repos (not random stars). Write
+   \`.agent/surfaces/<surface-id>.reference-candidates.json\` with
+   \`status: "awaiting_selection"\` and a \`repos\` array. Mark the best 1–2
+   with \`suggested: true\` and \`selected: true\`; include a few alternates
+   with \`suggested: false\` / \`selected: false\`. Each repo needs
+   \`owner\`, \`repo\`, \`url\`, optional \`description\` / \`stars\`.
+2. **Wait for human selection.** Stop and tell the user the Plan tab now shows
+   the found-repos row. Poll the candidates file (sleep 2–3s) until
+   \`status\` is \`"confirmed"\` (or the user messages which repos to use).
+   Do **not** clone until then. Only use repos with \`selected: true\`.
+3. **Shallow clone** selected repos into \`.agent/references/<owner>-<repo>/\`
+   only (\`git clone --depth 1 https://github.com/<owner>/<repo>
+   .agent/references/<owner>-<repo>\`). Set candidates \`status\` to \`"done"\`
+   after clones succeed.
+4. **Map.** \`remap_and_wait\` on each selected reference directory; note the
+   returned \`workspace_id\`.
+5. **Draft shape.** Call \`draft_proposal_from_workspace\` with that workspace id,
    \`tree_id\` / \`surface_id\`, and \`rewrite_root_to\` = your app path
    (e.g. \`apps/<surface-id>\`). Prefer writing
    \`.agent/task-trees/<surface-id>.graph-proposal.draft.json\`.
-5. **Adapt.** Rewrite the draft against §0 Plan lock: drop out-of-scope nodes,
+6. **Adapt.** Rewrite the draft against §0 Plan lock: drop out-of-scope nodes,
    rename/re-root paths, add surface-specific files/edges, fill \`architecture\`
    + \`phases\`. Promote the result to
    \`.agent/task-trees/<surface-id>.graph-proposal.json\`.
-6. **Cite.** Plan § Research must name the GitHub repos surveyed and say the
-   proposal was drafted from their Ix graph then adapted — do not claim
-   "internal priors only" when GitHub research was available.
+7. **Cite.** Plan § Research must name the GitHub repos surveyed (and which
+   the user selected) and say the proposal was drafted from their Ix graph
+   then adapted — do not claim "internal priors only" when GitHub research
+   was available.
 
 Generate phases start only after the final proposal exists. Never \`cp -R\`
 reference source into \`apps/\`.
@@ -90,8 +120,12 @@ Write/destructive commands stay gated.
 | Doc | Role |
 |-----|------|
 | \`CLAUDE.md\` (this file) | Standing process rules for every surface |
+| \`.agent/workspace.plan.md\` | Workspace-level brief; multi-surface split |
+| \`.agent/workspace.surfaces.suggested.json\` | Suggested surfaces for Console cards |
+| \`.agent/workspace/attachments/*\` | Planning PDF / brief files from Console home |
 | \`.agent/surfaces/<surface-id>.plan.md\` | Intent, research, plan lock, risks — keep lean |
 | \`.agent/task-trees/*.graph-proposal.json\` | Architecture, phased checklist, file/edge targets |
+| \`.agent/surfaces/<id>.reference-candidates.json\` | Found GitHub priors; user selects which to clone/map |
 | \`.agent/references/*\` | Shallow clones for planning maps only |
 
 ### Plan vs Proposal split
@@ -140,12 +174,39 @@ export function buildSurfacePlanKickoffPrompt(options: {
 		`I want to build: ${trimmed}`,
 		`Create ${planPath} for surface "${surfaceName}" (id: ${surfaceId}) from that intent.`,
 		`Keep the plan lean: §0 Plan lock, problem/intent, research (planning-only), risks/deferrals.`,
-		`In Research: survey 1-2 comparable public GitHub repos (gh search/api), shallow-clone into .agent/references/, remap_and_wait, draft_proposal_from_workspace (write ${proposalPath.replace('.json', '.draft.json')}), then adapt that draft to the Plan lock.`,
+		`In Research: survey comparable public GitHub repos (gh search/api), write .agent/surfaces/${surfaceId}.reference-candidates.json (status awaiting_selection; suggested repos selected:true), wait until the Plan UI confirms selection, then shallow-clone only selected repos into .agent/references/, remap_and_wait, draft_proposal_from_workspace (write ${proposalPath.replace('.json', '.draft.json')}), then adapt that draft to the Plan lock.`,
 		`End the plan with a Proposal Graph section that links to ${proposalPath} — do not put architecture trees or phased checklists in the plan.`,
 		`Then write ${proposalPath} as the verification contract: architecture notes, phases (phased checklist with remap_and_wait/compare_proposal gates), file: nodes, and structural edges adapted from the reference draft; set plan_ref to "${planPath}".`,
 		`Do not scaffold application code yet — plan + proposal only. Do not copy reference source into apps/.`,
 		`When those two artifacts exist, summarize what you wrote (including which repos informed the draft) and stop for human review.`,
 	].join(' ');
+}
+
+/**
+ * Console Surfaces home: workspace-level planning from a brief/PDF.
+ * Produces suggested surfaces; does not create apps/ or per-surface proposals.
+ */
+export function buildWorkspacePlanKickoffPrompt(options: {
+	readonly businessName?: string;
+	readonly intent: string;
+	readonly attachmentPaths?: readonly string[];
+}): string {
+	const business = options.businessName?.trim();
+	const trimmed = options.intent.trim();
+	const attachments = (options.attachmentPaths ?? []).filter(path => !!path.trim());
+	const parts = [
+		`Read CLAUDE.md and follow the Workspace planning section.`,
+		business ? `Business / workspace name: ${business}.` : '',
+		trimmed ? `Planning intent: ${trimmed}` : 'Planning intent: derive the product split from the attached brief.',
+		attachments.length
+			? `Read these workspace planning attachments first:\n${attachments.map(path => `- ${path}`).join('\n')}`
+			: '',
+		`Write .agent/workspace.plan.md summarizing the goal, who is served, the recommended surface split, and what to defer.`,
+		`Write .agent/workspace.surfaces.suggested.json with status "draft" and a surfaces array. Each surface needs id, name, purpose, primaryUsers, keyCapabilities, dependsOn, suggested, and selected. Mark recommended surfaces suggested:true and selected:true; include plausible alternates with suggested:false and selected:false.`,
+		`If attachments were provided, set sourceBrief to the primary brief path.`,
+		`Do NOT create apps/, per-surface plan.md files, graph proposals, or scaffold code. Stop when both workspace artifacts exist so the Console can show suggestion cards.`,
+	];
+	return parts.filter(Boolean).join(' ');
 }
 
 /**
@@ -183,7 +244,13 @@ export const CADRE_CLAUDE_SETTINGS_JSON = `{
 			"Bash(cat plan.md)",
 			"Bash(cat .agent/surfaces/*)",
 			"Bash(cat .agent/task-trees/*)",
+			"Bash(cat .agent/workspace.plan.md)",
+			"Bash(cat .agent/workspace.surfaces.suggested.json)",
+			"Bash(cat .agent/workspace/attachments/*)",
+			"Bash(mkdir -p .agent/workspace)",
+			"Bash(mkdir -p .agent/workspace/attachments)",
 			"Bash(jq *)",
+			"Bash(sleep *)",
 			"Read(./workspace.goal.json)",
 			"Read(./CLAUDE.md)",
 			"Read(./plan.md)",

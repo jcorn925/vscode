@@ -6,6 +6,7 @@
 import * as assert from 'assert';
 import {
 	buildSurfacePlanKickoffPrompt,
+	buildWorkspacePlanKickoffPrompt,
 	CADRE_CLAUDE_SETTINGS_JSON,
 	CADRE_SURFACE_CLAUDE_MD,
 } from '../../../../../../custom/goalWorkspace/cadreSurfaceClaudeTemplate.js';
@@ -17,6 +18,27 @@ suite('cadreSurfaceClaudeTemplate', () => {
 	test('CADRE_SURFACE_CLAUDE_MD requires plan lock before scaffold', () => {
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Plan first'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('graph-proposal.json'));
+	});
+
+	test('CADRE_SURFACE_CLAUDE_MD includes workspace planning section', () => {
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Workspace planning (Console home)'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('workspace.surfaces.suggested.json'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('.agent/workspace/attachments/'));
+	});
+
+	test('buildWorkspacePlanKickoffPrompt embeds brief paths and stop rule', () => {
+		const prompt = buildWorkspacePlanKickoffPrompt({
+			businessName: 'Cadre AI',
+			intent: 'Support chatbot and portal',
+			attachmentPaths: ['.agent/workspace/attachments/brief.pdf'],
+		});
+		assert.ok(prompt.includes('Cadre AI'));
+		assert.ok(prompt.includes('Support chatbot and portal'));
+		assert.ok(prompt.includes('.agent/workspace.plan.md'));
+		assert.ok(prompt.includes('.agent/workspace.surfaces.suggested.json'));
+		assert.ok(prompt.includes('.agent/workspace/attachments/brief.pdf'));
+		assert.ok(prompt.includes('Do NOT create apps/'));
+		assert.ok(prompt.includes('Workspace planning'));
 	});
 
 	test('buildSurfacePlanKickoffPrompt embeds intent and artifact paths', () => {
@@ -36,6 +58,8 @@ suite('cadreSurfaceClaudeTemplate', () => {
 		assert.ok(prompt.includes('draft_proposal_from_workspace'));
 		assert.ok(prompt.includes('.agent/references/'));
 		assert.ok(prompt.includes('cadre.graph-proposal.draft.json'));
+		assert.ok(prompt.includes('reference-candidates.json'));
+		assert.ok(prompt.includes('awaiting_selection'));
 	});
 
 	test('CADRE_SURFACE_CLAUDE_MD keeps architecture and phases in the proposal', () => {
@@ -50,6 +74,8 @@ suite('cadreSurfaceClaudeTemplate', () => {
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('.agent/references/'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Draft graph shape from a real comparable repo **first**'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('One surface id — no `-2` clones'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('reference-candidates.json'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Wait for human selection'));
 	});
 
 	test('CADRE_CLAUDE_SETTINGS_JSON allow-lists inspect script but not python3 -c', () => {
@@ -59,6 +85,7 @@ suite('cadreSurfaceClaudeTemplate', () => {
 		assert.ok(!CADRE_CLAUDE_SETTINGS_JSON.includes("python3 -c"));
 		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('Bash(gh search *)'));
 		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('Bash(git clone --depth 1 https://github.com/* .agent/references/*)'));
+		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('Bash(sleep *)'));
 		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('mcp__ix-graph__draft_proposal_from_workspace'));
 	});
 });

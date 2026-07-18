@@ -10,6 +10,7 @@ import { ThemeIcon } from '../../../../base/common/themables.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Disposable, DisposableStore, type IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { RunOnceScheduler, timeout } from '../../../../base/common/async.js';
+import { Event } from '../../../../base/common/event.js';
 import { isMacintosh, isWeb, isWindows } from '../../../../base/common/platform.js';
 import { URI, UriComponents } from '../../../../base/common/uri.js';
 import { basename, extUri, isEqual, isEqualOrParent, joinPath, resolvePath } from '../../../../base/common/resources.js';
@@ -34,8 +35,9 @@ import { Action2, registerAction2 } from '../../../../platform/actions/common/ac
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { IQuickInputService, type IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
-import { IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
+import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { INativeEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { createUiClickOverlayScript, UiClickOverlayMessage } from './uiClickOverlayScript.js';
@@ -85,7 +87,19 @@ import { IStartupGuideService } from '../../../../../custom/startup/StartupGuide
 import { IAppLaunchGuideService } from '../../../../../custom/appLaunch/AppLaunchGuideService.js';
 import { SetupGuidePanel } from './setupGuidePanel.js';
 import { IConsoleService, type WorkspaceSurface } from '../../../../../custom/goalWorkspace/ConsoleService.js';
-import { buildSurfacePlanKickoffPrompt, CADRE_CLAUDE_SETTINGS_JSON, CADRE_INSPECT_GOAL_WORKSPACE_PY, CADRE_SURFACE_CLAUDE_MD } from '../../../../../custom/goalWorkspace/cadreSurfaceClaudeTemplate.js';
+import { buildSurfacePlanKickoffPrompt, buildWorkspacePlanKickoffPrompt, CADRE_CLAUDE_SETTINGS_JSON, CADRE_INSPECT_GOAL_WORKSPACE_PY, CADRE_SURFACE_CLAUDE_MD } from '../../../../../custom/goalWorkspace/cadreSurfaceClaudeTemplate.js';
+import {
+	parseWorkspaceSuggestedSurfaces,
+	selectedSuggestedSurfaces,
+	serializeWorkspaceSuggestedSurfaces,
+	withSuggestedSurfaceSelection,
+	withSuggestedSurfacesStatus,
+	workspaceAttachmentsDir,
+	workspacePlanResource,
+	workspaceSuggestedSurfacesResource,
+	type WorkspaceSuggestedSurface,
+	type WorkspaceSuggestedSurfaces,
+} from '../../../../../custom/goalWorkspace/workspacePlanPaths.js';
 import {
 	brandFolderResource,
 	deleteGoalWorkspaceSurface,
@@ -97,6 +111,17 @@ import {
 	upsertImportedGoalWorkspaceSurface,
 	type SurfaceSetupStep,
 } from '../../../../../custom/goalWorkspace/goalWorkspaceSurfaceSetup.js';
+import {
+	attachmentRefDisplayPath,
+	attachmentRefResource,
+	clearDescribeAppDraft,
+	loadDescribeAppDraft,
+	saveDescribeAppDraft,
+	stageDescribeAppAttachment,
+	toWorkspaceOrFsPaths,
+	type DescribeAppAttachmentRef,
+} from '../../../../../custom/goalWorkspace/describeAppDraft.js';
+import { getPathForFile } from '../../../../platform/dnd/browser/dnd.js';
 import { SurfaceBuilderHandoffState, type SurfaceBuilderHandoffStateValue } from '../../../../../custom/goalWorkspace/surfaceBuilderHandoffState.js';
 import { blueprintResource, createBlueprintFromTemplateId, readBlueprint } from '../../../../../custom/goalWorkspace/surfaceBlueprintService.js';
 import { registerSurfaceFromBlueprint } from '../../../../../custom/goalWorkspace/surfaceBlueprintScaffold.js';
@@ -115,7 +140,7 @@ import { IAgentTaskTreeService, resolveCurrentTaskTreeStep } from '../../../../.
 import '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import type { AgentTaskTree } from '../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
 import { isSurfaceMainView, resolveDefaultSurfaceMainView, shouldShowSurfaceMainViewToggle, type SurfaceMainView } from '../../../../../custom/agentTaskTree/surfaceMainViewHelpers.js';
-import { resolveSurfacePlanResource } from '../../../../../custom/goalWorkspace/surfacePlanPaths.js';
+import { resolveSurfacePlanResource, surfacePlanResource } from '../../../../../custom/goalWorkspace/surfacePlanPaths.js';
 import type { WorkflowSpec, WorkflowStep } from '../../../../../custom/goalWorkspace/workflowCatalogTypes.js';
 import { buildTaskPrompt } from './agentTaskTreeChatExecutor.js';
 import { SurfacePlanPanel } from './surfacePlanPanel.js';
@@ -128,6 +153,8 @@ const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
 const STORAGE_ACTIVE_UI_CHAT_SURFACE = 'modeShell.activeUiChatSurface';
 const STORAGE_UI_CHAT_DRAFT_PREFIX = 'modeShell.uiChatDraft.';
 const STORAGE_SURFACE_MAIN_VIEW_PREFIX = 'modeShell.surfaceMainView.';
+const STORAGE_SURFACE_CODE_VIEW_PREFIX = 'modeShell.surfaceCodeView.';
+const STORAGE_WORKSPACE_HOME_VIEW = 'modeShell.workspaceHomeView';
 const STORAGE_SURFACE_FEATURE_CHECKLIST_HIDDEN = 'modeShell.surfaceFeatureChecklistHidden';
 const STORAGE_CLAUDE_TERMINAL_HEIGHT = 'modeShell.claudeTerminalHeight';
 const STORAGE_CLAUDE_TERMINAL_ACTIVE = 'modeShell.claudeTerminalActive';
@@ -135,6 +162,12 @@ const CLAUDE_TERMINAL_TITLE = 'Claude — New Surface';
 const CLAUDE_TERMINAL_MIN_HEIGHT = 120;
 const CLAUDE_TERMINAL_DEFAULT_HEIGHT = 240;
 const ADD_SURFACE_ID = '__add_surface__';
+
+type WorkspaceHomeView = 'claudeMd' | 'workspacePlan';
+
+function isWorkspaceHomeView(value: string | undefined): value is WorkspaceHomeView {
+	return value === 'claudeMd' || value === 'workspacePlan';
+}
 
 export async function runSurfaceWorkflowFromModeShell(surfaceId?: string): Promise<boolean> {
 	const instance = ModeShellContribution.getActiveInstance();
@@ -150,11 +183,6 @@ function slugifySurfaceId(value: string): string {
 		.replace(/[^a-z0-9]+/g, '-')
 		.replace(/^-+|-+$/g, '')
 		|| 'custom-surface';
-}
-
-/** Single-quote a string for `claude '…'` in the bash Claude terminal. */
-function shellQuoteForClaude(value: string): string {
-	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function surfaceIdFromRepoUrl(value: string): string {
@@ -231,6 +259,8 @@ class ModeShellContribution extends Disposable {
 	private readonly uiClaudeTerminalSash: HTMLElement;
 	private readonly uiClaudeTerminalHost: HTMLElement;
 	private readonly uiClaudeTerminalEmpty: HTMLElement;
+	private uiClaudeTerminalStatus!: HTMLElement;
+	private readonly claudeKickoffLogs: string[] = [];
 	private claudeTerminalInstance: ITerminalInstance | undefined;
 	private readonly claudeTerminalLifecycle = this._register(new MutableDisposable());
 	private claudeTerminalHeight = CLAUDE_TERMINAL_DEFAULT_HEIGHT;
@@ -253,6 +283,7 @@ class ModeShellContribution extends Disposable {
 	private readonly uiSelectionPill: HTMLElement;
 	private readonly uiSelectionCountEl: HTMLElement;
 	private readonly uiSelectionClearBtn: HTMLButtonElement;
+	private readonly uiClearAllSurfacesBtn: HTMLButtonElement;
 	private uiSelectionCount = 0;
 	private readonly uiStartAppButton: HTMLButtonElement;
 	private uiStartAllSurfacesButton!: HTMLButtonElement;
@@ -290,16 +321,53 @@ class ModeShellContribution extends Disposable {
 	private uiSurfaceScaffoldTextarea!: HTMLTextAreaElement;
 	private uiSurfaceScaffoldScaffoldButton!: HTMLButtonElement;
 	private uiSurfaceScaffoldCancelButton!: HTMLButtonElement;
-	private uiSurfaceSetupBusinessContext!: HTMLElement;
-	private uiSurfaceSetupBusinessContextToggle!: HTMLButtonElement;
-	private uiSurfaceSetupBusinessContextChevron!: HTMLElement;
+	private uiWorkspaceHomeTabToggle!: HTMLElement;
+	private uiWorkspaceHomeClaudeMdButton!: HTMLButtonElement;
+	private uiWorkspaceHomePlanButton!: HTMLButtonElement;
+	private uiWorkspaceClaudeMdPanelRoot!: HTMLElement;
+	private workspaceClaudeMdPanel: SurfaceClaudeMdPanel | undefined;
+	private workspaceHomeView: WorkspaceHomeView = 'workspacePlan';
+	private uiWorkspacePlanBrandFields!: HTMLElement;
+	private hasWorkspacePlanGenerated = false;
 	private uiSurfaceSetupSurfacesSection!: HTMLElement;
 	private uiSurfaceSetupSurfacesBody!: HTMLElement;
+	private uiSurfaceCreateHost!: HTMLElement;
+	private uiSurfaceCreateChooser!: HTMLElement;
+	private uiSurfaceDescribeCompose!: HTMLElement;
+	private uiSurfaceDescribeNameInput!: HTMLInputElement;
+	private uiSurfaceDescribeIntentInput!: HTMLTextAreaElement;
+	private uiSurfaceDescribeAttachmentList!: HTMLElement;
+	private uiSurfaceDescribeSubmitButton!: HTMLButtonElement;
+	private readonly describeAppAttachments: DescribeAppAttachmentRef[] = [];
+	private readonly describeAppAttachmentListeners = this._register(new DisposableStore());
+	private readonly describeAppAttachmentPreviewUrls: string[] = [];
+	private describeAppDraftHydrating = false;
+	private readonly describeAppDraftAutosaveScheduler = this._register(new RunOnceScheduler(() => void this.persistDescribeAppDraft(), 400));
+	private uiWorkspacePlanStrip!: HTMLElement;
+	private uiWorkspacePlanIntentInput!: HTMLTextAreaElement;
+	private uiWorkspacePlanAttachmentList!: HTMLElement;
+	private uiWorkspacePlanSubmitButton!: HTMLButtonElement;
+	private uiWorkspacePlanStatus!: HTMLElement;
+	private uiWorkspaceSuggestedHost!: HTMLElement;
+	private uiWorkspaceSuggestedGrid!: HTMLElement;
+	private uiWorkspaceSuggestedCreateButton!: HTMLButtonElement;
+	private readonly workspacePlanAttachments: Array<{
+		readonly id: string;
+		readonly kind: 'image' | 'file';
+		readonly name: string;
+		readonly mimeType: string;
+		readonly data: Uint8Array;
+	}> = [];
+	private readonly workspacePlanAttachmentListeners = this._register(new DisposableStore());
+	private readonly workspaceSuggestedCardListeners = this._register(new DisposableStore());
+	private readonly workspaceSuggestedWatcher = this._register(new MutableDisposable());
+	private workspaceSuggestedSurfaces: WorkspaceSuggestedSurfaces | undefined;
+	private workspaceSuggestedWriteInFlight = false;
+	private workspacePlanKickoffInFlight = false;
 	private readonly uiSurfaceSetupSections = new Map<SurfaceSetupStep, HTMLElement>();
 	private surfaceSetupBrandLogoPath: string | undefined;
 	private surfaceSetupBrandLogoMarkPath: string | undefined;
 	private surfaceSetupCurrentStep: SurfaceSetupStep = 'goal';
-	private surfaceSetupBusinessContextOpen = false;
 	private surfaceSetupDraftDirty = false;
 	private surfaceSetupHydrating = false;
 	private readonly surfaceSetupAutosaveScheduler = this._register(new RunOnceScheduler(() => void this.autosaveSurfaceSetupBuilder(), 600));
@@ -392,6 +460,7 @@ class ModeShellContribution extends Disposable {
 		@IEditorService private readonly editorService: IEditorService,
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@INotificationService private readonly notificationService: INotificationService,
+		@ILogService private readonly logService: ILogService,
 		@IChatService private readonly chatService: IChatService,
 		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
 		@ILanguageModelsService private readonly languageModelsService: ILanguageModelsService,
@@ -406,6 +475,7 @@ class ModeShellContribution extends Disposable {
 		@IDockerAvailabilityService private readonly dockerAvailabilityService: IDockerAvailabilityService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@IFileDialogService private readonly fileDialogService: IFileDialogService,
+		@IDialogService private readonly dialogService: IDialogService,
 		@IStartupGuideService private readonly startupGuideService: IStartupGuideService,
 		@IAppLaunchGuideService private readonly appLaunchGuideService: IAppLaunchGuideService,
 		@IConsoleService private readonly consoleService: IConsoleService,
@@ -619,27 +689,13 @@ class ModeShellContribution extends Disposable {
 				white-space: nowrap;
 			}
 
-			.monaco-workbench .custom-mode-ui-project-name .codicon {
-				flex: 0 0 auto;
-				font-size: 12px;
-				color: var(--vscode-descriptionForeground);
-			}
-
 			.monaco-workbench .custom-mode-ui-project-name:hover {
 				background-color: var(--vscode-toolbar-hoverBackground);
-			}
-
-			.monaco-workbench .custom-mode-ui-project-name:hover .codicon {
-				color: var(--vscode-foreground);
 			}
 
 			.monaco-workbench .custom-mode-ui-project-name.active {
 				color: var(--vscode-textLink-foreground);
 				background-color: var(--vscode-list-hoverBackground);
-			}
-
-			.monaco-workbench .custom-mode-ui-project-name:not(.active) .codicon {
-				display: none;
 			}
 
 			.monaco-workbench .custom-mode-ui-project-name.hidden {
@@ -757,6 +813,22 @@ class ModeShellContribution extends Disposable {
 				font-size: 12px;
 				font-weight: 600;
 				flex: 0 0 auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-claude-terminal-status {
+				flex: 1 1 auto;
+				min-width: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+				font-weight: 500;
+				text-align: right;
+			}
+
+			.monaco-workbench .custom-mode-ui-claude-terminal-status.error {
+				color: var(--vscode-errorForeground);
 			}
 
 			.monaco-workbench .custom-mode-ui-claude-terminal-host {
@@ -1351,6 +1423,40 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-tab-activeForeground);
 			}
 
+			.monaco-workbench .custom-mode-ui-surface-code {
+				flex: 0 0 auto;
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				width: 20px;
+				height: 20px;
+				padding: 0;
+				border: 0;
+				border-radius: 4px;
+				background: transparent;
+				color: var(--vscode-tab-inactiveForeground);
+				cursor: pointer;
+				line-height: 1;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-code .codicon {
+				font-size: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-code:hover {
+				background: var(--vscode-toolbar-hoverBackground);
+				color: var(--vscode-tab-activeForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-code.active {
+				color: var(--vscode-textLink-foreground);
+				background: var(--vscode-list-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-tab.active .custom-mode-ui-surface-code:not(.active) {
+				color: var(--vscode-tab-activeForeground);
+			}
+
 			.monaco-workbench .custom-mode-ui-surface-close {
 				flex: 0 0 auto;
 				width: 18px;
@@ -1543,6 +1649,113 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench .custom-mode-surface-plan-status {
 				font-size: 11px;
 				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references {
+				flex: 0 0 auto;
+				padding: 10px 12px;
+				border: 1px solid var(--vscode-editorWidget-border);
+				border-radius: 8px;
+				background: var(--vscode-editorWidget-background);
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-inner {
+				display: flex;
+				flex-direction: column;
+				gap: 8px;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-heading {
+				font-size: 12px;
+				font-weight: 600;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-hint {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+				line-height: 1.35;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-chips {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 6px;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-chip {
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				height: 26px;
+				padding: 0 10px;
+				border-radius: 999px;
+				border: 1px solid var(--vscode-editorWidget-border);
+				background: transparent;
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+				font-weight: 600;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-chip:disabled {
+				cursor: default;
+				opacity: 0.85;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-chip:not(:disabled):hover {
+				color: var(--vscode-foreground);
+				background: var(--vscode-toolbar-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-chip.selected {
+				color: var(--vscode-foreground);
+				border-color: var(--vscode-focusBorder, var(--vscode-editorWidget-border));
+				background: color-mix(in srgb, var(--vscode-focusBorder, #3794ff) 16%, transparent);
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-chip-badge {
+				font-size: 9px;
+				font-weight: 700;
+				letter-spacing: 0.02em;
+				text-transform: uppercase;
+				opacity: 0.8;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-chip-meta {
+				font-size: 10px;
+				font-weight: 500;
+				opacity: 0.75;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-actions {
+				display: flex;
+				justify-content: flex-end;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-confirm {
+				height: 26px;
+				padding: 0 12px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-button-border, transparent);
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+				font-size: 11px;
+				font-weight: 600;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-confirm:hover:not(:disabled) {
+				background: var(--vscode-button-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-references-confirm:disabled {
+				opacity: 0.5;
+				cursor: default;
 			}
 
 			.monaco-workbench .custom-mode-surface-plan-refresh {
@@ -2255,43 +2468,24 @@ class ModeShellContribution extends Disposable {
 				gap: 12px;
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-business-context-toggle {
-				display: flex;
-				align-items: center;
-				gap: 6px;
-				width: fit-content;
-				padding: 0;
-				border: 0;
-				background: transparent;
-				color: var(--vscode-descriptionForeground);
-				font-size: 12px;
-				font-weight: 600;
-				font-family: inherit;
-				cursor: pointer;
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-business-context-toggle:hover {
-				color: var(--vscode-foreground);
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-business-context-toggle:focus-visible {
-				outline: 1px solid var(--vscode-focusBorder);
-				outline-offset: 2px;
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-business-context-chevron {
-				font-size: 14px;
-				line-height: 1;
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-business-context-body {
-				display: flex;
-				flex-direction: column;
-				gap: 12px;
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-business-context:not(.open) .custom-mode-ui-surface-business-context-body {
+			.monaco-workbench .custom-mode-ui-surface-business-context.hidden {
 				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-home-panel.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-claude-md-panel {
+				min-height: 220px;
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.24));
+				border-radius: 8px;
+				overflow: hidden;
+				background: var(--vscode-editorWidget-background);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-home-toggle {
+				padding: 0;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-goal-field {
@@ -2447,9 +2641,14 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-ui-surface-starters-header {
 				display: flex;
-				align-items: flex-start;
+				align-items: center;
 				justify-content: space-between;
 				gap: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-starters-header .custom-mode-ui-surface-surfaces-title {
+				flex: 1 1 auto;
+				min-width: 0;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starters-subtitle {
@@ -2502,6 +2701,254 @@ class ModeShellContribution extends Disposable {
 				display: grid;
 				grid-template-columns: repeat(2, minmax(0, 1fr));
 				gap: 16px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-create-host > .custom-mode-ui-surface-starter-grid.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan {
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+				margin: 0 0 16px;
+				padding: 14px 16px;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 10px;
+				background: var(--vscode-editorWidget-background);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan-title {
+				font-size: 13px;
+				font-weight: 650;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan-hint {
+				font-size: 11px;
+				line-height: 1.4;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan-intent {
+				width: 100%;
+				min-height: 72px;
+				resize: vertical;
+				padding: 8px 10px;
+				border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+				border-radius: 6px;
+				background: var(--vscode-input-background);
+				color: var(--vscode-input-foreground);
+				font-family: inherit;
+				font-size: 12px;
+				line-height: 1.4;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan.dragover {
+				border-color: var(--vscode-focusBorder);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan-footer {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: center;
+				justify-content: space-between;
+				gap: 10px;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan-attachments {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 6px;
+				flex: 1 1 auto;
+				min-width: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan-actions {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				flex: 0 0 auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan-submit {
+				height: 28px;
+				padding: 0 12px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-button-border, transparent);
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+				font-size: 12px;
+				font-weight: 600;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan-submit:hover:not(:disabled) {
+				background: var(--vscode-button-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan-submit:disabled {
+				opacity: 0.55;
+				cursor: default;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-plan-status {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested {
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+				margin: 0 0 16px;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-header {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 10px;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-title {
+				font-size: 13px;
+				font-weight: 650;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-create {
+				height: 26px;
+				padding: 0 12px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-button-border, transparent);
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+				font-size: 11px;
+				font-weight: 600;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-create:disabled {
+				opacity: 0.5;
+				cursor: default;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-grid {
+				display: grid;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				gap: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-card {
+				display: flex;
+				flex-direction: column;
+				gap: 8px;
+				min-height: 140px;
+				padding: 12px 14px;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 10px;
+				background: var(--vscode-editor-background);
+				color: inherit;
+				text-align: left;
+				cursor: pointer;
+				font-family: inherit;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-card.selected {
+				border-color: var(--vscode-focusBorder, var(--vscode-panel-border));
+				background: color-mix(in srgb, var(--vscode-focusBorder, #3794ff) 12%, var(--vscode-editor-background));
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-card:disabled {
+				cursor: default;
+				opacity: 0.85;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-card-top {
+				display: flex;
+				align-items: flex-start;
+				justify-content: space-between;
+				gap: 8px;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-card-name {
+				font-size: 13px;
+				font-weight: 650;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-card-badge {
+				flex: 0 0 auto;
+				font-size: 9px;
+				font-weight: 700;
+				letter-spacing: 0.02em;
+				text-transform: uppercase;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-card-purpose {
+				font-size: 11px;
+				line-height: 1.4;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-card-chips {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+				margin-top: auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-suggested-card-chip {
+				padding: 2px 7px;
+				border-radius: 999px;
+				border: 1px solid var(--vscode-panel-border);
+				font-size: 10px;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-create-panel {
+				display: flex;
+				flex-direction: column;
+				min-height: 176px;
+				border: 1px dashed var(--vscode-panel-border);
+				border-radius: 10px;
+				background: transparent;
+				overflow: hidden;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-create-panel-title {
+				flex: 0 0 auto;
+				padding: 12px 14px 0;
+				color: var(--vscode-foreground);
+				font-size: 13px;
+				font-weight: 650;
+				line-height: 1.3;
+				text-align: center;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-create-panel-body {
+				flex: 1 1 auto;
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+				align-items: stretch;
+				min-height: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-create-separator {
+				width: 1px;
+				align-self: stretch;
+				margin: 12px 0 18px;
+				background: var(--vscode-panel-border);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card {
@@ -2763,15 +3210,27 @@ class ModeShellContribution extends Disposable {
 				align-items: center;
 				justify-content: center;
 				gap: 10px;
+				min-height: 0;
 				padding: 24px;
 				box-sizing: border-box;
 				text-align: center;
-				border-style: dashed;
+				border: 0;
+				border-radius: 0;
 				background: transparent;
+				box-shadow: none;
+				transform: none;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-new:hover {
 				background: var(--vscode-list-hoverBackground);
+				border-color: transparent;
+				box-shadow: none;
+				transform: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-create-panel .custom-mode-ui-surface-starter-card-new:focus-visible {
+				outline: 2px solid var(--vscode-focusBorder);
+				outline-offset: -2px;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starter-card-new .custom-mode-ui-surface-starter-card-header {
@@ -2800,9 +3259,288 @@ class ModeShellContribution extends Disposable {
 				display: none;
 			}
 
+			.monaco-workbench .custom-mode-ui-surface-describe-compose {
+				display: none;
+				flex-direction: column;
+				gap: 14px;
+				min-height: 176px;
+				padding: 18px;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 10px;
+				background: var(--vscode-editor-background);
+				box-sizing: border-box;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-compose.visible {
+				display: flex;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-compose.dragover {
+				border-color: var(--vscode-focusBorder);
+				box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-compose-header {
+				display: flex;
+				align-items: flex-start;
+				justify-content: space-between;
+				gap: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-compose-title {
+				color: var(--vscode-foreground);
+				font-size: 15px;
+				font-weight: 650;
+				line-height: 1.3;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-compose-hint {
+				margin-top: 4px;
+				color: var(--vscode-descriptionForeground);
+				font-size: 12px;
+				line-height: 1.45;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-compose-back {
+				flex: 0 0 auto;
+				height: 28px;
+				padding: 0 10px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+				background: transparent;
+				color: var(--vscode-foreground);
+				cursor: pointer;
+				font-size: 11px;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-compose-back:hover {
+				background: var(--vscode-toolbar-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-field {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-label {
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-name,
+			.monaco-workbench .custom-mode-ui-surface-describe-intent {
+				width: 100%;
+				box-sizing: border-box;
+				border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+				border-radius: 8px;
+				background: var(--vscode-input-background);
+				color: var(--vscode-input-foreground);
+				font-family: inherit;
+				font-size: 13px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-name {
+				height: 34px;
+				padding: 0 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-intent {
+				min-height: 96px;
+				padding: 10px 12px;
+				resize: vertical;
+				line-height: 1.45;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-name:focus,
+			.monaco-workbench .custom-mode-ui-surface-describe-intent:focus {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: -1px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-footer {
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+				margin-top: 2px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachments {
+				display: flex;
+				flex-direction: row;
+				flex-wrap: nowrap;
+				align-items: stretch;
+				gap: 8px;
+				max-width: 100%;
+				overflow-x: auto;
+				padding-bottom: 2px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachments:empty {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachment {
+				display: flex;
+				flex: 0 0 auto;
+				align-items: center;
+				gap: 8px;
+				max-width: 220px;
+				padding: 6px 8px;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 8px;
+				background: var(--vscode-sideBar-background);
+				font-size: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachment-preview {
+				flex: 0 0 auto;
+				width: 36px;
+				height: 36px;
+				border-radius: 6px;
+				object-fit: cover;
+				background: var(--vscode-editor-background);
+				border: 1px solid var(--vscode-panel-border);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachment-icon {
+				display: flex;
+				flex: 0 0 auto;
+				align-items: center;
+				justify-content: center;
+				width: 36px;
+				height: 36px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-panel-border);
+				background: var(--vscode-editor-background);
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachment-icon .codicon {
+				font-size: 16px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachment-meta {
+				display: flex;
+				flex-direction: column;
+				gap: 2px;
+				min-width: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachment-name {
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				color: var(--vscode-foreground);
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachment-kind {
+				color: var(--vscode-descriptionForeground);
+				font-size: 10px;
+				text-transform: uppercase;
+				letter-spacing: 0.02em;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachment-path {
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				color: var(--vscode-descriptionForeground);
+				font-size: 10px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachment-remove {
+				flex: 0 0 auto;
+				width: 22px;
+				height: 22px;
+				padding: 0;
+				border: 0;
+				border-radius: 4px;
+				background: transparent;
+				color: var(--vscode-descriptionForeground);
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-attachment-remove:hover {
+				background: var(--vscode-toolbar-hoverBackground);
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-actions {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 8px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-media {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-media-btn {
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				height: 30px;
+				padding: 0 10px;
+				border-radius: 6px;
+				border: 1px dashed var(--vscode-panel-border);
+				background: transparent;
+				color: var(--vscode-foreground);
+				cursor: pointer;
+				font-size: 12px;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-media-btn:hover {
+				border-color: var(--vscode-focusBorder);
+				background: var(--vscode-list-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-media-btn .codicon {
+				font-size: 14px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-submit {
+				height: 32px;
+				padding: 0 14px;
+				border-radius: 6px;
+				border: 0;
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+				cursor: pointer;
+				font-size: 12px;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-submit:hover:not(:disabled) {
+				background: var(--vscode-button-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-describe-submit:disabled {
+				opacity: 0.55;
+				cursor: default;
+			}
+
 			@media (max-width: 760px) {
 				.monaco-workbench .custom-mode-ui-surface-starter-grid {
 					grid-template-columns: minmax(0, 1fr);
+				}
+
+				.monaco-workbench .custom-mode-ui-surface-create-panel-body {
+					grid-template-columns: minmax(0, 1fr);
+					grid-template-rows: auto auto auto;
+				}
+
+				.monaco-workbench .custom-mode-ui-surface-create-separator {
+					width: auto;
+					height: 1px;
+					margin: 0 18px;
 				}
 			}
 
@@ -4014,7 +4752,7 @@ class ModeShellContribution extends Disposable {
 				-webkit-app-region: no-drag;
 			}
 
-			.monaco-workbench.custom-mode-shell-hasProject .custom-mode-ui-selection-pill {
+			.monaco-workbench.custom-mode-shell-hasProject.custom-mode-shell-preview-select .custom-mode-ui-selection-pill {
 				display: inline-flex;
 				align-items: center;
 				gap: 4px;
@@ -4045,7 +4783,7 @@ class ModeShellContribution extends Disposable {
 				-webkit-app-region: no-drag;
 			}
 
-			.monaco-workbench.custom-mode-shell-hasProject .custom-mode-ui-selection-clear {
+			.monaco-workbench.custom-mode-shell-hasProject.custom-mode-shell-preview-select .custom-mode-ui-selection-clear {
 				display: inline-block;
 			}
 
@@ -4055,6 +4793,35 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-selection-clear:disabled {
+				opacity: 0.5;
+				cursor: default;
+			}
+
+			.monaco-workbench .custom-mode-ui-clear-all-surfaces {
+				display: none;
+				height: 22px;
+				padding: 0 10px;
+				border-radius: 999px;
+				border: 1px solid var(--vscode-editorWidget-border);
+				background-color: transparent;
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+				font-weight: 600;
+				line-height: 20px;
+				cursor: pointer;
+				-webkit-app-region: no-drag;
+			}
+
+			.monaco-workbench.custom-mode-shell-hasProject:not(.custom-mode-shell-preview-select) .custom-mode-ui-clear-all-surfaces {
+				display: inline-block;
+			}
+
+			.monaco-workbench .custom-mode-ui-clear-all-surfaces:hover:not(:disabled) {
+				color: var(--vscode-foreground);
+				background-color: var(--vscode-toolbar-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-clear-all-surfaces:disabled {
 				opacity: 0.5;
 				cursor: default;
 			}
@@ -4199,12 +4966,12 @@ class ModeShellContribution extends Disposable {
 		this.uiProjectName = $('button.custom-mode-ui-project-name.hidden', {
 			type: 'button',
 			role: 'tab',
-			title: localize('customMode.consoleCodeToggle', 'Toggle Console / Code'),
+			title: localize('customMode.consoleHomeTitle', 'Open Console surfaces home'),
 			'aria-pressed': 'false',
-		}, this.uiProjectNameLabel, $('span.codicon' + ThemeIcon.asCSSSelector(Codicon.arrowSwap))) as HTMLButtonElement;
+		}, this.uiProjectNameLabel) as HTMLButtonElement;
 		this.modeTopBar.appendChild(this.uiProjectName);
 		this._register(addDisposableListener(this.uiProjectName, 'click', () => {
-			this.toggleConsoleCodeMode();
+			this.goToConsoleHome();
 		}));
 		for (const mode of ModeShellContribution.MODES) {
 			const button = $('button.custom-mode-top-tab', {
@@ -4241,9 +5008,13 @@ class ModeShellContribution extends Disposable {
 			title: localize('customMode.claudeTerminalSash', 'Resize Claude terminal'),
 			tabindex: '0',
 		});
+		this.uiClaudeTerminalStatus = $('span.custom-mode-ui-claude-terminal-status', {
+			title: localize('customMode.claudeKickoffStatusTitle', 'Claude kickoff status'),
+		});
 		this.uiClaudeTerminalPane = $('div.custom-mode-ui-claude-terminal', undefined,
 			$('div.custom-mode-ui-claude-terminal-header', undefined,
 				$('span', undefined, localize('customMode.claudeTerminalTitle', 'Claude')),
+				this.uiClaudeTerminalStatus,
 			),
 			this.uiClaudeTerminalHost,
 		);
@@ -4272,6 +5043,11 @@ class ModeShellContribution extends Disposable {
 			title: dragToSelectLabel,
 		}, dragToSelectLabel) as HTMLButtonElement;
 		this.uiSelectionClearBtn.disabled = true;
+		this.uiClearAllSurfacesBtn = $('button.custom-mode-ui-clear-all-surfaces', {
+			type: 'button',
+			'aria-label': localize('customMode.clearAllSurfaces', 'Clear all Surfaces'),
+			title: localize('customMode.clearAllSurfacesTitle', 'Delete every surface, plan, proposal, and generated app folder'),
+		}, localize('customMode.clearAllSurfaces', 'Clear all Surfaces')) as HTMLButtonElement;
 		this.uiStartAppButton = $('button.custom-mode-start-app', { type: 'button' }, localize('customMode.startApp', 'Start App')) as HTMLButtonElement;
 		this.uiStartSubtitle = $('div.custom-mode-start-app-subtitle');
 		this.uiStartStatus = $('pre.custom-mode-start-app-status');
@@ -4365,6 +5141,9 @@ class ModeShellContribution extends Disposable {
 		this.surfacePlanPanel = this._register(new SurfacePlanPanel(this.uiSurfacePlanPanelRoot, this.fileService));
 		this._register(this.surfacePlanPanel.onDidRequestBuild(request => {
 			void this.submitPlanBuildIntent(request);
+		}));
+		this._register(this.surfacePlanPanel.onDidConfirmReferenceSelection(selection => {
+			void this.notifyClaudeReferenceSelectionConfirmed(selection);
 		}));
 		this.uiSurfaceClaudeMdPanelRoot = $('div.custom-mode-ui-surface-claude-md-panel.hidden');
 		this.uiSurfaceClaudeMdPanelRoot.hidden = true;
@@ -4500,6 +5279,7 @@ class ModeShellContribution extends Disposable {
 		this.modeTopBar.appendChild(this.uiSurfaceSwitcher);
 		const topBarSpacer = $('div.custom-mode-top-spacer');
 		this.modeTopBar.appendChild(topBarSpacer);
+		this.modeTopBar.appendChild(this.uiClearAllSurfacesBtn);
 		this.modeTopBar.appendChild(this.uiSelectionClearBtn);
 		this.modeTopBar.appendChild(this.uiSelectionPill);
 		this._register(toDisposable(() => {
@@ -4507,8 +5287,11 @@ class ModeShellContribution extends Disposable {
 			topBarSpacer.remove();
 			this.uiSelectionPill.remove();
 			this.uiSelectionClearBtn.remove();
+			this.uiClearAllSurfacesBtn.remove();
 		}));
 		this._register(addDisposableListener(this.uiSelectionClearBtn, 'click', () => this.clearUiSelection()));
+		this._register(addDisposableListener(this.uiClearAllSurfacesBtn, 'click', () => void this.clearAllSurfaces()));
+		this.syncTopBarSelectionChrome();
 
 		this.processContainer = $('div.custom-mode-process-container');
 		if (this._processChatDismissed) {
@@ -5105,6 +5888,7 @@ class ModeShellContribution extends Disposable {
 		}
 
 		this.syncTabGuides(mode);
+		this.syncTopBarSelectionChrome();
 
 		if (isUi) {
 			this.routeSelectedSurfacePreview();
@@ -5674,20 +6458,38 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private createSurfaceSetupDashboard(): HTMLElement {
-		const starterGrid = $('div.custom-mode-ui-surface-starter-grid');
-		// Suggested starter cards are intentionally omitted — New Surface starts a Claude
-		// planning session (CLAUDE.md → plan.md + proposal graph) instead.
-		starterGrid.appendChild(this.createNewSurfaceCard());
+		const createPanel = $('div.custom-mode-ui-surface-create-panel', undefined,
+			$('div.custom-mode-ui-surface-create-panel-title', undefined, localize('customMode.surfaceCreatePanelTitle', 'Create Surface')),
+			$('div.custom-mode-ui-surface-create-panel-body', undefined,
+				this.createDescribeAppCard(),
+				$('div.custom-mode-ui-surface-create-separator', {
+					role: 'separator',
+					'aria-orientation': 'vertical',
+				}),
+				this.createImportRepoCard(),
+			),
+		);
+		// 2-col grid: Create Surface occupies one card slot; workspace suggestions render above.
+		const starterGrid = $('div.custom-mode-ui-surface-starter-grid', undefined, createPanel);
+		this.uiSurfaceCreateChooser = starterGrid;
+		this.uiSurfaceDescribeCompose = this.createDescribeAppCompose();
+		this.uiSurfaceCreateHost = $('div.custom-mode-ui-surface-create-host', undefined,
+			this.uiSurfaceCreateChooser,
+			this.uiSurfaceDescribeCompose,
+		);
+		this.uiWorkspacePlanStrip = this.createWorkspacePlanStrip();
+		this.uiWorkspaceSuggestedHost = this.createWorkspaceSuggestedHost();
 		this.uiStartAllSurfacesButton = $('button.custom-mode-start-all-surfaces', { type: 'button' }, localize('customMode.startAllSurfaces', 'Start all surfaces')) as HTMLButtonElement;
 		this._register(addDisposableListener(this.uiStartAllSurfacesButton, 'click', () => void this.onStartAllSurfacesClicked()));
 		const surfacesTitle = $('div.custom-mode-ui-surface-surfaces-title', undefined, localize('customMode.surfaceSetupStartersTitle', 'Surfaces'));
 		this.uiSurfaceSetupSurfacesBody = $('div.custom-mode-ui-surface-surfaces-body', { id: 'surface-setup-surfaces-body' },
 			$('div.custom-mode-ui-surface-starters', undefined,
 				$('div.custom-mode-ui-surface-starters-header', undefined,
-					$('div.custom-mode-ui-surface-starters-subtitle', undefined, localize('customMode.surfaceSetupStartersSubtitle', 'Start a Claude planning session to draft plan.md and a proposal graph for a new surface.')),
+					surfacesTitle,
 					this.uiStartAllSurfacesButton,
 				),
-				starterGrid,
+				this.uiWorkspaceSuggestedHost,
+				this.uiSurfaceCreateHost,
 			),
 		);
 
@@ -5721,16 +6523,7 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceSetupLogoMarkDropzone = logoMarkDropzone.dropzone;
 		this.uiSurfaceSetupLogoMarkPreview = logoMarkDropzone.preview;
 
-		this.uiSurfaceSetupBusinessContextChevron = $('span.custom-mode-ui-surface-business-context-chevron.codicon' + ThemeIcon.asCSSSelector(Codicon.chevronRight));
-		this.uiSurfaceSetupBusinessContextToggle = $('button.custom-mode-ui-surface-business-context-toggle', {
-			type: 'button',
-			'aria-expanded': 'false',
-			'aria-controls': 'surface-setup-business-context-body',
-		}, this.uiSurfaceSetupBusinessContextChevron, localize('customMode.surfaceSetupBusinessContextToggle', 'Business context')) as HTMLButtonElement;
-		this._register(addDisposableListener(this.uiSurfaceSetupBusinessContextToggle, 'click', () => {
-			this.setSurfaceSetupBusinessContextOpen(!this.surfaceSetupBusinessContextOpen);
-		}));
-		const businessContextBody = $('div.custom-mode-ui-surface-business-context-body', { id: 'surface-setup-business-context-body' },
+		this.uiWorkspacePlanBrandFields = $('div.custom-mode-ui-surface-business-context.hidden', undefined,
 			$('label.custom-mode-ui-surface-goal-field', undefined,
 				$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalDescriptionLabel', 'Description')),
 				this.uiSurfaceSetupGoalDescriptionInput
@@ -5747,11 +6540,29 @@ class ModeShellContribution extends Disposable {
 			),
 			brandColors,
 		);
-		this.uiSurfaceSetupBusinessContext = $('div.custom-mode-ui-surface-business-context', undefined,
-			this.uiSurfaceSetupBusinessContextToggle,
-			businessContextBody,
-		);
-		this.applySurfaceSetupBusinessContextOpenState();
+
+		this.uiWorkspaceHomeClaudeMdButton = $('button', {
+			type: 'button',
+			role: 'tab',
+			'aria-selected': 'false',
+		}, localize('customMode.workspaceHomeClaudeMd', 'CLAUDE.md')) as HTMLButtonElement;
+		this.uiWorkspaceHomePlanButton = $('button', {
+			type: 'button',
+			role: 'tab',
+			'aria-selected': 'true',
+		}, localize('customMode.workspaceHomePlan', 'Workspace Plan')) as HTMLButtonElement;
+		this.uiWorkspaceHomeTabToggle = $('div.custom-mode-ui-surface-main-view-toggle.custom-mode-ui-workspace-home-toggle', {
+			role: 'tablist',
+			'aria-label': localize('customMode.workspaceHomeTabs', 'Workspace home views'),
+		}, this.uiWorkspaceHomeClaudeMdButton, this.uiWorkspaceHomePlanButton);
+		this._register(addDisposableListener(this.uiWorkspaceHomeClaudeMdButton, 'click', () => this.setWorkspaceHomeView('claudeMd')));
+		this._register(addDisposableListener(this.uiWorkspaceHomePlanButton, 'click', () => this.setWorkspaceHomeView('workspacePlan')));
+
+		this.uiWorkspaceClaudeMdPanelRoot = $('div.custom-mode-ui-workspace-claude-md-panel.custom-mode-ui-workspace-home-panel.hidden');
+		this.workspaceClaudeMdPanel = this._register(new SurfaceClaudeMdPanel(this.uiWorkspaceClaudeMdPanelRoot, this.fileService));
+
+		const storedHomeView = this.storageService.get(STORAGE_WORKSPACE_HOME_VIEW, StorageScope.WORKSPACE);
+		this.workspaceHomeView = isWorkspaceHomeView(storedHomeView) ? storedHomeView : 'workspacePlan';
 
 		const goalSection = $('section.custom-mode-ui-surface-setup-section', { id: 'surface-setup-section-goal', 'data-section': 'goal' },
 			$('div.custom-mode-ui-surface-goal-form', undefined,
@@ -5759,17 +6570,19 @@ class ModeShellContribution extends Disposable {
 					$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalNameLabel', 'Business name')),
 					this.uiSurfaceSetupGoalNameInput
 				),
-				this.uiSurfaceSetupBusinessContext,
+				this.uiWorkspaceHomeTabToggle,
+				this.uiWorkspaceClaudeMdPanelRoot,
+				this.uiWorkspacePlanStrip,
+				this.uiWorkspacePlanBrandFields,
 			)
 		);
 		this.uiSurfaceSetupSurfacesSection = $('section.custom-mode-ui-surface-setup-section', { id: 'surface-setup-section-surfaces', 'data-section': 'surfaces' },
-			surfacesTitle,
 			this.uiSurfaceSetupSurfacesBody,
 		);
 		const surfacesSection = this.uiSurfaceSetupSurfacesSection;
 		for (const [step, section] of [
 			['goal', goalSection],
-			['brand', this.uiSurfaceSetupBusinessContext],
+			['brand', this.uiWorkspacePlanBrandFields],
 			['surfaces', surfacesSection],
 		] as const) {
 			this.uiSurfaceSetupSections.set(step, section);
@@ -5779,6 +6592,7 @@ class ModeShellContribution extends Disposable {
 			goalSection,
 			surfacesSection,
 		);
+		this.syncWorkspaceHomeView();
 		this.uiSurfaceScaffoldTitle = $('div.custom-mode-ui-surface-scaffold-title');
 		this.uiSurfaceScaffoldTextarea = $('textarea.custom-mode-ui-surface-scaffold-textarea', {
 			'aria-label': localize('customMode.surfaceScaffoldPromptAria', 'Surface scaffold prompt'),
@@ -5817,6 +6631,502 @@ class ModeShellContribution extends Disposable {
 		return $('div.custom-mode-ui-surface-setup.hidden', undefined,
 			this.uiSurfaceSetupInner,
 		);
+	}
+
+	private createWorkspacePlanStrip(): HTMLElement {
+		this.uiWorkspacePlanIntentInput = $('textarea.custom-mode-ui-workspace-plan-intent', {
+			rows: '3',
+			placeholder: localize(
+				'customMode.workspacePlanIntentPlaceholder',
+				'Optional: what should this workspace become? Or just drop a planning PDF…',
+			),
+			'aria-label': localize('customMode.workspacePlanIntentAria', 'Workspace planning intent'),
+		}) as HTMLTextAreaElement;
+		this.uiWorkspacePlanAttachmentList = $('div.custom-mode-ui-workspace-plan-attachments');
+		this.uiWorkspacePlanSubmitButton = $('button.custom-mode-ui-workspace-plan-submit', {
+			type: 'button',
+		}, localize('customMode.workspacePlanSubmit', 'Start workspace planning')) as HTMLButtonElement;
+		this.uiWorkspacePlanStatus = $('div.custom-mode-ui-workspace-plan-status');
+
+		const fileInput = $('input', { type: 'file', accept: '.pdf,application/pdf,image/*,.doc,.docx,.md,.txt', hidden: 'true', multiple: 'true' }) as HTMLInputElement;
+		const fileButton = $('button.custom-mode-ui-surface-describe-media-btn', {
+			type: 'button',
+		},
+			$('span.codicon' + ThemeIcon.asCSSSelector(Codicon.symbolFile)),
+			localize('customMode.workspacePlanAddFile', 'PDF / file'),
+		) as HTMLButtonElement;
+		this._register(addDisposableListener(fileButton, 'click', () => fileInput.click()));
+		this._register(addDisposableListener(fileInput, 'change', () => {
+			void this.addWorkspacePlanFiles(fileInput.files);
+			fileInput.value = '';
+		}));
+		this._register(addDisposableListener(this.uiWorkspacePlanSubmitButton, 'click', () => void this.submitWorkspacePlanCompose()));
+		this._register(addDisposableListener(this.uiWorkspacePlanIntentInput, 'keydown', (event: KeyboardEvent) => {
+			if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+				event.preventDefault();
+				void this.submitWorkspacePlanCompose();
+			}
+		}));
+
+		const root = $('div.custom-mode-ui-workspace-plan.custom-mode-ui-workspace-home-panel', undefined,
+			$('div.custom-mode-ui-workspace-plan-hint', undefined, localize(
+				'customMode.workspacePlanHint',
+				'Drop a planning PDF or brief. Claude will propose separate surfaces with details — Create Surface below stays available for one-off apps.',
+			)),
+			this.uiWorkspacePlanIntentInput,
+			$('div.custom-mode-ui-workspace-plan-footer', undefined,
+				this.uiWorkspacePlanAttachmentList,
+				$('div.custom-mode-ui-workspace-plan-actions', undefined, fileButton, fileInput, this.uiWorkspacePlanSubmitButton),
+			),
+			this.uiWorkspacePlanStatus,
+		);
+		this._register(addDisposableListener(root, 'dragenter', event => {
+			if (!this.dragEventHasFiles(event)) {
+				return;
+			}
+			event.preventDefault();
+			root.classList.add('dragover');
+		}));
+		this._register(addDisposableListener(root, 'dragover', event => {
+			if (!this.dragEventHasFiles(event)) {
+				return;
+			}
+			event.preventDefault();
+			if (event.dataTransfer) {
+				event.dataTransfer.dropEffect = 'copy';
+			}
+			root.classList.add('dragover');
+		}));
+		this._register(addDisposableListener(root, 'dragleave', event => {
+			const related = event.relatedTarget;
+			if (related instanceof Node && root.contains(related)) {
+				return;
+			}
+			root.classList.remove('dragover');
+		}));
+		this._register(addDisposableListener(root, 'drop', event => {
+			event.preventDefault();
+			root.classList.remove('dragover');
+			const files = event.dataTransfer?.files;
+			if (files?.length) {
+				void this.addWorkspacePlanFiles(files);
+			}
+		}));
+		return root;
+	}
+
+	private createWorkspaceSuggestedHost(): HTMLElement {
+		this.uiWorkspaceSuggestedGrid = $('div.custom-mode-ui-workspace-suggested-grid');
+		this.uiWorkspaceSuggestedCreateButton = $('button.custom-mode-ui-workspace-suggested-create', {
+			type: 'button',
+		}, localize('customMode.workspaceSuggestedCreate', 'Create selected surfaces')) as HTMLButtonElement;
+		this._register(addDisposableListener(this.uiWorkspaceSuggestedCreateButton, 'click', () => void this.createSelectedWorkspaceSurfaces()));
+		const host = $('div.custom-mode-ui-workspace-suggested.hidden', undefined,
+			$('div.custom-mode-ui-workspace-suggested-header', undefined,
+				$('div.custom-mode-ui-workspace-suggested-title', undefined, localize('customMode.workspaceSuggestedTitle', 'Suggested surfaces')),
+				this.uiWorkspaceSuggestedCreateButton,
+			),
+			this.uiWorkspaceSuggestedGrid,
+		);
+		return host;
+	}
+
+	private async addWorkspacePlanFiles(fileList: FileList | null | undefined): Promise<void> {
+		if (!fileList?.length) {
+			return;
+		}
+		for (const file of Array.from(fileList)) {
+			const buffer = new Uint8Array(await file.arrayBuffer());
+			this.workspacePlanAttachments.push({
+				id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+				kind: file.type.startsWith('image/') ? 'image' : 'file',
+				name: file.name,
+				mimeType: file.type || 'application/octet-stream',
+				data: buffer,
+			});
+		}
+		this.renderWorkspacePlanAttachments();
+	}
+
+	private renderWorkspacePlanAttachments(): void {
+		this.workspacePlanAttachmentListeners.clear();
+		this.uiWorkspacePlanAttachmentList.replaceChildren();
+		for (const attachment of this.workspacePlanAttachments) {
+			const remove = $('button.custom-mode-ui-surface-describe-attachment-remove', {
+				type: 'button',
+				title: localize('customMode.workspacePlanRemoveAttachment', 'Remove {0}', attachment.name),
+				'aria-label': localize('customMode.workspacePlanRemoveAttachment', 'Remove {0}', attachment.name),
+			}, '\u00d7') as HTMLButtonElement;
+			this.workspacePlanAttachmentListeners.add(addDisposableListener(remove, 'click', () => {
+				const index = this.workspacePlanAttachments.findIndex(item => item.id === attachment.id);
+				if (index >= 0) {
+					this.workspacePlanAttachments.splice(index, 1);
+					this.renderWorkspacePlanAttachments();
+				}
+			}));
+			this.uiWorkspacePlanAttachmentList.appendChild(
+				$('div.custom-mode-ui-surface-describe-attachment', { title: attachment.name },
+					$('div.custom-mode-ui-surface-describe-attachment-icon', undefined,
+						$('span.codicon' + ThemeIcon.asCSSSelector(Codicon.symbolFile)),
+					),
+					$('div.custom-mode-ui-surface-describe-attachment-meta', undefined,
+						$('span.custom-mode-ui-surface-describe-attachment-name', undefined, attachment.name),
+						$('span.custom-mode-ui-surface-describe-attachment-kind', undefined, attachment.kind),
+					),
+					remove,
+				),
+			);
+		}
+	}
+
+	private async submitWorkspacePlanCompose(): Promise<void> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			this.notificationService.warn(localize('customMode.surfaceClaudeNoWorkspace', 'Open a workspace folder before creating a new surface.'));
+			return;
+		}
+		const intent = this.uiWorkspacePlanIntentInput.value.trim();
+		if (!intent && this.workspacePlanAttachments.length === 0) {
+			this.notificationService.warn(localize(
+				'customMode.workspacePlanIntentRequired',
+				'Add a brief description or drop a planning PDF before starting workspace planning.',
+			));
+			this.uiWorkspacePlanIntentInput.focus();
+			return;
+		}
+		if (this.workspacePlanKickoffInFlight) {
+			return;
+		}
+		this.workspacePlanKickoffInFlight = true;
+		this.uiWorkspacePlanSubmitButton.disabled = true;
+		const submitLabel = this.uiWorkspacePlanSubmitButton.textContent;
+		this.uiWorkspacePlanSubmitButton.textContent = localize('customMode.workspacePlanSubmitStarting', 'Starting…');
+		this.uiWorkspacePlanStatus.textContent = localize('customMode.workspacePlanStatusPlanning', 'Planning…');
+		const attachmentsSnapshot = [...this.workspacePlanAttachments];
+		try {
+			this.logClaudeKickoff(`workspace-plan start attachments=${attachmentsSnapshot.length}`);
+			await this.ensureWorkspaceClaudeMd(workspaceFolder);
+			await this.fileService.createFolder(joinPath(workspaceFolder, '.agent'));
+			await this.fileService.createFolder(workspaceAttachmentsDir(workspaceFolder));
+			const attachmentPaths: string[] = [];
+			const usedNames = new Set<string>();
+			for (const attachment of attachmentsSnapshot) {
+				const safeName = this.uniqueAttachmentFileName(attachment.name, usedNames);
+				usedNames.add(safeName);
+				const resource = joinPath(workspaceAttachmentsDir(workspaceFolder), safeName);
+				await this.fileService.writeFile(resource, VSBuffer.wrap(attachment.data));
+				attachmentPaths.push(`.agent/workspace/attachments/${safeName}`);
+			}
+			this.logClaudeKickoff(`workspace-plan saved ${attachmentPaths.length} attachment(s)`);
+
+			// Stay on Console home so suggestion cards appear here.
+			this.modeService.setMode('UI');
+			this.selectedSurfaceId = ADD_SURFACE_ID;
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
+			this.contextGatheringOpen = true;
+			this.persistContextGatheringOpen();
+			this.renderGoalSurfaceButtons(this.consoleService.getSurfaces());
+			this.syncSurfaceSetupDashboardVisibility();
+			this.setAddSurfaceState();
+			this.syncContextGatheringUi();
+
+			const prompt = buildWorkspacePlanKickoffPrompt({
+				businessName: this.uiSurfaceSetupGoalNameInput.value.trim() || undefined,
+				intent,
+				attachmentPaths,
+			});
+			this.logClaudeKickoff(`workspace-plan reset Claude terminal`);
+			await this.resetClaudeTerminalSession();
+			this.logClaudeKickoff(`workspace-plan create Claude terminal`);
+			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder, { forceNew: true });
+			await terminal.processReady;
+			await terminal.focusWhenReady(true);
+			this.relayoutTerminalInstances();
+			await timeout(120);
+			this.relayoutTerminalInstances();
+			this.logClaudeKickoff(`workspace-plan terminal ${created ? 'created' : 'reused'} id=${terminal.instanceId} host=${this.uiClaudeTerminalHost.clientWidth}x${this.uiClaudeTerminalHost.clientHeight}`);
+			if (created) {
+				this.logClaudeKickoff(`workspace-plan send 'claude'`);
+				await terminal.sendText('claude', true);
+				await timeout(900);
+				await this.submitClaudePrompt(terminal, prompt);
+			} else {
+				await this.submitClaudePrompt(terminal, prompt);
+			}
+			if (terminal.isDisposed || terminal.exitReason !== undefined) {
+				throw new Error(`Claude terminal exited during kickoff (reason=${terminal.exitReason ?? 'disposed'})`);
+			}
+			this.logClaudeKickoff(`workspace-plan kickoff submitted (${prompt.length} chars)`);
+			this.watchWorkspaceSuggestedSurfaces(workspaceFolder);
+			this.notificationService.info(localize(
+				'customMode.workspacePlanStarted',
+				'Claude is drafting a workspace plan and suggested surfaces. Watch the Console for cards.',
+			));
+		} catch (error: unknown) {
+			this.uiWorkspacePlanStatus.textContent = localize('customMode.workspacePlanStatusFailed', 'Planning failed');
+			this.logClaudeKickoff(`workspace-plan FAILED: ${String((error as Error)?.message ?? error)}`, true);
+			this.notificationService.error(localize(
+				'customMode.workspacePlanStartFailed',
+				'Failed to start workspace planning: {0}',
+				String((error as Error)?.message ?? error),
+			));
+		} finally {
+			this.workspacePlanKickoffInFlight = false;
+			this.uiWorkspacePlanSubmitButton.disabled = false;
+			this.uiWorkspacePlanSubmitButton.textContent = submitLabel || localize('customMode.workspacePlanSubmit', 'Start workspace planning');
+		}
+	}
+
+	private watchWorkspaceSuggestedSurfaces(workspaceFolder: URI): void {
+		const store = new DisposableStore();
+		this.workspaceSuggestedWatcher.value = store;
+		try {
+			store.add(this.fileService.watch(joinPath(workspaceFolder, '.agent')));
+			store.add(this.fileService.onDidFilesChange(e => {
+				if (this.workspaceSuggestedWriteInFlight) {
+					return;
+				}
+				const resource = workspaceSuggestedSurfacesResource(workspaceFolder);
+				if (e.affects(resource) || e.affects(workspacePlanResource(workspaceFolder))) {
+					void this.refreshWorkspaceSuggestedSurfaces(workspaceFolder);
+				}
+			}));
+		} catch {
+			// Watching is best-effort.
+		}
+		void this.refreshWorkspaceSuggestedSurfaces(workspaceFolder);
+	}
+
+	private async refreshWorkspaceSuggestedSurfaces(workspaceFolder?: URI): Promise<void> {
+		const folder = workspaceFolder ?? this.getWorkspaceFolderUri();
+		if (!folder) {
+			this.workspaceSuggestedSurfaces = undefined;
+			this.renderWorkspaceSuggestedSurfaces();
+			void this.refreshWorkspacePlanGeneratedState(undefined);
+			return;
+		}
+		try {
+			const content = await this.fileService.readFile(workspaceSuggestedSurfacesResource(folder));
+			this.workspaceSuggestedSurfaces = parseWorkspaceSuggestedSurfaces(content.value.toString());
+		} catch {
+			this.workspaceSuggestedSurfaces = undefined;
+		}
+		this.renderWorkspaceSuggestedSurfaces();
+		void this.refreshWorkspacePlanGeneratedState(folder);
+	}
+
+	private async refreshWorkspacePlanGeneratedState(workspaceFolder?: URI): Promise<void> {
+		const folder = workspaceFolder ?? this.getWorkspaceFolderUri();
+		let generated = Boolean(this.workspaceSuggestedSurfaces?.surfaces.length);
+		if (!generated && folder) {
+			try {
+				await this.fileService.stat(workspacePlanResource(folder));
+				generated = true;
+			} catch {
+				generated = false;
+			}
+		}
+		this.hasWorkspacePlanGenerated = generated;
+		this.syncWorkspaceHomeView();
+	}
+
+	private setWorkspaceHomeView(view: WorkspaceHomeView): void {
+		if (this.workspaceHomeView === view) {
+			this.syncWorkspaceHomeView();
+			return;
+		}
+		this.workspaceHomeView = view;
+		this.storageService.store(STORAGE_WORKSPACE_HOME_VIEW, view, StorageScope.WORKSPACE, StorageTarget.USER);
+		this.syncWorkspaceHomeView();
+	}
+
+	private syncWorkspaceHomeView(): void {
+		if (!this.uiWorkspaceHomeTabToggle || !this.uiWorkspacePlanStrip || !this.uiWorkspaceClaudeMdPanelRoot) {
+			return;
+		}
+		const showClaudeMd = this.workspaceHomeView === 'claudeMd';
+		const showPlan = this.workspaceHomeView === 'workspacePlan';
+		this.uiWorkspaceHomeClaudeMdButton.classList.toggle('active', showClaudeMd);
+		this.uiWorkspaceHomePlanButton.classList.toggle('active', showPlan);
+		this.uiWorkspaceHomeClaudeMdButton.setAttribute('aria-selected', String(showClaudeMd));
+		this.uiWorkspaceHomePlanButton.setAttribute('aria-selected', String(showPlan));
+		this.uiWorkspaceClaudeMdPanelRoot.classList.toggle('hidden', !showClaudeMd);
+		this.uiWorkspacePlanStrip.classList.toggle('hidden', !showPlan);
+		this.uiWorkspacePlanBrandFields.classList.toggle('hidden', !showPlan || !this.hasWorkspacePlanGenerated);
+		if (showClaudeMd) {
+			void this.workspaceClaudeMdPanel?.load({ workspaceFolder: this.getWorkspaceFolderUri() });
+		}
+	}
+
+	private renderWorkspaceSuggestedSurfaces(): void {
+		this.workspaceSuggestedCardListeners.clear();
+		this.uiWorkspaceSuggestedGrid.replaceChildren();
+		const doc = this.workspaceSuggestedSurfaces;
+		if (!doc?.surfaces.length) {
+			this.uiWorkspaceSuggestedHost.classList.add('hidden');
+			if (!this.workspacePlanKickoffInFlight) {
+				this.uiWorkspacePlanStatus.textContent = '';
+			}
+			return;
+		}
+
+		this.uiWorkspaceSuggestedHost.classList.remove('hidden');
+		const interactive = doc.status === 'draft';
+		const selectedCount = selectedSuggestedSurfaces(doc).length;
+		this.uiWorkspaceSuggestedCreateButton.disabled = !interactive || selectedCount === 0;
+		this.uiWorkspacePlanStatus.textContent = doc.status === 'confirmed'
+			? localize('customMode.workspacePlanStatusCreated', 'Created selected surfaces from the workspace plan.')
+			: localize('customMode.workspacePlanStatusSuggested', '{0} suggested surface(s) — toggle and create.', doc.surfaces.length);
+
+		for (const surface of doc.surfaces) {
+			this.uiWorkspaceSuggestedGrid.appendChild(this.createWorkspaceSuggestedCard(surface, interactive));
+		}
+	}
+
+	private createWorkspaceSuggestedCard(surface: WorkspaceSuggestedSurface, interactive: boolean): HTMLElement {
+		const card = $('button.custom-mode-ui-workspace-suggested-card', {
+			type: 'button',
+			'aria-pressed': surface.selected ? 'true' : 'false',
+		}) as HTMLButtonElement;
+		card.classList.toggle('selected', surface.selected);
+		card.disabled = !interactive;
+
+		const top = $('div.custom-mode-ui-workspace-suggested-card-top', undefined,
+			$('div.custom-mode-ui-workspace-suggested-card-name', undefined, surface.name),
+		);
+		if (surface.suggested) {
+			top.appendChild($('span.custom-mode-ui-workspace-suggested-card-badge', undefined,
+				localize('customMode.workspaceSuggestedBadge', 'Suggested')));
+		}
+		card.appendChild(top);
+		if (surface.purpose) {
+			card.appendChild($('div.custom-mode-ui-workspace-suggested-card-purpose', undefined, surface.purpose));
+		}
+		const chips = [...surface.keyCapabilities, ...surface.primaryUsers.map(user => `user:${user}`)];
+		if (chips.length) {
+			card.appendChild($('div.custom-mode-ui-workspace-suggested-card-chips', undefined,
+				...chips.slice(0, 8).map(chip =>
+					$('span.custom-mode-ui-workspace-suggested-card-chip', undefined, chip)
+				),
+			));
+		}
+		if (interactive) {
+			this.workspaceSuggestedCardListeners.add(addDisposableListener(card, 'click', () => {
+				void this.toggleWorkspaceSuggestedSelection(surface.id, !surface.selected);
+			}));
+		}
+		return card;
+	}
+
+	private async toggleWorkspaceSuggestedSelection(surfaceId: string, selected: boolean): Promise<void> {
+		if (!this.workspaceSuggestedSurfaces || this.workspaceSuggestedSurfaces.status !== 'draft') {
+			return;
+		}
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			return;
+		}
+		const next = withSuggestedSurfaceSelection(this.workspaceSuggestedSurfaces, surfaceId, selected);
+		await this.persistWorkspaceSuggestedSurfaces(workspaceFolder, next);
+	}
+
+	private async createSelectedWorkspaceSurfaces(): Promise<void> {
+		const doc = this.workspaceSuggestedSurfaces;
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!doc || doc.status !== 'draft' || !workspaceFolder) {
+			return;
+		}
+		const selected = selectedSuggestedSurfaces(doc);
+		if (!selected.length) {
+			return;
+		}
+		this.uiWorkspaceSuggestedCreateButton.disabled = true;
+		const failed: string[] = [];
+		try {
+			await this.fileService.createFolder(joinPath(workspaceFolder, '.agent', 'surfaces'));
+			await this.fileService.createFolder(joinPath(workspaceFolder, '.agent', 'task-trees'));
+			for (const surface of selected) {
+				try {
+					const surfaceId = this.uniqueSurfaceId(surface.id || surface.name);
+					await upsertImportedGoalWorkspaceSurface(this.fileService, workspaceFolder, {
+						surfaceId,
+						surfaceName: surface.name,
+						relativePath: `apps/${surfaceId}`,
+						purpose: surface.purpose || localize('customMode.surfaceClaudePurpose', 'Planning surface for {0}.', surface.name),
+					});
+					const planResource = surfacePlanResource(workspaceFolder, surfaceId);
+					try {
+						await this.fileService.stat(planResource);
+					} catch {
+						const provisional = [
+							`# ${surface.name} — Plan`,
+							'',
+							'## Status',
+							'Created from workspace plan — open Plan to continue Research.',
+							'',
+							'## Intent',
+							surface.purpose || surface.name,
+							'',
+							'## Primary users',
+							...(surface.primaryUsers.length ? surface.primaryUsers.map(user => `- ${user}`) : ['- (tbd)']),
+							'',
+							'## Key capabilities',
+							...(surface.keyCapabilities.length ? surface.keyCapabilities.map(cap => `- ${cap}`) : ['- (tbd)']),
+							'',
+							'## §0 Plan lock',
+							'- [ ] Locked',
+							'',
+							'## Research',
+							'(pending)',
+							'',
+							'## Risks / deferrals',
+							'(pending)',
+							'',
+							'## Proposal Graph',
+							`See \`.agent/task-trees/${surfaceId}.graph-proposal.json\` (pending).`,
+							'',
+						].join('\n');
+						await this.fileService.writeFile(planResource, VSBuffer.fromString(provisional));
+					}
+				} catch {
+					failed.push(surface.name);
+				}
+			}
+			const confirmed = withSuggestedSurfacesStatus(doc, 'confirmed');
+			await this.persistWorkspaceSuggestedSurfaces(workspaceFolder, confirmed);
+			await this.consoleService.refresh();
+			this.syncGoalSurfaceSwitcher();
+			void this.surfaceFeatureChecklistService.refresh();
+			if (failed.length) {
+				this.notificationService.warn(localize(
+					'customMode.workspaceSuggestedCreatePartial',
+					'Created surfaces, but failed for: {0}',
+					failed.join(', '),
+				));
+			} else {
+				this.notificationService.info(localize(
+					'customMode.workspaceSuggestedCreateSuccess',
+					'Created {0} surface(s) from the workspace plan.',
+					selected.length,
+				));
+			}
+		} finally {
+			this.renderWorkspaceSuggestedSurfaces();
+		}
+	}
+
+	private async persistWorkspaceSuggestedSurfaces(workspaceFolder: URI, doc: WorkspaceSuggestedSurfaces): Promise<void> {
+		this.workspaceSuggestedSurfaces = doc;
+		this.renderWorkspaceSuggestedSurfaces();
+		this.workspaceSuggestedWriteInFlight = true;
+		try {
+			await this.fileService.writeFile(
+				workspaceSuggestedSurfacesResource(workspaceFolder),
+				VSBuffer.fromString(serializeWorkspaceSuggestedSurfaces(doc)),
+			);
+		} finally {
+			this.workspaceSuggestedWriteInFlight = false;
+		}
 	}
 
 	private createBrandColorInput(defaultValue: string): HTMLInputElement {
@@ -5996,50 +7306,615 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
-	private createNewSurfaceCard(): HTMLButtonElement {
+	private createDescribeAppCard(): HTMLButtonElement {
 		const button = $('button.custom-mode-ui-surface-starter-card.custom-mode-ui-surface-starter-card-new', {
 			type: 'button',
-			title: localize('customMode.surfaceStarterNewTitle', 'Start Claude to plan a new surface'),
+			title: localize('customMode.surfaceDescribeAppTitle', 'Describe an app and start Claude planning'),
 		},
 			$('div.custom-mode-ui-surface-starter-card-header', undefined,
-				$('div.custom-mode-ui-surface-starter-card-icon.codicon' + ThemeIcon.asCSSSelector(Codicon.add)),
-				$('div.custom-mode-ui-surface-starter-card-title', undefined, localize('customMode.surfaceStarterNew', 'New Surface')),
+				$('div.custom-mode-ui-surface-starter-card-icon.codicon' + ThemeIcon.asCSSSelector(Codicon.edit)),
+				$('div.custom-mode-ui-surface-starter-card-title', undefined, localize('customMode.surfaceDescribeApp', 'Describe App')),
 			),
-			$('div.custom-mode-ui-surface-starter-card-summary', undefined, localize('customMode.surfaceStarterNewSummary', 'Start Claude with CLAUDE.md to draft plan.md and a proposal graph.')),
+			$('div.custom-mode-ui-surface-starter-card-summary', undefined, localize('customMode.surfaceDescribeAppSummary', 'Describe with text, images, or files — Claude drafts the plan and proposal graph.')),
 		) as HTMLButtonElement;
-		this._register(addDisposableListener(button, 'click', () => void this.showNewSurfaceActionPicker()));
+		this._register(addDisposableListener(button, 'click', () => this.showDescribeAppCompose()));
 		return button;
 	}
 
-	private async showNewSurfaceActionPicker(): Promise<void> {
-		type NewSurfaceActionPick = IQuickPickItem & { action: 'create' | 'import' };
-		const pick = await this.quickInputService.pick<NewSurfaceActionPick>([
-			{
-				label: localize('customMode.surfaceNewCreateLabel', 'Create New Surface'),
-				description: localize('customMode.surfaceNewCreateDescription', 'Start Claude to write plan.md and a proposal graph'),
-				action: 'create',
-			},
-			{
-				label: localize('customMode.surfaceNewImportLabel', 'Import Repo'),
-				description: localize('customMode.surfaceNewImportDescription', 'Register an existing app folder or clone a Git URL'),
-				action: 'import',
-			},
-		], {
-			title: localize('customMode.surfaceNewActionTitle', 'New Surface'),
-			placeHolder: localize('customMode.surfaceNewActionPlaceholder', 'Choose how to add the surface'),
-		});
-		if (!pick) {
-			return;
-		}
-		if (pick.action === 'create') {
-			await this.startNewSurfaceClaudeSession();
-			return;
-		}
-		await this.importSurfaceRepo();
+	private createImportRepoCard(): HTMLButtonElement {
+		const button = $('button.custom-mode-ui-surface-starter-card.custom-mode-ui-surface-starter-card-new', {
+			type: 'button',
+			title: localize('customMode.surfaceImportRepoTitle', 'Import an existing repo as a surface'),
+		},
+			$('div.custom-mode-ui-surface-starter-card-header', undefined,
+				$('div.custom-mode-ui-surface-starter-card-icon.codicon' + ThemeIcon.asCSSSelector(Codicon.repo)),
+				$('div.custom-mode-ui-surface-starter-card-title', undefined, localize('customMode.surfaceImportRepo', 'Import Repo')),
+			),
+			$('div.custom-mode-ui-surface-starter-card-summary', undefined, localize('customMode.surfaceImportRepoSummary', 'Register an existing app folder or clone a Git URL.')),
+		) as HTMLButtonElement;
+		this._register(addDisposableListener(button, 'click', () => void this.importSurfaceRepo()));
+		return button;
 	}
 
-	private async importSurfaceRepo(): Promise<void> {
-		type ImportSourcePick = IQuickPickItem & { source: 'git' | 'folder' };
+	private createDescribeAppCompose(): HTMLElement {
+		this.uiSurfaceDescribeNameInput = $('input.custom-mode-ui-surface-describe-name', {
+			type: 'text',
+			placeholder: localize('customMode.surfaceDescribeNamePlaceholder', 'e.g. Cadre bot'),
+			'aria-label': localize('customMode.surfaceDescribeNameAria', 'Surface name'),
+		}) as HTMLInputElement;
+		this.uiSurfaceDescribeIntentInput = $('textarea.custom-mode-ui-surface-describe-intent', {
+			rows: '5',
+			placeholder: localize(
+				'customMode.surfaceDescribeIntentPlaceholder',
+				'What should this app do? Who is it for? Key workflows, constraints, and success criteria…',
+			),
+			'aria-label': localize('customMode.surfaceDescribeIntentAria', 'App description'),
+		}) as HTMLTextAreaElement;
+		this.uiSurfaceDescribeAttachmentList = $('div.custom-mode-ui-surface-describe-attachments');
+		this.uiSurfaceDescribeSubmitButton = $('button.custom-mode-ui-surface-describe-submit', {
+			type: 'button',
+		}, localize('customMode.surfaceDescribeSubmit', 'Start planning')) as HTMLButtonElement;
+
+		const backButton = $('button.custom-mode-ui-surface-describe-compose-back', {
+			type: 'button',
+		}, localize('customMode.surfaceDescribeBack', 'Back')) as HTMLButtonElement;
+		this._register(addDisposableListener(backButton, 'click', () => {
+			this.scheduleDescribeAppDraftSave();
+			this.showSurfaceCreateChooser();
+		}));
+
+		const imageInput = $('input', { type: 'file', accept: 'image/*', hidden: 'true', multiple: 'true' }) as HTMLInputElement;
+		const fileInput = $('input', { type: 'file', hidden: 'true', multiple: 'true' }) as HTMLInputElement;
+		const imageButton = $('button.custom-mode-ui-surface-describe-media-btn', {
+			type: 'button',
+		},
+			$('span.codicon' + ThemeIcon.asCSSSelector(Codicon.fileMedia)),
+			localize('customMode.surfaceDescribeAddImage', 'Image'),
+		) as HTMLButtonElement;
+		const fileButton = $('button.custom-mode-ui-surface-describe-media-btn', {
+			type: 'button',
+		},
+			$('span.codicon' + ThemeIcon.asCSSSelector(Codicon.symbolFile)),
+			localize('customMode.surfaceDescribeAddFile', 'File'),
+		) as HTMLButtonElement;
+		this._register(addDisposableListener(imageButton, 'click', () => imageInput.click()));
+		this._register(addDisposableListener(fileButton, 'click', () => fileInput.click()));
+		this._register(addDisposableListener(imageInput, 'change', () => {
+			void this.addDescribeAppFiles(imageInput.files, 'image');
+			imageInput.value = '';
+		}));
+		this._register(addDisposableListener(fileInput, 'change', () => {
+			void this.addDescribeAppFiles(fileInput.files, 'file');
+			fileInput.value = '';
+		}));
+		this._register(addDisposableListener(this.uiSurfaceDescribeSubmitButton, 'click', () => void this.submitDescribeAppCompose()));
+		this._register(addDisposableListener(this.uiSurfaceDescribeNameInput, 'input', () => this.scheduleDescribeAppDraftSave()));
+		this._register(addDisposableListener(this.uiSurfaceDescribeIntentInput, 'input', () => this.scheduleDescribeAppDraftSave()));
+		this._register(addDisposableListener(this.uiSurfaceDescribeIntentInput, 'keydown', (event: KeyboardEvent) => {
+			if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+				event.preventDefault();
+				void this.submitDescribeAppCompose();
+			}
+		}));
+		this._register(toDisposable(() => this.clearDescribeAppAttachmentPreviews()));
+
+		const root = $('div.custom-mode-ui-surface-describe-compose', undefined,
+			$('div.custom-mode-ui-surface-describe-compose-header', undefined,
+				$('div', undefined,
+					$('div.custom-mode-ui-surface-describe-compose-title', undefined, localize('customMode.surfaceDescribeComposeTitle', 'Describe App')),
+					$('div.custom-mode-ui-surface-describe-compose-hint', undefined, localize(
+						'customMode.surfaceDescribeComposeHint',
+						'Add text, or drop / attach images and files. Claude will draft plan.md and the proposal graph — no app code yet.',
+					)),
+				),
+				backButton,
+			),
+			$('label.custom-mode-ui-surface-describe-field', undefined,
+				$('span.custom-mode-ui-surface-describe-label', undefined, localize('customMode.surfaceDescribeNameLabel', 'Surface name')),
+				this.uiSurfaceDescribeNameInput,
+			),
+			$('label.custom-mode-ui-surface-describe-field', undefined,
+				$('span.custom-mode-ui-surface-describe-label', undefined, localize('customMode.surfaceDescribeIntentLabel', 'Text')),
+				this.uiSurfaceDescribeIntentInput,
+			),
+			$('div.custom-mode-ui-surface-describe-footer', undefined,
+				this.uiSurfaceDescribeAttachmentList,
+				$('div.custom-mode-ui-surface-describe-actions', undefined,
+					$('div.custom-mode-ui-surface-describe-media', undefined, imageButton, fileButton, imageInput, fileInput),
+					this.uiSurfaceDescribeSubmitButton,
+				),
+			),
+		);
+		this._register(addDisposableListener(root, 'dragenter', event => {
+			if (!this.dragEventHasFiles(event)) {
+				return;
+			}
+			event.preventDefault();
+			root.classList.add('dragover');
+		}));
+		this._register(addDisposableListener(root, 'dragover', event => {
+			if (!this.dragEventHasFiles(event)) {
+				return;
+			}
+			event.preventDefault();
+			if (event.dataTransfer) {
+				event.dataTransfer.dropEffect = 'copy';
+			}
+			root.classList.add('dragover');
+		}));
+		this._register(addDisposableListener(root, 'dragleave', event => {
+			const related = event.relatedTarget;
+			if (related instanceof Node && root.contains(related)) {
+				return;
+			}
+			root.classList.remove('dragover');
+		}));
+		this._register(addDisposableListener(root, 'drop', event => {
+			event.preventDefault();
+			root.classList.remove('dragover');
+			const files = event.dataTransfer?.files;
+			if (files?.length) {
+				void this.addDescribeAppFiles(files, 'file');
+			}
+		}));
+		return root;
+	}
+
+	private dragEventHasFiles(event: DragEvent): boolean {
+		const types = event.dataTransfer?.types;
+		if (!types) {
+			return false;
+		}
+		return Array.from(types).includes('Files');
+	}
+
+	private showDescribeAppCompose(): void {
+		this.uiSurfaceCreateChooser.classList.add('hidden');
+		this.uiSurfaceDescribeCompose.classList.add('visible');
+		void this.hydrateDescribeAppDraft().then(() => {
+			this.renderDescribeAppAttachments();
+			queueMicrotask(() => {
+				if (this.uiSurfaceDescribeNameInput.value.trim()) {
+					this.uiSurfaceDescribeIntentInput.focus();
+				} else {
+					this.uiSurfaceDescribeNameInput.focus();
+				}
+			});
+		});
+	}
+
+	private showSurfaceCreateChooser(): void {
+		this.uiSurfaceDescribeCompose.classList.remove('visible');
+		this.uiSurfaceCreateChooser.classList.remove('hidden');
+	}
+
+	private resetDescribeAppCompose(): void {
+		this.describeAppAttachments.length = 0;
+		this.clearDescribeAppAttachmentPreviews();
+		this.uiSurfaceDescribeNameInput.value = '';
+		this.uiSurfaceDescribeIntentInput.value = '';
+		this.renderDescribeAppAttachments();
+		this.uiSurfaceDescribeSubmitButton.disabled = false;
+		this.uiSurfaceDescribeSubmitButton.textContent = localize('customMode.surfaceDescribeSubmit', 'Start planning');
+		void clearDescribeAppDraft(this.fileService, this.getWorkspaceFolderUri());
+		this.showSurfaceCreateChooser();
+	}
+
+	private scheduleDescribeAppDraftSave(): void {
+		if (this.describeAppDraftHydrating) {
+			return;
+		}
+		this.describeAppDraftAutosaveScheduler.schedule();
+	}
+
+	private async persistDescribeAppDraft(): Promise<void> {
+		if (!this.uiSurfaceDescribeNameInput || !this.uiSurfaceDescribeIntentInput) {
+			return;
+		}
+		await saveDescribeAppDraft(this.fileService, this.getWorkspaceFolderUri(), {
+			surfaceName: this.uiSurfaceDescribeNameInput.value,
+			intent: this.uiSurfaceDescribeIntentInput.value,
+			attachments: [...this.describeAppAttachments],
+		});
+	}
+
+	private async hydrateDescribeAppDraft(): Promise<void> {
+		const draft = await loadDescribeAppDraft(this.fileService, this.getWorkspaceFolderUri());
+		if (!draft) {
+			return;
+		}
+		this.describeAppDraftHydrating = true;
+		try {
+			this.uiSurfaceDescribeNameInput.value = draft.surfaceName;
+			this.uiSurfaceDescribeIntentInput.value = draft.intent;
+			this.describeAppAttachments.length = 0;
+			this.describeAppAttachments.push(...draft.attachments);
+		} finally {
+			this.describeAppDraftHydrating = false;
+		}
+	}
+
+	private clearDescribeAppAttachmentPreviews(): void {
+		for (const url of this.describeAppAttachmentPreviewUrls) {
+			URL.revokeObjectURL(url);
+		}
+		this.describeAppAttachmentPreviewUrls.length = 0;
+	}
+
+	private async addDescribeAppFiles(fileList: FileList | null | undefined, kind: 'image' | 'file'): Promise<void> {
+		if (!fileList?.length) {
+			return;
+		}
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			this.notificationService.warn(localize('customMode.surfaceDescribeAttachNoWorkspace', 'Open a workspace folder before attaching files.'));
+			return;
+		}
+		for (const file of Array.from(fileList)) {
+			const resolvedKind = kind === 'image' || file.type.startsWith('image/') ? 'image' : 'file';
+			const nativePath = getPathForFile(file);
+			let ref: DescribeAppAttachmentRef;
+			if (nativePath) {
+				const paths = toWorkspaceOrFsPaths(workspaceFolder, nativePath);
+				ref = {
+					id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+					kind: resolvedKind,
+					name: file.name || basename(URI.file(nativePath)),
+					mimeType: file.type || 'application/octet-stream',
+					fsPath: paths.fsPath,
+					workspacePath: paths.workspacePath,
+				};
+			} else {
+				// No native path (e.g. pasted blob) — stage once under the draft folder and keep a path ref.
+				ref = await stageDescribeAppAttachment(this.fileService, workspaceFolder, file, resolvedKind);
+			}
+			const duplicate = this.describeAppAttachments.some(existing =>
+				(ref.workspacePath && existing.workspacePath === ref.workspacePath)
+				|| (ref.fsPath && existing.fsPath === ref.fsPath)
+			);
+			if (duplicate) {
+				continue;
+			}
+			this.describeAppAttachments.push(ref);
+		}
+		this.renderDescribeAppAttachments();
+		this.scheduleDescribeAppDraftSave();
+	}
+
+	private renderDescribeAppAttachments(): void {
+		this.describeAppAttachmentListeners.clear();
+		this.clearDescribeAppAttachmentPreviews();
+		this.uiSurfaceDescribeAttachmentList.replaceChildren();
+		this.uiSurfaceDescribeAttachmentList.setAttribute(
+			'aria-label',
+			localize('customMode.surfaceDescribeAttachmentsAria', 'Attached images and files'),
+		);
+		for (const attachment of this.describeAppAttachments) {
+			const remove = $('button.custom-mode-ui-surface-describe-attachment-remove', {
+				type: 'button',
+				title: localize('customMode.surfaceDescribeRemoveAttachment', 'Remove {0}', attachment.name),
+				'aria-label': localize('customMode.surfaceDescribeRemoveAttachment', 'Remove {0}', attachment.name),
+			}, '\u00d7') as HTMLButtonElement;
+			this.describeAppAttachmentListeners.add(addDisposableListener(remove, 'click', () => {
+				const index = this.describeAppAttachments.findIndex(item => item.id === attachment.id);
+				if (index >= 0) {
+					this.describeAppAttachments.splice(index, 1);
+					this.renderDescribeAppAttachments();
+					this.scheduleDescribeAppDraftSave();
+				}
+			}));
+
+			let preview: HTMLElement;
+			if (attachment.kind === 'image') {
+				const img = $('img.custom-mode-ui-surface-describe-attachment-preview', {
+					alt: attachment.name,
+				}) as HTMLImageElement;
+				preview = img;
+				void this.hydrateDescribeAppAttachmentPreview(img, attachment);
+			} else {
+				preview = $('div.custom-mode-ui-surface-describe-attachment-icon', undefined,
+					$('span.codicon' + ThemeIcon.asCSSSelector(Codicon.symbolFile)),
+				);
+			}
+
+			const pathLabel = attachmentRefDisplayPath(attachment);
+			this.uiSurfaceDescribeAttachmentList.appendChild(
+				$('div.custom-mode-ui-surface-describe-attachment', {
+					title: pathLabel,
+				},
+					preview,
+					$('div.custom-mode-ui-surface-describe-attachment-meta', undefined,
+						$('span.custom-mode-ui-surface-describe-attachment-name', undefined, attachment.name),
+						$('span.custom-mode-ui-surface-describe-attachment-path', undefined, pathLabel),
+					),
+					remove,
+				),
+			);
+		}
+	}
+
+	private async hydrateDescribeAppAttachmentPreview(img: HTMLImageElement, attachment: DescribeAppAttachmentRef): Promise<void> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			return;
+		}
+		const resource = attachmentRefResource(workspaceFolder, attachment);
+		if (!resource) {
+			return;
+		}
+		try {
+			const content = await this.fileService.readFile(resource);
+			const objectUrl = URL.createObjectURL(new Blob([content.value.buffer as BlobPart], { type: attachment.mimeType || 'image/*' }));
+			this.describeAppAttachmentPreviewUrls.push(objectUrl);
+			img.src = objectUrl;
+		} catch {
+			// Preview is best-effort; path ref still counts.
+		}
+	}
+
+	private async submitDescribeAppCompose(): Promise<void> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			this.notificationService.warn(localize('customMode.surfaceClaudeNoWorkspace', 'Open a workspace folder before creating a new surface.'));
+			return;
+		}
+		const name = this.uiSurfaceDescribeNameInput.value.trim();
+		const intent = this.uiSurfaceDescribeIntentInput.value.trim();
+		if (!name) {
+			this.notificationService.warn(localize('customMode.surfaceDescribeNameRequired', 'Enter a surface name before starting planning.'));
+			this.uiSurfaceDescribeNameInput.focus();
+			return;
+		}
+		if (!intent && this.describeAppAttachments.length === 0) {
+			this.notificationService.warn(localize('customMode.surfaceDescribeIntentRequired', 'Add a description or attach files before starting planning.'));
+			this.uiSurfaceDescribeIntentInput.focus();
+			return;
+		}
+		this.uiSurfaceDescribeSubmitButton.disabled = true;
+		const submitLabel = this.uiSurfaceDescribeSubmitButton.textContent;
+		this.uiSurfaceDescribeSubmitButton.textContent = localize('customMode.surfaceDescribeSubmitStarting', 'Starting…');
+		const surfaceId = this.uniqueSurfaceId(name);
+		const attachmentsSnapshot = [...this.describeAppAttachments];
+		try {
+			await this.ensureWorkspaceClaudeMd(workspaceFolder);
+			await this.fileService.createFolder(joinPath(workspaceFolder, '.agent', 'surfaces'));
+			await this.fileService.createFolder(joinPath(workspaceFolder, '.agent', 'task-trees'));
+			const attachmentPaths: string[] = [];
+			if (attachmentsSnapshot.length) {
+				// Prefer path references — do not copy original files into a new attachments folder.
+				for (const attachment of attachmentsSnapshot) {
+					const path = attachmentRefDisplayPath(attachment);
+					if (path) {
+						attachmentPaths.push(path);
+					}
+				}
+			}
+			await upsertImportedGoalWorkspaceSurface(this.fileService, workspaceFolder, {
+				surfaceId,
+				surfaceName: name,
+				relativePath: `apps/${surfaceId}`,
+				purpose: localize('customMode.surfaceClaudePurpose', 'Planning surface for {0}.', name),
+			});
+			await this.consoleService.refresh();
+
+			// Persist selection before switcher sync so we don't stay on ADD_SURFACE_ID.
+			this.selectedSurfaceId = surfaceId;
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surfaceId, StorageScope.WORKSPACE, StorageTarget.USER);
+
+			const intentParts = [intent];
+			if (attachmentPaths.length) {
+				intentParts.push(
+					'',
+					'Attached references (read these during Research / planning; use existing paths — do not copy):',
+					...attachmentPaths.map(path => `- ${path}`),
+				);
+			}
+			const fullIntent = intentParts.join('\n').trim() || `Build ${name}.`;
+			this.logClaudeKickoff(`describe-app create surface=${surfaceId} attachments=${attachmentPaths.length}`);
+			await this.beginSurfacePlanningSession({
+				workspaceFolder,
+				surfaceId,
+				surfaceName: name,
+				intent: fullIntent,
+				writeProvisionalPlan: true,
+			});
+			this.syncGoalSurfaceSwitcher();
+			void this.surfaceFeatureChecklistService.refresh();
+			this.resetDescribeAppCompose();
+			this.notificationService.info(localize(
+				'customMode.surfaceDescribeStarted',
+				'Claude is planning {0}. Follow along in the Claude panel.',
+				name,
+			));
+		} catch (error: unknown) {
+			this.uiSurfaceDescribeSubmitButton.disabled = false;
+			this.uiSurfaceDescribeSubmitButton.textContent = submitLabel || localize('customMode.surfaceDescribeSubmit', 'Start planning');
+			this.logClaudeKickoff(`describe-app failed: ${String((error as Error)?.message ?? error)}`, true);
+			this.notificationService.error(localize(
+				'customMode.surfaceDescribeStartFailed',
+				'Failed to start planning: {0}',
+				String((error as Error)?.message ?? error),
+			));
+		}
+	}
+
+	/**
+	 * Keep Console UI visible (Claude panel lives here), select the surface, seed a
+	 * provisional plan when needed, and kick off / continue Claude with the planning prompt.
+	 */
+	private async beginSurfacePlanningSession(options: {
+		readonly workspaceFolder: URI;
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+		readonly intent: string;
+		readonly writeProvisionalPlan?: boolean;
+	}): Promise<void> {
+		const { workspaceFolder, surfaceId, surfaceName, intent } = options;
+		const logCtx = `surface=${surfaceId}`;
+
+		this.logClaudeKickoff(`start ${logCtx} name=${surfaceName}`);
+		try {
+			// Do not call selectGoalSurface — that switches to Code and hides the Claude panel.
+			this.logClaudeKickoff(`select UI + surface ${logCtx}`);
+			this.modeService.setMode('UI');
+			this.persistSurfaceCodeView(surfaceId, false);
+			this.selectedSurfaceId = surfaceId;
+			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surfaceId, StorageScope.WORKSPACE, StorageTarget.USER);
+			this.contextGatheringOpen = false;
+			this.persistContextGatheringOpen();
+			this.renderGoalSurfaceButtons(this.consoleService.getSurfaces());
+			this.surfaceMainView = 'plan';
+			this.persistSurfaceMainView(surfaceId, 'plan');
+
+			if (options.writeProvisionalPlan) {
+				const planResource = surfacePlanResource(workspaceFolder, surfaceId);
+				try {
+					await this.fileService.stat(planResource);
+					this.logClaudeKickoff(`plan exists ${logCtx}`);
+				} catch {
+					this.logClaudeKickoff(`write provisional plan ${logCtx}`);
+					const provisional = [
+						`# ${surfaceName} — Plan`,
+						'',
+						'## Status',
+						'Planning in progress via Claude…',
+						'',
+						'## Intent',
+						intent,
+						'',
+						'## §0 Plan lock',
+						'- [ ] Locked',
+						'',
+						'## Research',
+						'(pending — Claude is surveying comparable repos and drafting the proposal graph)',
+						'',
+						'## Risks / deferrals',
+						'(pending)',
+						'',
+						'## Proposal Graph',
+						`See \`.agent/task-trees/${surfaceId}.graph-proposal.json\` (pending).`,
+						'',
+					].join('\n');
+					await this.fileService.writeFile(planResource, VSBuffer.fromString(provisional));
+				}
+			}
+
+			this.container.classList.add('custom-mode-ui-surface-selected');
+			this.syncSurfaceSetupDashboardVisibility();
+			this.syncSurfaceMainView();
+			this.syncContextGatheringUi();
+			this.updateUiProjectName();
+			this.routeSelectedSurfacePreview();
+
+			this.logClaudeKickoff(`reset Claude terminal ${logCtx}`);
+			await this.resetClaudeTerminalSession();
+			this.logClaudeKickoff(`attach/create Claude terminal ${logCtx}`);
+			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder);
+			this.logClaudeKickoff(`terminal ${created ? 'created' : 'reused'} id=${terminal.instanceId} ${logCtx}`);
+			await terminal.processReady;
+			this.logClaudeKickoff(`process ready ${logCtx}`);
+			await terminal.focusWhenReady(true);
+			this.relayoutTerminalInstances();
+			await timeout(120);
+			this.relayoutTerminalInstances();
+
+			const prompt = buildSurfacePlanKickoffPrompt({
+				surfaceId,
+				surfaceName,
+				intent,
+			});
+			this.logClaudeKickoff(`submit kickoff (${prompt.length} chars, terminal ${created ? 'new' : 'reuse'}) ${logCtx}`);
+			if (created) {
+				// Start Claude, then submit the kickoff as the first turn so the TUI is visible
+				// immediately and we avoid oversized `claude '…'` argv on long intents.
+				this.logClaudeKickoff(`send 'claude' command ${logCtx}`);
+				await terminal.sendText('claude', true);
+				await timeout(900);
+				await this.submitClaudePrompt(terminal, prompt);
+			} else {
+				await this.submitClaudePrompt(terminal, prompt);
+			}
+			this.logClaudeKickoff(`kickoff submitted ${logCtx}`);
+
+			// Refresh Plan tab in case the watcher has not picked up the provisional file yet.
+			void this.surfacePlanPanel?.load({
+				surfaceId,
+				surfaceName,
+				surfacePath: this.consoleService.getSurface(surfaceId)?.path,
+				workspaceFolder,
+			});
+		} catch (error: unknown) {
+			const message = String((error as Error)?.message ?? error);
+			this.logClaudeKickoff(`FAILED ${logCtx}: ${message}`, true);
+			throw error;
+		}
+	}
+
+	/**
+	 * Always-on kickoff logging: Claude header status, Output/log service, in-memory
+	 * ring, Start App runtime panel (when visible), and `.agent/logs/claude-kickoff.log`.
+	 * Local only — no LangGraph / remote telemetry required.
+	 */
+	private logClaudeKickoff(message: string, isError = false): void {
+		const stamp = new Date().toISOString().slice(11, 23);
+		const line = `[${stamp}] ${message}`;
+		this.claudeKickoffLogs.push(line);
+		if (this.claudeKickoffLogs.length > 80) {
+			this.claudeKickoffLogs.splice(0, this.claudeKickoffLogs.length - 80);
+		}
+		if (this.uiClaudeTerminalStatus) {
+			this.uiClaudeTerminalStatus.textContent = message;
+			this.uiClaudeTerminalStatus.title = this.claudeKickoffLogs.slice(-12).join('\n');
+			this.uiClaudeTerminalStatus.classList.toggle('error', isError);
+		}
+		if (isError) {
+			this.logService.error(`[claude-kickoff] ${message}`);
+		} else {
+			this.logService.info(`[claude-kickoff] ${message}`);
+		}
+		this.pushUiRuntimeLog(`[claude-kickoff] ${message}`);
+		void this.appendClaudeKickoffLogFile(line);
+	}
+
+	private async appendClaudeKickoffLogFile(line: string): Promise<void> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			return;
+		}
+		try {
+			const logsDir = joinPath(workspaceFolder, '.agent', 'logs');
+			const logFile = joinPath(logsDir, 'claude-kickoff.log');
+			await this.fileService.createFolder(logsDir);
+			let existing = '';
+			try {
+				existing = (await this.fileService.readFile(logFile)).value.toString();
+			} catch {
+				// first write
+			}
+			const next = `${existing}${line}\n`.slice(-48_000);
+			await this.fileService.writeFile(logFile, VSBuffer.fromString(next));
+		} catch (error: unknown) {
+			this.logService.warn(`[claude-kickoff] could not write log file: ${String((error as Error)?.message ?? error)}`);
+		}
+	}
+
+	private uniqueAttachmentFileName(name: string, used: Set<string>): string {
+		const cleaned = name.replace(/[^\w.\-]+/g, '_').replace(/^\.+/, '') || 'attachment';
+		if (!used.has(cleaned)) {
+			return cleaned;
+		}
+		const dot = cleaned.lastIndexOf('.');
+		const stem = dot > 0 ? cleaned.slice(0, dot) : cleaned;
+		const ext = dot > 0 ? cleaned.slice(dot) : '';
+		for (let i = 2; ; i++) {
+			const candidate = `${stem}-${i}${ext}`;
+			if (!used.has(candidate)) {
+				return candidate;
+			}
+		}
+	}
+
+	private async importSurfaceRepo(): Promise<void> {		type ImportSourcePick = IQuickPickItem & { source: 'git' | 'folder' };
 		const pick = await this.quickInputService.pick<ImportSourcePick>([
 			{
 				label: localize('customMode.surfaceImportGitLabel', 'Clone from Git URL'),
@@ -6203,52 +8078,6 @@ class ModeShellContribution extends Disposable {
 		this.notificationService.info(localize('customMode.surfaceImportSuccess', 'Imported {0} as a goal workspace surface.', surfaceName));
 	}
 
-	private async startNewSurfaceClaudeSession(): Promise<void> {
-		const workspaceFolder = this.getWorkspaceFolderUri();
-		if (!workspaceFolder) {
-			this.notificationService.warn(localize('customMode.surfaceClaudeNoWorkspace', 'Open a workspace folder before creating a new surface.'));
-			return;
-		}
-		const surfaceName = await this.quickInputService.input({
-			prompt: localize('customMode.surfaceStarterNewPrompt', 'What should this surface be called?'),
-			placeHolder: localize('customMode.surfaceStarterNewPlaceholder', 'e.g. Referral Program'),
-		});
-		if (!surfaceName?.trim()) {
-			return;
-		}
-		const name = surfaceName.trim();
-		const surfaceId = slugifySurfaceId(name);
-		try {
-			await this.ensureWorkspaceClaudeMd(workspaceFolder);
-			await this.fileService.createFolder(joinPath(workspaceFolder, '.agent', 'surfaces'));
-			await this.fileService.createFolder(joinPath(workspaceFolder, '.agent', 'task-trees'));
-			await upsertImportedGoalWorkspaceSurface(this.fileService, workspaceFolder, {
-				surfaceId,
-				surfaceName: name,
-				relativePath: `apps/${surfaceId}`,
-				purpose: localize('customMode.surfaceClaudePurpose', 'Planning surface for {0}.', name),
-			});
-			await this.consoleService.refresh();
-			this.syncGoalSurfaceSwitcher();
-			void this.surfaceFeatureChecklistService.refresh();
-			this.selectGoalSurface(surfaceId);
-			this.setSurfaceMainView('plan');
-			// Fresh Claude each New Surface — do not reuse the previous conversation.
-			await this.ensureClaudeTerminalSession(workspaceFolder, { reset: true });
-			this.notificationService.info(localize(
-				'customMode.surfaceClaudeStarted',
-				'Claude is ready for {0}. Describe what to build in the Claude panel (follow CLAUDE.md).',
-				name,
-			));
-		} catch (error: unknown) {
-			this.notificationService.error(localize(
-				'customMode.surfaceClaudeStartFailed',
-				'Failed to start Claude: {0}',
-				String((error as Error)?.message ?? error),
-			));
-		}
-	}
-
 	private async ensureWorkspaceClaudeMd(workspaceFolder: URI): Promise<void> {
 		const resource = joinPath(workspaceFolder, 'CLAUDE.md');
 		try {
@@ -6277,20 +8106,6 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
-	private async ensureClaudeTerminalSession(workspaceFolder: URI, options?: { readonly reset?: boolean }): Promise<void> {
-		if (options?.reset) {
-			await this.resetClaudeTerminalSession();
-		}
-		const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder);
-		await terminal.processReady;
-		await terminal.focusWhenReady(true);
-		this.relayoutTerminalInstances();
-		if (created) {
-			// Interactive session — user describes the surface; no hardcoded kickoff prompt.
-			await terminal.sendText('claude', true);
-		}
-	}
-
 	/** Empty Plan tab → Claude Code: seed CLAUDE.md if needed, ensure session, send kickoff. */
 	private async submitPlanBuildIntent(request: {
 		readonly surfaceId: string;
@@ -6308,24 +8123,13 @@ class ModeShellContribution extends Disposable {
 		}
 		try {
 			await this.ensureWorkspaceClaudeMd(workspaceFolder);
-			const existing = this.findClaudeTerminalInstance();
-			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder);
-			await terminal.processReady;
-			await terminal.focusWhenReady(true);
-			this.relayoutTerminalInstances();
-			const prompt = buildSurfacePlanKickoffPrompt({
+			await this.beginSurfacePlanningSession({
+				workspaceFolder,
 				surfaceId: request.surfaceId,
 				surfaceName: request.surfaceName,
 				intent,
+				writeProvisionalPlan: true,
 			});
-			if (created || !existing) {
-				// Start Claude with the Plan compose text as the first user message.
-				await terminal.sendText(`claude ${shellQuoteForClaude(prompt)}`, true);
-			} else {
-				// Session already running — type into Claude as the next user turn.
-				await this.submitClaudePrompt(terminal, prompt);
-			}
-			this.setSurfaceMainView('plan');
 			this.notificationService.info(localize(
 				'customMode.surfacePlanKickoffSent',
 				'Sent build intent for {0} to Claude.',
@@ -6355,6 +8159,44 @@ class ModeShellContribution extends Disposable {
 		await terminal.sendText('', true);
 	}
 
+	/** After the Plan UI confirms Research repos, nudge Claude to clone only the selected set. */
+	private async notifyClaudeReferenceSelectionConfirmed(selection: {
+		readonly surfaceId: string;
+		readonly selectedRepos: ReadonlyArray<{ readonly owner: string; readonly repo: string; readonly url: string }>;
+	}): Promise<void> {
+		const terminal = this.findClaudeTerminalInstance();
+		if (!terminal || terminal.isDisposed) {
+			this.notificationService.info(localize(
+				'customMode.referenceSelectionSaved',
+				'Saved {0} selected repo(s). Claude will pick this up from the candidates file.',
+				selection.selectedRepos.length,
+			));
+			return;
+		}
+		const labels = selection.selectedRepos.map(repo => `${repo.owner}/${repo.repo}`);
+		const prompt = [
+			`Reference selection confirmed for surface ${selection.surfaceId}.`,
+			`status is now "confirmed" in .agent/surfaces/${selection.surfaceId}.reference-candidates.json.`,
+			`Clone and map ONLY these selected repos: ${labels.join(', ')}.`,
+			`Skip deselected candidates. Continue the Research recipe from the shallow-clone step.`,
+		].join(' ');
+		try {
+			await terminal.focusWhenReady(true);
+			await this.submitClaudePrompt(terminal, prompt);
+			this.notificationService.info(localize(
+				'customMode.referenceSelectionSent',
+				'Sent selected repos to Claude: {0}',
+				labels.join(', '),
+			));
+		} catch (error: unknown) {
+			this.notificationService.warn(localize(
+				'customMode.referenceSelectionSendFailed',
+				'Saved selection, but could not notify Claude: {0}',
+				String((error as Error)?.message ?? error),
+			));
+		}
+	}
+
 	/** Dispose the Claude panel terminal so the next New Surface starts a clean session. */
 	private async resetClaudeTerminalSession(): Promise<void> {
 		const existing = this.findClaudeTerminalInstance();
@@ -6363,7 +8205,10 @@ class ModeShellContribution extends Disposable {
 		this.setClaudeTerminalMarkedActive(false);
 		this.uiClaudeTerminalEmpty.classList.remove('hidden');
 		if (existing && !existing.isDisposed) {
+			const disposed = Event.toPromise(existing.onDisposed);
 			existing.dispose(TerminalExitReason.User);
+			// Wait so the next create doesn't rebind a half-disposed / dead pty.
+			await Promise.race([disposed, timeout(2000)]);
 		}
 	}
 
@@ -6416,15 +8261,21 @@ class ModeShellContribution extends Disposable {
 		}
 		return this.terminalService.instances.find(instance =>
 			!instance.isDisposed
+			&& instance.exitReason === undefined
 			&& (instance.title === CLAUDE_TERMINAL_TITLE || instance.shellLaunchConfig.name === CLAUDE_TERMINAL_TITLE)
 		);
 	}
 
-	private async attachOrCreateClaudeTerminal(workspaceFolder: URI): Promise<{ terminal: ITerminalInstance; created: boolean }> {
-		const existing = this.findClaudeTerminalInstance();
-		if (existing) {
-			this.bindClaudeTerminalInstance(existing);
-			return { terminal: existing, created: false };
+	private async attachOrCreateClaudeTerminal(
+		workspaceFolder: URI,
+		options?: { forceNew?: boolean },
+	): Promise<{ terminal: ITerminalInstance; created: boolean }> {
+		if (!options?.forceNew) {
+			const existing = this.findClaudeTerminalInstance();
+			if (existing) {
+				this.bindClaudeTerminalInstance(existing);
+				return { terminal: existing, created: false };
+			}
 		}
 		const terminal = await this.terminalService.createTerminal({
 			cwd: workspaceFolder,
@@ -6553,27 +8404,10 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
-	private setSurfaceSetupBusinessContextOpen(open: boolean): void {
-		if (this.surfaceSetupBusinessContextOpen === open) {
-			return;
-		}
-		this.surfaceSetupBusinessContextOpen = open;
-		this.applySurfaceSetupBusinessContextOpenState();
-	}
-
-	private applySurfaceSetupBusinessContextOpenState(): void {
-		this.uiSurfaceSetupBusinessContext.classList.toggle('open', this.surfaceSetupBusinessContextOpen);
-		this.uiSurfaceSetupBusinessContextToggle.setAttribute('aria-expanded', String(this.surfaceSetupBusinessContextOpen));
-		this.uiSurfaceSetupBusinessContextChevron.className = [
-			'custom-mode-ui-surface-business-context-chevron',
-			ThemeIcon.asClassName(this.surfaceSetupBusinessContextOpen ? Codicon.chevronDown : Codicon.chevronRight),
-		].join(' ');
-	}
-
 	private focusSurfaceSetupSection(step: SurfaceSetupStep, options?: { scroll?: boolean }): void {
 		this.surfaceSetupCurrentStep = step;
-		if (step === 'brand') {
-			this.setSurfaceSetupBusinessContextOpen(true);
+		if (step === 'brand' || step === 'goal') {
+			this.setWorkspaceHomeView('workspacePlan');
 		}
 		if (options?.scroll === false) {
 			return;
@@ -6618,6 +8452,13 @@ class ModeShellContribution extends Disposable {
 		this.surfaceSetupDraftDirty = false;
 		this.focusSurfaceSetupSection(step, { scroll: false });
 		await this.refreshStarterSurfaceCardStatuses();
+		if (workspaceFolder) {
+			this.watchWorkspaceSuggestedSurfaces(workspaceFolder);
+		} else {
+			this.workspaceSuggestedSurfaces = undefined;
+			this.renderWorkspaceSuggestedSurfaces();
+			void this.refreshWorkspacePlanGeneratedState(undefined);
+		}
 	}
 
 	private async persistSurfaceSetupBuilder(options?: { requireName?: boolean }): Promise<boolean> {
@@ -6714,37 +8555,18 @@ class ModeShellContribution extends Disposable {
 		return this.modeService.getMode() === 'Code';
 	}
 
-	private isSurfaceContextSelected(): boolean {
-		return !!this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID;
-	}
-
 	private updateUiProjectName(): void {
 		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
-		const inCode = this.isCodeTabSelected();
-		const label = inCode
-			? localize('customMode.codeTab', 'Code')
-			: localize('customMode.consoleTab', 'Console');
+		const label = localize('customMode.consoleTab', 'Console');
 		this.uiProjectNameLabel.textContent = hasProject ? label : '';
-		this.uiProjectName.setAttribute('aria-label', localize('customMode.consoleCodeToggleAria', 'Toggle Console and Code. Currently {0}.', label));
+		this.uiProjectName.setAttribute('aria-label', localize('customMode.consoleHomeAria', 'Open Console surfaces home'));
 		this.uiProjectName.classList.toggle('hidden', !hasProject);
 		this.syncContextGatheringUi();
 	}
 
-	private toggleConsoleCodeMode(): void {
-		// Top-bar tabs: surface tab → Code; Console toggles Code ↔ Console UI
-		// (surface panels) or Code ↔ Surfaces builder when no surface is selected.
-		if (this.modeService.getMode() === 'Code') {
-			if (this.isSurfaceContextSelected()) {
-				this.ensureWorkspaceView();
-			} else {
-				this.selectGoalSurface(ADD_SURFACE_ID);
-			}
-			this.syncContextGatheringUi();
-			this.updateUiProjectName();
-			return;
-		}
-
-		this.modeService.setMode('Code');
+	/** Console top-left control: always Surfaces home — Code lives on each surface tab. */
+	private goToConsoleHome(): void {
+		this.selectGoalSurface(ADD_SURFACE_ID);
 		this.syncContextGatheringUi();
 		this.updateUiProjectName();
 	}
@@ -6761,16 +8583,12 @@ class ModeShellContribution extends Disposable {
 
 	private syncContextGatheringUi(): void {
 		this.container.classList.toggle('custom-mode-context-gathering-open', this.contextGatheringOpen);
-		const mode = this.modeService.getMode();
-		const builderOpen = this.selectedSurfaceId === ADD_SURFACE_ID;
-		const toggleActive = this.isCodeTabSelected() || (mode === 'UI' && builderOpen);
-		this.uiProjectName.classList.toggle('active', toggleActive);
-		this.uiProjectName.setAttribute('aria-pressed', String(toggleActive));
-		this.uiProjectName.setAttribute('aria-selected', String(toggleActive));
-		const inCode = this.isCodeTabSelected();
-		this.uiProjectName.title = inCode
-			? localize('customMode.consoleCodeToggleToConsole', 'Switch to Console')
-			: localize('customMode.consoleCodeToggleToCode', 'Switch to Code');
+		const builderOpen = this.selectedSurfaceId === ADD_SURFACE_ID && this.modeService.getMode() === 'UI';
+		this.uiProjectName.classList.toggle('active', builderOpen);
+		this.uiProjectName.setAttribute('aria-pressed', String(builderOpen));
+		this.uiProjectName.setAttribute('aria-selected', String(builderOpen));
+		this.uiProjectName.title = localize('customMode.consoleHomeTitle', 'Open Console surfaces home');
+		this.syncTopBarSelectionChrome();
 	}
 
 	private applySurfaceSelection(surfaceId: string, options?: { contextGathering?: boolean; deferPreviewRouting?: boolean }): void {
@@ -6781,8 +8599,10 @@ class ModeShellContribution extends Disposable {
 		}
 		if (surfaceId === ADD_SURFACE_ID) {
 			this.ensureWorkspaceView();
-		} else {
+		} else if (this.getStoredSurfaceCodeView(surfaceId)) {
 			this.modeService.setMode('Code');
+		} else {
+			this.modeService.setMode('UI');
 		}
 		this.renderGoalSurfaceButtons(this.consoleService.getSurfaces());
 		if (surfaceId !== ADD_SURFACE_ID) {
@@ -6865,6 +8685,7 @@ class ModeShellContribution extends Disposable {
 		});
 		this.refreshStartCommandHints();
 		this.refreshUiChatTabsAndSession();
+		this.syncTopBarSelectionChrome();
 	}
 
 	private async freeWorkspaceSurfacePortsAtStartup(surfaces: readonly WorkspaceSurface[]): Promise<void> {
@@ -6919,6 +8740,7 @@ class ModeShellContribution extends Disposable {
 	private renderGoalSurfaceButtons(surfaces: readonly WorkspaceSurface[]): void {
 		const nextButtons = new Map<string, HTMLButtonElement>();
 		const fragment = document.createDocumentFragment();
+		const codeViewActive = this.isCodeTabSelected();
 
 		for (const surface of surfaces) {
 			let button = this.uiSurfaceButtons.get(surface.id);
@@ -6931,12 +8753,25 @@ class ModeShellContribution extends Disposable {
 			}
 
 			const isActive = surface.id === this.selectedSurfaceId;
+			const isCodeActive = isActive && codeViewActive;
 			const description = this.formatGoalSurfaceDescription(surface);
 			button.textContent = surface.name;
 			button.title = description;
-			button.classList.toggle('active', isActive);
-			button.setAttribute('aria-selected', String(isActive));
+			button.classList.toggle('active', isActive && !codeViewActive);
+			button.setAttribute('aria-selected', String(isActive && !codeViewActive));
 			button.setAttribute('aria-label', description);
+
+			const codeLabel = isCodeActive
+				? localize('customMode.surfaceCodeToggleToConsole', 'Show {0} Console view', surface.name)
+				: localize('customMode.surfaceCodeToggleToCode', 'Show {0} Code view', surface.name);
+			const codeButton = $('button.custom-mode-ui-surface-code', {
+				type: 'button',
+				title: codeLabel,
+				'aria-label': codeLabel,
+				'aria-pressed': String(isCodeActive),
+			}, $('span.codicon' + ThemeIcon.asCSSSelector(Codicon.arrowSwap))) as HTMLButtonElement;
+			codeButton.dataset.surfaceId = surface.id;
+			codeButton.classList.toggle('active', isCodeActive);
 
 			const closeLabel = localize('customMode.surfaceCloseButtonAria', 'Delete {0} surface', surface.name);
 			const closeButton = $('button.custom-mode-ui-surface-close', {
@@ -6946,7 +8781,7 @@ class ModeShellContribution extends Disposable {
 			}, '\u00d7') as HTMLButtonElement;
 			closeButton.dataset.surfaceId = surface.id;
 
-			const tab = $('div.custom-mode-ui-surface-tab', undefined, button, closeButton);
+			const tab = $('div.custom-mode-ui-surface-tab', undefined, button, codeButton, closeButton);
 			tab.classList.toggle('active', isActive);
 
 			nextButtons.set(surface.id, button);
@@ -6965,6 +8800,14 @@ class ModeShellContribution extends Disposable {
 		if (!(target instanceof HTMLElement)) {
 			return;
 		}
+		const codeButton = target.closest('.custom-mode-ui-surface-code') as HTMLElement | null;
+		const codeSurfaceId = codeButton?.dataset.surfaceId;
+		if (codeSurfaceId) {
+			event.preventDefault();
+			event.stopPropagation();
+			this.toggleSurfaceCodeView(codeSurfaceId);
+			return;
+		}
 		const closeButton = target.closest('.custom-mode-ui-surface-close') as HTMLElement | null;
 		const surfaceId = closeButton?.dataset.surfaceId;
 		if (!surfaceId) {
@@ -6973,6 +8816,52 @@ class ModeShellContribution extends Disposable {
 		event.preventDefault();
 		event.stopPropagation();
 		void this.deleteGoalSurface(surfaceId);
+	}
+
+	private surfaceCodeViewStorageKey(surfaceId: string): string {
+		return `${STORAGE_SURFACE_CODE_VIEW_PREFIX}${surfaceId}`;
+	}
+
+	private getStoredSurfaceCodeView(surfaceId: string): boolean {
+		return this.storageService.get(this.surfaceCodeViewStorageKey(surfaceId), StorageScope.WORKSPACE) === '1';
+	}
+
+	private persistSurfaceCodeView(surfaceId: string, enabled: boolean): void {
+		const key = this.surfaceCodeViewStorageKey(surfaceId);
+		if (enabled) {
+			this.storageService.store(key, '1', StorageScope.WORKSPACE, StorageTarget.USER);
+		} else {
+			this.storageService.remove(key, StorageScope.WORKSPACE);
+		}
+	}
+
+	/** Per-surface ⇄ Code toggle — independent of the Console home control. */
+	private toggleSurfaceCodeView(surfaceId: string): void {
+		const surface = this.consoleService.getSurface(surfaceId);
+		if (!surface) {
+			return;
+		}
+		const currentlyCode = this.selectedSurfaceId === surfaceId && this.modeService.getMode() === 'Code';
+		const next = !currentlyCode;
+		this.persistSurfaceCodeView(surfaceId, next);
+		this.autoStartAppAttempted = false;
+		this.selectedSurfaceId = surface.id;
+		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
+		this.contextGatheringOpen = false;
+		this.persistContextGatheringOpen();
+		if (!next) {
+			// Returning to Console surface chrome — keep preview routing.
+			this.applySurfaceSelection(surfaceId, { contextGathering: false });
+			return;
+		}
+		this.clearEmbeddedUiUrl();
+		this.setAppReachable(false);
+		this.applySurfaceSelection(surfaceId, { contextGathering: false, deferPreviewRouting: true });
+		void this.ensureSurfaceServerStarted(surface, { force: true }).then(started => {
+			if (started && this.selectedSurfaceId === surface.id) {
+				this.refreshSelectedSurfaceTaskTreeAndRoute();
+			}
+		});
 	}
 
 	private selectGoalSurface(surfaceId: string): void {
@@ -6991,6 +8880,8 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 
+		// Name click always opens Console surface view; Code is only via the ⇄ control.
+		this.persistSurfaceCodeView(surface.id, false);
 		this.selectedSurfaceId = surface.id;
 		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
 		this.clearEmbeddedUiUrl();
@@ -7026,6 +8917,7 @@ class ModeShellContribution extends Disposable {
 				return;
 			}
 			this.clearStoredUiChatDraft(surfaceId);
+			this.persistSurfaceCodeView(surfaceId, false);
 			if (this.boundUiChatSurfaceId === surfaceId) {
 				this.boundUiChatSurfaceId = undefined;
 			}
@@ -7044,6 +8936,7 @@ class ModeShellContribution extends Disposable {
 			await this.consoleService.refresh();
 			this.syncGoalSurfaceSwitcher();
 			void this.refreshStarterSurfaceCardStatuses();
+			this.syncTopBarSelectionChrome();
 			this.notificationService.notify({
 				severity: Severity.Info,
 				message: localize('customMode.surfaceDeleteSuccess', 'Deleted {0} surface.', surface.name)
@@ -7059,6 +8952,92 @@ class ModeShellContribution extends Disposable {
 				)
 			});
 		}
+	}
+
+	/** Preview tab + reachable app — only then is drag-to-select useful. */
+	private isAppPreviewInView(): boolean {
+		return this.modeService.getMode() === 'UI'
+			&& !this.contextGatheringOpen
+			&& !!this.getSelectedSurface()
+			&& this.surfaceMainView === 'preview'
+			&& this.appReachable;
+	}
+
+	private syncTopBarSelectionChrome(): void {
+		const previewSelect = this.isAppPreviewInView();
+		this.container.classList.toggle('custom-mode-shell-preview-select', previewSelect);
+		const surfaceCount = this.consoleService.getSurfaces().length;
+		this.uiClearAllSurfacesBtn.disabled = surfaceCount === 0;
+	}
+
+	private async clearAllSurfaces(): Promise<void> {
+		const surfaces = [...this.consoleService.getSurfaces()];
+		if (!surfaces.length) {
+			return;
+		}
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			this.notificationService.warn(localize(
+				'customMode.clearAllSurfacesNoWorkspace',
+				'Open a workspace folder before clearing surfaces.',
+			));
+			return;
+		}
+		const { confirmed } = await this.dialogService.confirm({
+			message: localize(
+				'customMode.clearAllSurfacesConfirm',
+				'Clear all {0} surface(s)? This deletes plans, proposals, and generated app folders.',
+				surfaces.length,
+			),
+			primaryButton: localize('customMode.clearAllSurfacesConfirmButton', 'Clear all Surfaces'),
+			type: 'warning',
+		});
+		if (!confirmed) {
+			return;
+		}
+
+		const failed: string[] = [];
+		for (const surface of surfaces) {
+			try {
+				const deleted = await deleteGoalWorkspaceSurface(this.fileService, workspaceFolder, surface.id);
+				if (!deleted) {
+					failed.push(surface.name);
+					continue;
+				}
+				this.clearStoredUiChatDraft(surface.id);
+				this.chatSessionManager.removeUISurfaceSession(surface.id);
+			} catch {
+				failed.push(surface.name);
+			}
+		}
+
+		this.boundUiChatSurfaceId = undefined;
+		this.selectedSurfaceId = ADD_SURFACE_ID;
+		this.activeUiChatSurfaceId = ADD_SURFACE_ID;
+		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
+		this.storageService.store(STORAGE_ACTIVE_UI_CHAT_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
+		this.clearEmbeddedUiUrl();
+		this.setAppReachable(false);
+		await this.resetClaudeTerminalSession();
+		await this.consoleService.refresh();
+		this.applySurfaceSelection(ADD_SURFACE_ID, { contextGathering: true });
+		this.syncGoalSurfaceSwitcher();
+		void this.refreshStarterSurfaceCardStatuses();
+		this.syncTopBarSelectionChrome();
+
+		if (failed.length) {
+			this.notificationService.warn(localize(
+				'customMode.clearAllSurfacesPartial',
+				'Cleared surfaces, but failed for: {0}',
+				failed.join(', '),
+			));
+			return;
+		}
+		this.notificationService.info(localize(
+			'customMode.clearAllSurfacesSuccess',
+			'Cleared {0} surface(s).',
+			surfaces.length,
+		));
 	}
 
 	private getSelectedSurface(): WorkspaceSurface | undefined {
@@ -7267,6 +9246,7 @@ class ModeShellContribution extends Disposable {
 			});
 		}
 		this.renderSelectedSurfaceLaunchPanel();
+		this.syncTopBarSelectionChrome();
 	}
 
 	private updateSurfaceFeatureChecklistVisibility(): void {
@@ -8944,6 +10924,11 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private ensureCodeModeForDevServerTerminal(): void {
+		// Only jump to editors when this surface explicitly opted into Code view.
+		const surfaceId = this.selectedSurfaceId;
+		if (!surfaceId || surfaceId === ADD_SURFACE_ID || !this.getStoredSurfaceCodeView(surfaceId)) {
+			return;
+		}
 		if (this.modeService.getMode() === 'Code') {
 			return;
 		}
@@ -9346,6 +11331,7 @@ class ModeShellContribution extends Disposable {
 		const wasReachable = this.appReachable;
 		this.appReachable = reachable;
 		this.container.classList.toggle('custom-mode-app-reachable', reachable);
+		this.syncTopBarSelectionChrome();
 
 		// When the dev server transitions from unreachable to reachable, the embedded UI is
 		// almost certainly showing an ERR_CONNECTION_REFUSED page from the initial load attempt
@@ -9429,14 +11415,21 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private pushUiRuntimeLog(line: string): void {
-		if (this.uiSetup.classList.contains('custom-mode-setup-hidden')) {
-			return;
-		}
 		this.uiRuntimeLogs.push(line);
 		if (this.uiRuntimeLogs.length > 50) {
 			this.uiRuntimeLogs.splice(0, this.uiRuntimeLogs.length - 50);
 		}
-		this.uiRuntimeText.textContent = this.uiRuntimeLogs.slice(-20).join('\n');
+		// Start App setup panel may be hidden during surface planning — still keep the ring.
+		if (!this.uiSetup.classList.contains('custom-mode-setup-hidden')) {
+			this.uiRuntimeText.textContent = this.uiRuntimeLogs.slice(-20).join('\n');
+		}
+		// Mirror into the renderer log so agents can tail window1/renderer.log / code.sh CONSOLE.
+		const tagged = `[modeShell] ${line}`;
+		if (/failed|error|bad /i.test(line)) {
+			this.logService.error(tagged);
+		} else {
+			this.logService.info(tagged);
+		}
 	}
 
 	private isWebviewElement(el: HTMLElement): boolean {
