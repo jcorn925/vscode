@@ -33,7 +33,7 @@ Planning comes before code. Graph verification gates "done."
      graph-proposal.json, a stable \`run_id\`, and the \`clone_workspace\`
      returned by remap (no reference workspace)
    - Stop when passed, or \`rounds_without_improvement >= 2\`, or the phase budget ends
-   - After verify, open the **Proposal Graph** tab for architecture / phases /
+   - After verify, open the **Proposed Code Graph** tab for architecture / phases /
      file+edge review
 5. **Batch remaps.** Implement a whole subsystem, then remap once. Do not
    remap after every file (ingest settle is expensive).
@@ -136,7 +136,7 @@ Write/destructive commands stay gated.
 - Problem / intent
 - Research (planning-only; cite GitHub priors + Ix draft step)
 - Risks / deferrals
-- **Last section:** link to the Proposal Graph (path of the paired
+- **Last section:** link to the Proposed Code Graph (path of the paired
   \`.graph-proposal.json\`) — do not paste architecture trees or phase
   checklists into the plan
 
@@ -175,7 +175,7 @@ export function buildSurfacePlanKickoffPrompt(options: {
 		`Create ${planPath} for surface "${surfaceName}" (id: ${surfaceId}) from that intent.`,
 		`Keep the plan lean: §0 Plan lock, problem/intent, research (planning-only), risks/deferrals.`,
 		`In Research: survey comparable public GitHub repos (gh search/api), write .agent/surfaces/${surfaceId}.reference-candidates.json (status awaiting_selection; suggested repos selected:true), wait until the Plan UI confirms selection, then shallow-clone only selected repos into .agent/references/, remap_and_wait, draft_proposal_from_workspace (write ${proposalPath.replace('.json', '.draft.json')}), then adapt that draft to the Plan lock.`,
-		`End the plan with a Proposal Graph section that links to ${proposalPath} — do not put architecture trees or phased checklists in the plan.`,
+		`End the plan with a Proposed Code Graph section that links to ${proposalPath} — do not put architecture trees or phased checklists in the plan.`,
 		`Then write ${proposalPath} as the verification contract: architecture notes, phases (phased checklist with remap_and_wait/compare_proposal gates), file: nodes, and structural edges adapted from the reference draft; set plan_ref to "${planPath}".`,
 		`Do not scaffold application code yet — plan + proposal only. Do not copy reference source into apps/.`,
 		`When those two artifacts exist, summarize what you wrote (including which repos informed the draft) and stop for human review.`,
@@ -207,6 +207,26 @@ export function buildWorkspacePlanKickoffPrompt(options: {
 		`Do NOT create apps/, per-surface plan.md files, graph proposals, or scaffold code. Stop when both workspace artifacts exist so the Console can show suggestion cards.`,
 	];
 	return parts.filter(Boolean).join(' ');
+}
+
+/**
+ * Project-level Claude Code MCP config (``.mcp.json``) so the embedded Claude
+ * session can actually spawn ix-graph. Permission allow-list entries alone are
+ * not enough — without this file Claude reports "no MCP servers connected."
+ *
+ * ``ixGraphScriptAbsPath`` must be an absolute path to ``scripts/ix_graph_mcp.py``
+ * in the GoalConsole / Code OSS checkout (Console cwd is not the product root).
+ */
+export function buildCadreClaudeMcpJson(ixGraphScriptAbsPath: string): string {
+	return `${JSON.stringify({
+		mcpServers: {
+			'ix-graph': {
+				type: 'stdio',
+				command: 'python3',
+				args: [ixGraphScriptAbsPath],
+			},
+		},
+	}, null, '\t')}\n`;
 }
 
 /**

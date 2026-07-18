@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { resolveDefaultSurfaceMainView, shouldShowSurfaceMainViewToggle, type SurfaceMainView } from '../../../../../../custom/agentTaskTree/surfaceMainViewHelpers.js';
+import { normalizeSurfaceMainView, resolveDefaultSurfaceMainView, shouldShowSurfaceMainViewToggle, type SurfaceMainView } from '../../../../../../custom/agentTaskTree/surfaceMainViewHelpers.js';
 import type { AgentTaskTree } from '../../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
 
 suite('surfaceMainViewHelpers', () => {
@@ -24,16 +24,16 @@ suite('surfaceMainViewHelpers', () => {
 		}), true);
 	});
 
-	test('resolveDefaultSurfaceMainView prefers task tree for active work', () => {
+	test('resolveDefaultSurfaceMainView prefers Plan for active work', () => {
 		const activeTree = createTree('active');
-		assert.strictEqual(resolveDefaultSurfaceMainView(activeTree, true), 'taskTree');
-		assert.strictEqual(resolveDefaultSurfaceMainView(activeTree, false), 'taskTree');
+		assert.strictEqual(resolveDefaultSurfaceMainView(activeTree, true), 'plan');
+		assert.strictEqual(resolveDefaultSurfaceMainView(activeTree, false), 'plan');
 	});
 
 	test('resolveDefaultSurfaceMainView opens preview when complete and reachable', () => {
 		const completeTree = createTree('complete');
 		assert.strictEqual(resolveDefaultSurfaceMainView(completeTree, true), 'preview');
-		assert.strictEqual(resolveDefaultSurfaceMainView(completeTree, false), 'taskTree');
+		assert.strictEqual(resolveDefaultSurfaceMainView(completeTree, false), 'plan');
 	});
 
 	test('SurfaceMainView accepts the Ix subsystems tab without making it a default', () => {
@@ -46,6 +46,13 @@ suite('surfaceMainViewHelpers', () => {
 		assert.strictEqual(resolveDefaultSurfaceMainView(undefined, false, true), 'plan');
 		const planView: SurfaceMainView = 'plan';
 		assert.strictEqual(planView, 'plan');
+	});
+
+	test('normalizeSurfaceMainView maps legacy taskTree to plan', () => {
+		assert.strictEqual(normalizeSurfaceMainView('taskTree'), 'plan');
+		assert.strictEqual(normalizeSurfaceMainView('plan'), 'plan');
+		assert.strictEqual(normalizeSurfaceMainView('preview'), 'preview');
+		assert.strictEqual(normalizeSurfaceMainView('nope'), undefined);
 	});
 
 	test('SurfaceMainView accepts the CLAUDE.md tab', () => {

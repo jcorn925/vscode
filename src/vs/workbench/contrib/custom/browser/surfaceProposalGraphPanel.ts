@@ -67,19 +67,19 @@ export class SurfaceProposalGraphPanel extends Disposable {
 			}
 		}));
 		this._register(toDisposable(() => this.root.replaceChildren()));
-		this.showEmpty(localize('surfaceProposalGraph.selectSurface', 'Select a surface to view its proposal graph.'));
+		this.showEmpty(localize('surfaceProposalGraph.selectSurface', 'Select a surface to view its proposed code graph.'));
 	}
 
 	async load(options: SurfaceProposalGraphPanelLoadOptions): Promise<void> {
 		this.lastOptions = options;
 		const generation = ++this.loadGeneration;
 		const { surfaceId, surfaceName, treeId, workspaceFolder } = options;
-		this.titleEl.textContent = localize('surfaceProposalGraph.title', '{0} proposal graph', surfaceName?.trim() || surfaceId);
-		this.pathEl.textContent = '';
+		this.titleEl.textContent = localize('surfaceProposalGraph.title', '{0} proposed code graph', surfaceName?.trim() || surfaceId);
+		this.setPathDisplay(undefined);
 		this.statusEl.textContent = localize('surfaceProposalGraph.loading', 'Loading…');
 
 		if (!workspaceFolder) {
-			this.showEmpty(localize('surfaceProposalGraph.noWorkspace', 'Open a workspace folder to load the proposal graph.'));
+			this.showEmpty(localize('surfaceProposalGraph.noWorkspace', 'Open a workspace folder to load the proposed code graph.'));
 			return;
 		}
 
@@ -91,10 +91,10 @@ export class SurfaceProposalGraphPanel extends Disposable {
 
 		if (!resource) {
 			const expected = graphProposalResource(taskTreesFolder(workspaceFolder), surfaceId);
-			this.pathEl.textContent = expected.path;
+			this.setPathDisplay(expected);
 			this.showEmpty(localize(
 				'surfaceProposalGraph.missing',
-				'No proposal graph yet for {0}. Start New Surface (Claude) or add {1}.',
+				'No proposed code graph yet for {0}. Start New Surface (Claude) or add {1}.',
 				surfaceId,
 				`.agent/task-trees/${surfaceId}.graph-proposal.json`,
 			));
@@ -109,7 +109,7 @@ export class SurfaceProposalGraphPanel extends Disposable {
 			const proposal = JSON.parse(content.value.toString()) as GraphProposalDocument;
 			const graph = buildProposalPreviewGraph(proposal);
 			const partition = partitionProposalWorkstreams(proposal);
-			this.pathEl.textContent = resource.path;
+			this.setPathDisplay(resource);
 			const parallelSafe = partition.workstreams.filter(w => w.parallelSafe).length;
 			this.statusEl.textContent = localize(
 				'surfaceProposalGraph.loadedWithWorkstreams',
@@ -124,13 +124,13 @@ export class SurfaceProposalGraphPanel extends Disposable {
 			this.emptyEl.classList.add('hidden');
 			this.emptyEl.textContent = '';
 			this.treeAnchor.classList.remove('hidden');
-			this.treeView.setDocument(proposal, graph, partition);
+			this.treeView.setDocument({ proposal, graph, partition });
 		} catch {
 			if (generation !== this.loadGeneration) {
 				return;
 			}
-			this.pathEl.textContent = resource.path;
-			this.showEmpty(localize('surfaceProposalGraph.readFailed', 'Could not read the proposal graph for {0}.', surfaceId));
+			this.setPathDisplay(resource);
+			this.showEmpty(localize('surfaceProposalGraph.readFailed', 'Could not read the proposed code graph for {0}.', surfaceId));
 		}
 	}
 
@@ -171,5 +171,10 @@ export class SurfaceProposalGraphPanel extends Disposable {
 		this.emptyEl.textContent = message;
 		this.emptyEl.classList.remove('hidden');
 		this.treeAnchor.classList.add('hidden');
+	}
+
+	private setPathDisplay(resource: URI | undefined): void {
+		this.pathEl.textContent = resource?.path ?? '';
+		this.pathEl.title = resource?.path ?? '';
 	}
 }

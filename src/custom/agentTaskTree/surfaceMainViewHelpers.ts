@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { AgentTaskTree } from './agentTaskTreeTypes.js';
-import { treeHasActiveWork } from './agentTaskTreeService.js';
 
+/** `taskTree` is retained only for storage migration; it is coerced to `plan`. */
 export type SurfaceMainView = 'plan' | 'claudeMd' | 'taskTree' | 'preview' | 'ixSubsystems';
 
 export function shouldShowSurfaceMainViewToggle(options: {
@@ -25,24 +25,23 @@ export function shouldShowSurfaceMainViewToggle(options: {
 export function resolveDefaultSurfaceMainView(
 	tree: AgentTaskTree | undefined,
 	previewReachable: boolean,
-	hasPlan = false,
+	_hasPlan = false,
 ): SurfaceMainView {
-	if (!tree && hasPlan) {
-		return 'plan';
-	}
-	if (!tree) {
-		return hasPlan ? 'plan' : 'taskTree';
-	}
-	if (treeHasActiveWork(tree)) {
-		return 'taskTree';
-	}
-	if (tree.status === 'complete' && previewReachable) {
+	if (tree?.status === 'complete' && previewReachable) {
 		return 'preview';
 	}
-	if (hasPlan && tree.status !== 'complete') {
+	return 'plan';
+}
+
+/** Maps legacy stored `taskTree` (Proposed Code Graph) onto Plan. */
+export function normalizeSurfaceMainView(value: string | undefined): SurfaceMainView | undefined {
+	if (value === 'taskTree') {
 		return 'plan';
 	}
-	return 'taskTree';
+	if (isSurfaceMainView(value)) {
+		return value;
+	}
+	return undefined;
 }
 
 export function isSurfaceMainView(value: string | undefined): value is SurfaceMainView {

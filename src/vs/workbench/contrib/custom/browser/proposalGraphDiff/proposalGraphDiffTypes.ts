@@ -73,8 +73,8 @@ export interface GraphProposalDocument {
 export interface GraphProposalArchitectureDocument {
 	/** Short prose / shared-package notes. */
 	readonly summary?: string;
-	/** ASCII or indented folder tree for the surface. */
-	readonly tree?: string;
+	/** ASCII or indented folder tree for the surface. Agents sometimes emit a string[]. */
+	readonly tree?: string | readonly string[];
 }
 
 export interface GraphProposalPhaseDocument {

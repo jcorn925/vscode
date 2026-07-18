@@ -4,15 +4,15 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, clearNode } from '../../../../base/browser/dom.js';
-import { renderMarkdown } from '../../../../base/browser/markdownRenderer.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
-import { MarkdownString } from '../../../../base/common/htmlContent.js';
 import { URI } from '../../../../base/common/uri.js';
-import { joinPath } from '../../../../base/common/resources.js';
+import { basename, joinPath } from '../../../../base/common/resources.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { localize } from '../../../../nls.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
+import { graphProposalResource } from '../../../../../custom/agentTaskTree/agentTaskTreeGraphProposal.js';
+import { taskTreesFolder } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import { resolveSurfacePlanResource, surfacePlanResource } from '../../../../../custom/goalWorkspace/surfacePlanPaths.js';
 import {
 	parseSurfaceReferenceCandidates,
@@ -25,11 +25,17 @@ import {
 	type SurfaceReferenceCandidates,
 	type SurfaceReferenceRepo,
 } from '../../../../../custom/goalWorkspace/surfaceReferenceCandidates.js';
+import { IWebviewService } from '../../webview/browser/webview.js';
+import { buildProposalPreviewGraph } from './proposalGraphDiff/buildProposalDiffGraph.js';
+import { partitionProposalWorkstreams } from './proposalGraphDiff/partitionProposalWorkstreams.js';
+import type { GraphProposalDocument } from './proposalGraphDiff/proposalGraphDiffTypes.js';
+import { SurfaceProposalTreeView } from './surfaceProposalTreeView.js';
 
 export interface SurfacePlanPanelLoadOptions {
 	readonly surfaceId: string;
 	readonly surfaceName?: string;
 	readonly surfacePath?: string;
+	readonly treeId?: string;
 	readonly workspaceFolder: URI | undefined;
 }
 
@@ -60,8 +66,9 @@ export class SurfacePlanPanel extends Disposable {
 	private readonly statusEl: HTMLElement;
 	private readonly refreshButton: HTMLButtonElement;
 	private readonly referencesEl: HTMLElement;
-	private readonly bodyEl: HTMLElement;
-	private readonly rendered = this._register(new MutableDisposable());
+	private readonly composeEl: HTMLElement;
+	private readonly treeAnchor: HTMLElement;
+	private readonly treeView: SurfaceProposalTreeView;
 	private readonly watcher = this._register(new MutableDisposable());
 	private readonly composeListeners = this._register(new MutableDisposable());
 	private readonly referencesListeners = this._register(new MutableDisposable());
@@ -73,6 +80,7 @@ export class SurfacePlanPanel extends Disposable {
 	constructor(
 		private readonly root: HTMLElement,
 		private readonly fileService: IFileService,
+		webviewService: IWebviewService,
 	) {
 		super();
 
@@ -82,15 +90,16 @@ export class SurfacePlanPanel extends Disposable {
 		this.refreshButton = $('button.custom-mode-surface-plan-refresh', {
 			type: 'button',
 		}, localize('surfacePlan.refresh', 'Refresh')) as HTMLButtonElement;
-		const headerTop = $('div.custom-mode-surface-plan-header-top', undefined, this.titleEl, this.refreshButton);
-		const header = $('div.custom-mode-surface-plan-header', undefined, headerTop, this.pathEl, this.statusEl);
 		this.referencesEl = $('div.custom-mode-surface-plan-references.hidden');
 		this.referencesEl.setAttribute('role', 'group');
 		this.referencesEl.setAttribute('aria-label', localize('surfacePlan.referencesLabel', 'Reference repositories'));
-		this.bodyEl = $('div.custom-mode-surface-plan-body');
-		this.bodyEl.setAttribute('role', 'article');
-		this.bodyEl.setAttribute('aria-label', localize('surfacePlan.bodyLabel', 'Surface plan'));
-		this.root.appendChild($('div.custom-mode-surface-plan', undefined, header, this.referencesEl, this.bodyEl));
+		this.composeEl = $('div.custom-mode-surface-plan-compose-host.hidden');
+		this.treeAnchor = $('div.custom-mode-surface-plan-tree-anchor');
+		// Header (title / path / status / refresh) intentionally omitted — plan body only.
+		this.root.appendChild($('div.custom-mode-surface-plan', undefined, this.referencesEl, this.composeEl, this.treeAnchor));
+
+		this.treeView = this._register(new SurfaceProposalTreeView(webviewService, () => this.treeView.republish()));
+		this.treeView.attach(this.treeAnchor);
 
 		this._register(addDisposableListener(this.refreshButton, 'click', () => {
 			if (this.lastOptions) {
@@ -98,13 +107,13 @@ export class SurfacePlanPanel extends Disposable {
 			}
 		}));
 		this._register(toDisposable(() => this.root.replaceChildren()));
-		this.renderEmpty(localize('surfacePlan.selectSurface', 'Select a surface to view its plan.md.'));
+		this.showTreeMessage(localize('surfacePlan.selectSurface', 'Select a surface to view its plan.md.'));
 	}
 
 	async load(options: SurfacePlanPanelLoadOptions): Promise<void> {
 		this.lastOptions = options;
 		const generation = ++this.loadGeneration;
-		const { surfaceId, surfaceName, surfacePath, workspaceFolder } = options;
+		const { surfaceId, surfaceName, surfacePath, treeId, workspaceFolder } = options;
 		this.titleEl.textContent = localize('surfacePlan.title', '{0} plan', surfaceName?.trim() || surfaceId);
 		this.pathEl.textContent = '';
 		this.statusEl.textContent = localize('surfacePlan.loading', 'Loading…');
@@ -112,67 +121,118 @@ export class SurfacePlanPanel extends Disposable {
 		if (!workspaceFolder) {
 			this.candidates = undefined;
 			this.renderReferencesRow();
-			this.renderEmpty(localize('surfacePlan.noWorkspace', 'Open a workspace folder to load plan.md.'));
+			this.clearCompose();
+			this.showTreeMessage(localize('surfacePlan.noWorkspace', 'Open a workspace folder to load plan.md.'));
 			return;
 		}
 
-		this.watchPlanCandidates(workspaceFolder, surfaceId, surfacePath);
+		this.watchPlanAndProposal(workspaceFolder, surfaceId, surfacePath, treeId);
 		await this.refreshReferenceCandidates(workspaceFolder, surfaceId, generation);
 		if (generation !== this.loadGeneration) {
 			return;
 		}
 
-		const resource = await resolveSurfacePlanResource(this.fileService, workspaceFolder, surfaceId, surfacePath);
+		const planResource = await resolveSurfacePlanResource(this.fileService, workspaceFolder, surfaceId, surfacePath);
 		if (generation !== this.loadGeneration) {
 			return;
 		}
 
-		if (!resource) {
+		let planMarkdown: string | undefined;
+		if (!planResource) {
 			const expected = surfacePlanResource(workspaceFolder, surfaceId);
 			this.pathEl.textContent = expected.path;
 			this.statusEl.textContent = this.candidates?.status === 'awaiting_selection'
 				? localize('surfacePlan.awaitingRepoSelection', 'Select reference repos')
 				: localize('surfacePlan.awaitingPlan', 'No plan yet');
 			this.renderBuildCompose(surfaceId, surfaceName?.trim() || surfaceId);
+		} else {
+			try {
+				const content = await this.fileService.readFile(planResource);
+				if (generation !== this.loadGeneration) {
+					return;
+				}
+				const text = content.value.toString();
+				this.pathEl.textContent = planResource.path;
+				if (!text.trim()) {
+					this.statusEl.textContent = this.candidates?.status === 'awaiting_selection'
+						? localize('surfacePlan.awaitingRepoSelection', 'Select reference repos')
+						: localize('surfacePlan.emptyPlan', 'Plan is empty');
+					this.renderBuildCompose(surfaceId, surfaceName?.trim() || surfaceId);
+				} else {
+					this.statusEl.textContent = this.candidates?.status === 'awaiting_selection'
+						? localize('surfacePlan.awaitingRepoSelection', 'Select reference repos')
+						: localize('surfacePlan.ready', 'Plan loaded');
+					this.clearCompose();
+					planMarkdown = text;
+				}
+			} catch (error: unknown) {
+				if (generation !== this.loadGeneration) {
+					return;
+				}
+				this.clearCompose();
+				this.showTreeMessage(localize(
+					'surfacePlan.readFailed',
+					'Could not read plan: {0}',
+					String((error as Error)?.message ?? error),
+				));
+				return;
+			}
+		}
+
+		const proposalResource = await this.resolveProposalResource(workspaceFolder, surfaceId, treeId);
+		if (generation !== this.loadGeneration) {
 			return;
 		}
 
-		try {
-			const content = await this.fileService.readFile(resource);
-			if (generation !== this.loadGeneration) {
-				return;
+		let proposal: GraphProposalDocument | undefined;
+		let proposalMissingMessage: string | undefined;
+		if (!proposalResource) {
+			const expected = graphProposalResource(taskTreesFolder(workspaceFolder), surfaceId);
+			proposalMissingMessage = localize(
+				'surfacePlan.proposalMissing',
+				'No proposed code graph yet for {0}. Start New Surface (Claude) or add {1}.',
+				surfaceId,
+				basename(expected),
+			);
+		} else {
+			try {
+				const content = await this.fileService.readFile(proposalResource);
+				if (generation !== this.loadGeneration) {
+					return;
+				}
+				proposal = JSON.parse(content.value.toString()) as GraphProposalDocument;
+			} catch {
+				if (generation !== this.loadGeneration) {
+					return;
+				}
+				proposalMissingMessage = localize(
+					'surfacePlan.proposalReadFailed',
+					'Could not read the proposed code graph for {0}.',
+					surfaceId,
+				);
 			}
-			const text = content.value.toString();
-			this.pathEl.textContent = resource.path;
-			if (!text.trim()) {
-				this.statusEl.textContent = this.candidates?.status === 'awaiting_selection'
-					? localize('surfacePlan.awaitingRepoSelection', 'Select reference repos')
-					: localize('surfacePlan.emptyPlan', 'Plan is empty');
-				this.renderBuildCompose(surfaceId, surfaceName?.trim() || surfaceId);
-				return;
-			}
-			this.statusEl.textContent = this.candidates?.status === 'awaiting_selection'
-				? localize('surfacePlan.awaitingRepoSelection', 'Select reference repos')
-				: localize('surfacePlan.ready', 'Plan loaded');
-			this.renderMarkdown(text);
-		} catch (error: unknown) {
-			if (generation !== this.loadGeneration) {
-				return;
-			}
-			this.renderEmpty(localize(
-				'surfacePlan.readFailed',
-				'Could not read plan: {0}',
-				String((error as Error)?.message ?? error),
-			));
 		}
+
+		this.treeAnchor.classList.remove('hidden');
+		const graph = proposal ? buildProposalPreviewGraph(proposal) : undefined;
+		const partition = proposal ? partitionProposalWorkstreams(proposal) : undefined;
+		this.treeView.setDocument({
+			proposal,
+			graph,
+			partition,
+			planMarkdown,
+			storageKey: `surfaceProposalTree.visibility.${surfaceId}`,
+			proposalMissingMessage: proposal || planMarkdown ? proposalMissingMessage : (proposalMissingMessage || localize('surfacePlan.emptyContent', 'No plan or proposal content yet.')),
+		});
 	}
 
-	private watchPlanCandidates(workspaceFolder: URI, surfaceId: string, surfacePath?: string): void {
+	private watchPlanAndProposal(workspaceFolder: URI, surfaceId: string, surfacePath?: string, treeId?: string): void {
 		const store = new DisposableStore();
 		this.watcher.value = store;
 		try {
 			store.add(this.fileService.watch(joinPath(workspaceFolder, '.agent')));
 			store.add(this.fileService.watch(joinPath(workspaceFolder, '.agent', 'surfaces')));
+			store.add(this.fileService.watch(taskTreesFolder(workspaceFolder)));
 			store.add(this.fileService.watch(workspaceFolder));
 			store.add(this.fileService.onDidFilesChange(e => {
 				if (!this.lastOptions || this.lastOptions.surfaceId !== surfaceId || this.candidatesWriteInFlight) {
@@ -190,13 +250,32 @@ export class SurfacePlanPanel extends Disposable {
 				if (surfacePath) {
 					planCandidates.push(joinPath(workspaceFolder, ...surfacePath.split('/').filter(Boolean), 'plan.md'));
 				}
-				if (planCandidates.some(uri => e.affects(uri))) {
+				const folder = taskTreesFolder(workspaceFolder);
+				const proposalCandidates = [
+					...(treeId && treeId !== surfaceId ? [graphProposalResource(folder, treeId)] : []),
+					graphProposalResource(folder, surfaceId),
+				];
+				if (planCandidates.some(uri => e.affects(uri)) || proposalCandidates.some(uri => e.contains(uri) || e.affects(uri))) {
 					void this.load(this.lastOptions);
 				}
 			}));
 		} catch {
 			// Watching is best-effort.
 		}
+	}
+
+	private async resolveProposalResource(workspaceFolder: URI, surfaceId: string, treeId?: string): Promise<URI | undefined> {
+		const folder = taskTreesFolder(workspaceFolder);
+		const candidates = [
+			...(treeId && treeId !== surfaceId ? [graphProposalResource(folder, treeId)] : []),
+			graphProposalResource(folder, surfaceId),
+		];
+		for (const candidate of candidates) {
+			if (await this.fileService.exists(candidate)) {
+				return candidate;
+			}
+		}
+		return undefined;
 	}
 
 	private async refreshReferenceCandidates(workspaceFolder: URI, surfaceId: string, generation: number): Promise<void> {
@@ -332,29 +411,24 @@ export class SurfacePlanPanel extends Disposable {
 		}
 	}
 
-	private renderMarkdown(text: string): void {
-		this.composeListeners.clear();
-		this.rendered.clear();
-		this.bodyEl.replaceChildren();
-		const rendered = renderMarkdown(new MarkdownString(text, { supportThemeIcons: true, isTrusted: true }), {
-			asyncRenderCallback: () => { /* layout handled by parent */ },
+	private showTreeMessage(message: string): void {
+		this.treeAnchor.classList.remove('hidden');
+		this.treeView.setDocument({
+			proposalMissingMessage: message,
+			storageKey: 'surfaceProposalTree.visibility',
 		});
-		rendered.element.classList.add('custom-mode-surface-plan-markdown');
-		this.bodyEl.appendChild(rendered.element);
-		this.rendered.value = toDisposable(() => rendered.dispose());
 	}
 
-	private renderEmpty(message: string): void {
+	private clearCompose(): void {
 		this.composeListeners.clear();
-		this.rendered.clear();
-		this.statusEl.textContent = '';
-		this.bodyEl.replaceChildren($('div.custom-mode-surface-plan-empty', undefined, message));
+		this.composeEl.classList.add('hidden');
+		this.composeEl.replaceChildren();
 	}
 
 	private renderBuildCompose(surfaceId: string, surfaceName: string): void {
 		this.composeListeners.clear();
-		this.rendered.clear();
-		this.bodyEl.replaceChildren();
+		this.composeEl.classList.remove('hidden');
+		this.composeEl.replaceChildren();
 
 		const store = new DisposableStore();
 		this.composeListeners.value = store;
@@ -388,7 +462,6 @@ export class SurfacePlanPanel extends Disposable {
 			}
 			submit.disabled = true;
 			this._onDidRequestBuild.fire({ surfaceId, surfaceName, intent });
-			// Re-enable after a beat so the user can refine and resend if needed.
 			setTimeout(() => {
 				if (!submit.isConnected) {
 					return;
@@ -407,7 +480,7 @@ export class SurfacePlanPanel extends Disposable {
 
 		const actions = $('div.custom-mode-surface-plan-compose-actions', undefined, submit);
 		const form = $('div.custom-mode-surface-plan-compose', undefined, heading, hint, input, actions);
-		this.bodyEl.appendChild(form);
+		this.composeEl.appendChild(form);
 		queueMicrotask(() => input.focus());
 	}
 }

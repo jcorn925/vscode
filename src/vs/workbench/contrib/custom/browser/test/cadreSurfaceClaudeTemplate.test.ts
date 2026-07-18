@@ -5,6 +5,7 @@
 
 import * as assert from 'assert';
 import {
+	buildCadreClaudeMcpJson,
 	buildSurfacePlanKickoffPrompt,
 	buildWorkspacePlanKickoffPrompt,
 	CADRE_CLAUDE_SETTINGS_JSON,
@@ -52,7 +53,7 @@ suite('cadreSurfaceClaudeTemplate', () => {
 		assert.ok(prompt.includes('.agent/task-trees/cadre.graph-proposal.json'));
 		assert.ok(prompt.includes('Do not scaffold application code yet'));
 		assert.ok(prompt.includes('Keep the plan lean'));
-		assert.ok(prompt.includes('End the plan with a Proposal Graph section'));
+		assert.ok(prompt.includes('End the plan with a Proposed Code Graph section'));
 		assert.ok(prompt.includes('architecture notes'));
 		assert.ok(prompt.includes('phases'));
 		assert.ok(prompt.includes('draft_proposal_from_workspace'));
@@ -87,5 +88,12 @@ suite('cadreSurfaceClaudeTemplate', () => {
 		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('Bash(git clone --depth 1 https://github.com/* .agent/references/*)'));
 		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('Bash(sleep *)'));
 		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('mcp__ix-graph__draft_proposal_from_workspace'));
+	});
+
+	test('buildCadreClaudeMcpJson points stdio ix-graph at absolute script path', () => {
+		const json = buildCadreClaudeMcpJson('/abs/scripts/ix_graph_mcp.py');
+		const parsed = JSON.parse(json) as { mcpServers: { 'ix-graph': { command: string; args: string[] } } };
+		assert.strictEqual(parsed.mcpServers['ix-graph'].command, 'python3');
+		assert.deepStrictEqual(parsed.mcpServers['ix-graph'].args, ['/abs/scripts/ix_graph_mcp.py']);
 	});
 });
