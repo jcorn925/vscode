@@ -31,10 +31,13 @@ export function resolveDefaultSurfaceMainView(
 	return 'plan';
 }
 
-/** Maps legacy stored views onto Plan. */
+/** Maps legacy stored views onto Plan; Preview remains a real selectable view. */
 export function normalizeSurfaceMainView(value: string | undefined): SurfaceMainView | undefined {
-	if (value === 'taskTree' || value === 'claudeMd' || value === 'preview' || value === 'ixSubsystems') {
+	if (value === 'taskTree' || value === 'claudeMd' || value === 'ixSubsystems') {
 		return 'plan';
+	}
+	if (value === 'preview') {
+		return 'preview';
 	}
 	if (isSurfaceMainView(value)) {
 		return value;

@@ -38,3 +38,17 @@ export const CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_LINES = [
 ] as const;
 
 export const CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_GUIDANCE = CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_LINES.join('\n');
+
+/**
+ * Plan Steps hybrid routing: Custom AI orchestrates; Claude Code executes
+ * tool-heavy research / generate work. See surfacePlanOrchestration.ts.
+ */
+export const CUSTOM_AI_PLAN_STEPS_ROLE_LINES = [
+	'For Console Plan Steps, you are the goal/surface orchestrator: frame intent, acknowledge locks, choose the next phase, narrate status, and decide verify/repair.',
+	'Do not perform tool-heavy repo exploration, shell commands, or generate-phase coding when Claude Code is available for Plan Steps.',
+	'Claude Code owns research_survey, research_map, generate phases, and Enable Preview file edits via the Claude terminal and phase-progress.json.',
+	'Never edit `.workflow.json` or claim a Plan Step completed — the Console advances Steps only after phase-progress or Preview gates.',
+	'When an orchestration brief asks for DISPATCH_CLAUDE, emit that marker after a short summary and stop; do not implement the phase yourself.',
+] as const;
+
+export const CUSTOM_AI_PLAN_STEPS_ROLE_GUIDANCE = CUSTOM_AI_PLAN_STEPS_ROLE_LINES.join('\n');

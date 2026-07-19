@@ -26,10 +26,25 @@ import { ISearchService } from '../../../../services/search/common/search.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { detectLinks, getLinkSuffix } from './terminalLinkParsing.js';
 import { ITerminalLogService } from '../../../../../platform/terminal/common/terminal.js';
+import { ITerminalService } from '../../../terminal/browser/terminal.js';
+import { IModeService } from '../../../../../../custom/mode/ModeService.js';
+import { isClaudeTerminalTitle } from '../../../custom/browser/claudeTerminalKeys.js';
+
+/** True when the active terminal is a Mode Shell Claude Code session. */
+function isActiveClaudeTerminal(terminalService: ITerminalService): boolean {
+	const active = terminalService.activeInstance;
+	if (!active) {
+		return false;
+	}
+	return isClaudeTerminalTitle(active.title)
+		|| isClaudeTerminalTitle(active.shellLaunchConfig.name);
+}
 
 export class TerminalLocalFileLinkOpener implements ITerminalLinkOpener {
 	constructor(
 		@IEditorService private readonly _editorService: IEditorService,
+		@IModeService private readonly _modeService: IModeService,
+		@ITerminalService private readonly _terminalService: ITerminalService,
 	) {
 	}
 
@@ -46,6 +61,10 @@ export class TerminalLocalFileLinkOpener implements ITerminalLinkOpener {
 				endLineNumber: linkSuffix.rowEnd,
 				endColumn: linkSuffix.colEnd
 			};
+		}
+		// Claude links open behind the Console overlay unless we enter Code view first.
+		if (isActiveClaudeTerminal(this._terminalService) && this._modeService.getMode() !== 'Code') {
+			this._modeService.setMode('Code');
 		}
 		await this._editorService.openEditor({
 			resource: link.uri,

@@ -30,10 +30,10 @@ suite('surfaceMainViewHelpers', () => {
 		assert.strictEqual(resolveDefaultSurfaceMainView(undefined, false, true), 'plan');
 	});
 
-	test('normalizeSurfaceMainView maps all legacy views to plan', () => {
+	test('normalizeSurfaceMainView maps legacy views to plan but keeps preview', () => {
 		assert.strictEqual(normalizeSurfaceMainView('taskTree'), 'plan');
 		assert.strictEqual(normalizeSurfaceMainView('claudeMd'), 'plan');
-		assert.strictEqual(normalizeSurfaceMainView('preview'), 'plan');
+		assert.strictEqual(normalizeSurfaceMainView('preview'), 'preview');
 		assert.strictEqual(normalizeSurfaceMainView('ixSubsystems'), 'plan');
 		assert.strictEqual(normalizeSurfaceMainView('plan'), 'plan');
 		assert.strictEqual(normalizeSurfaceMainView('nope'), undefined);

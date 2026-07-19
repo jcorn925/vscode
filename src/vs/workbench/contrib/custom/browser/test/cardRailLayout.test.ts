@@ -51,6 +51,22 @@ suite('cardRailLayout', () => {
 		layout.dispose();
 	});
 
+	test('revealLabel renders a labeled left-edge tab when collapsed', () => {
+		const layout = createCardRailLayout({
+			activeId: 'plan',
+			cards: [{ id: 'plan', key: 'Plan', value: 'plan.md' }],
+			onSelect: () => { },
+			autoHideMs: 10,
+			revealLabel: 'Console',
+		});
+		const reveal = layout.root.querySelector('.custom-mode-card-rail-reveal') as HTMLElement;
+		assert.ok(reveal);
+		assert.ok(reveal.classList.contains('has-label'));
+		assert.strictEqual(reveal.textContent, 'Console');
+		assert.strictEqual(reveal.getAttribute('aria-label'), 'Show Console');
+		layout.dispose();
+	});
+
 	test('setCards is a no-op when items are unchanged', () => {
 		const layout = createCardRailLayout({
 			activeId: 'plan',
@@ -107,6 +123,63 @@ suite('cardRailLayout', () => {
 		const label = layout.rail.querySelector('.custom-mode-card-rail-group-label');
 		assert.ok(label);
 		assert.strictEqual(label?.textContent, 'New Surface');
+		layout.dispose();
+	});
+
+	test('assocGroup wraps associated section cards in an outline host', () => {
+		const layout = createCardRailLayout({
+			activeId: 'surfaceSection:plan',
+			cards: [
+				{ id: 'surface:a', key: 'Surface', value: 'Cadre' },
+				{ id: 'surfaceSection:rules', key: 'Rules', value: 'CLAUDE.md', groupStart: true, assocGroup: 'surface:a' },
+				{ id: 'surfaceSection:plan', key: 'Plan', value: 'plan.md', assocGroup: 'surface:a' },
+			],
+			onSelect: () => { },
+		});
+		const assoc = layout.rail.querySelector('.custom-mode-card-rail-assoc') as HTMLElement | null;
+		assert.ok(assoc);
+		assert.strictEqual(assoc?.dataset.assocGroup, 'surface:a');
+		assert.strictEqual(assoc?.querySelectorAll('button.custom-mode-card-rail-card').length, 2);
+		assert.ok(layout.rail.querySelector('button[data-card-id="surface:a"]'));
+		assert.ok(!assoc?.contains(layout.rail.querySelector('button[data-card-id="surface:a"]')!));
+		assert.ok(assoc?.querySelector('button[data-card-id="surfaceSection:plan"]')?.classList.contains('active'));
+		layout.dispose();
+	});
+
+	test('assocGroup draws a stem from the parent card to the outlined group', async () => {
+		const layout = createCardRailLayout({
+			activeId: 'surfaceSection:plan',
+			cards: [
+				{ id: 'surface:a', key: 'Surface', value: 'Cadre' },
+				{ id: 'surfaceSection:plan', key: 'Plan', value: 'plan.md', groupStart: true, assocGroup: 'surface:a' },
+			],
+			onSelect: () => { },
+		});
+		document.body.appendChild(layout.root);
+		await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+		const rect = (top: number, height: number, left: number, width: number): DOMRect => ({
+			top,
+			bottom: top + height,
+			left,
+			right: left + width,
+			width,
+			height,
+			x: left,
+			y: top,
+			toJSON: () => ({}),
+		});
+		const owner = layout.rail.querySelector('button[data-card-id="surface:a"]') as HTMLElement;
+		const assoc = layout.rail.querySelector('.custom-mode-card-rail-assoc') as HTMLElement;
+		assert.ok(owner);
+		assert.ok(assoc);
+		layout.rail.getBoundingClientRect = () => rect(0, 200, 0, 220);
+		owner.getBoundingClientRect = () => rect(8, 48, 16, 90);
+		assoc.getBoundingClientRect = () => rect(80, 90, 16, 188);
+		// Scroll handler re-runs connector layout against the mocked boxes.
+		layout.rail.dispatchEvent(new Event('scroll'));
+		await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+		assert.ok(owner.classList.contains('assoc-owner'));
+		assert.ok(layout.rail.querySelector('.custom-mode-card-rail-assoc-stem'));
 		layout.dispose();
 	});
 
@@ -172,6 +245,26 @@ suite('cardRailLayout', () => {
 		assert.deepStrictEqual(clampCardRailWidth(12), CARD_RAIL_MIN_WIDTH);
 		assert.ok(widths.includes(CARD_RAIL_MIN_WIDTH));
 		assert.ok(widths.includes(CARD_RAIL_MAX_WIDTH));
+		layout.dispose();
+	});
+
+	test('autoHideMs collapses after idle and reveals on left-edge pointermove', async () => {
+		const layout = createCardRailLayout({
+			cards: [{ id: 'plan', key: 'Plan', value: 'plan.md' }],
+			onSelect: () => { },
+			autoHideMs: 20,
+		});
+		assert.ok(layout.root.querySelector('.custom-mode-card-rail-reveal'));
+		assert.ok(!layout.root.classList.contains('collapsed'));
+		await new Promise<void>(resolve => setTimeout(resolve, 40));
+		assert.ok(layout.root.classList.contains('collapsed'));
+		layout.root.dispatchEvent(new PointerEvent('pointermove', { clientX: 2, clientY: 8, bubbles: true }));
+		assert.ok(!layout.root.classList.contains('collapsed'));
+		layout.rail.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }));
+		await new Promise<void>(resolve => setTimeout(resolve, 40));
+		assert.ok(layout.root.classList.contains('collapsed'));
+		layout.rail.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+		assert.ok(!layout.root.classList.contains('collapsed'));
 		layout.dispose();
 	});
 });

@@ -45,7 +45,12 @@ import {
 	type SurfacePhaseProgressDocument,
 } from '../../../../../custom/goalWorkspace/surfacePhaseProgress.js';
 import {
+	ENABLE_PREVIEW_STEP,
+	ENABLE_PREVIEW_STEP_ID,
+	VERIFY_GRAPH_STEP,
+	VERIFY_GRAPH_STEP_ID,
 	isSurfacePlanLocked,
+	isSurfacePreviewWired,
 	markSurfacePlanLocked,
 	resolveSurfacePlanWorkflowStatus,
 	type SurfacePlanWorkflowAction,
@@ -54,6 +59,15 @@ import {
 	type SurfacePlanWorkflowSignals,
 	type SurfacePlanWorkflowStepState,
 } from '../../../../../custom/goalWorkspace/surfacePlanWorkflowStatus.js';
+import {
+	isBlockerStepId,
+	loadAndProbeSurfaceBlockers,
+	openBlockerStepRefs,
+	resolveBlockerInDocument,
+	serializeSurfaceBlockersDocument,
+	surfaceBlockersResource,
+	type SurfaceBlockersDocument,
+} from '../../../../../custom/goalWorkspace/surfaceBlockers.js';
 import { discoverIxSubsystemRegions } from '../../../../../custom/goalWorkspace/surfaceBlueprintIxDiscovery.js';
 import type { WorkspaceSurface } from '../../../../../custom/goalWorkspace/ConsoleService.js';
 import { resolveSurfacePathForIx, scopeIxRegionsToSurface } from '../../../../../custom/goalWorkspace/surfaceIxScope.js';
@@ -63,6 +77,7 @@ import { buildProposalDiffGraph, buildProposalPreviewGraph } from './proposalGra
 import { partitionProposalWorkstreams } from './proposalGraphDiff/partitionProposalWorkstreams.js';
 import type { GraphProposalDocument, ProposalCompareSnapshot } from './proposalGraphDiff/proposalGraphDiffTypes.js';
 import { computeSurfaceProposalProgress } from './surfaceProposalProgress.js';
+import { phaseIdsToCompleteFromStructuralPass } from './surfaceStepsStructuralReconcile.js';
 import { SurfaceProposalTreeView, type SurfaceProposalTreeCardItem, type SurfaceProposalTreeDocumentOptions, type SurfaceProposalTreeGraphRegion, type SurfaceProposalTreePreviewInfo } from './surfaceProposalTreeView.js';
 
 /** Latest ix compare_proposal snapshot used for Files/Relationships/Workstreams card progress. */
@@ -106,6 +121,9 @@ export interface SurfacePlanNextActionRequest {
 export interface SurfacePlanOwningSurfaceRequest {
 	readonly surfaceId: string;
 	readonly surfaceName: string;
+	/** When set, ModeShell should open the card associated with this Plan step. */
+	readonly stepId?: string;
+	readonly stepKind?: SurfacePlanWorkflowStepState['kind'];
 }
 
 export class SurfacePlanPanel extends Disposable {
@@ -145,11 +163,13 @@ export class SurfacePlanPanel extends Disposable {
 	private lastProposalPhases: readonly SurfacePlanWorkflowPhaseRef[] = [];
 	private workflowDocument: SurfacePlanWorkflowDocument | undefined;
 	private phaseProgressDocument: SurfacePhaseProgressDocument | undefined;
+	private blockersDocument: SurfaceBlockersDocument | undefined;
 	private loadGeneration = 0;
 	private candidates: SurfaceReferenceCandidates | undefined;
 	private candidatesWriteInFlight = false;
 	private workflowWriteInFlight = false;
 	private phaseProgressWriteInFlight = false;
+	private blockersWriteInFlight = false;
 	private nextActionInFlight = false;
 	private hasPlanContent = false;
 	private hasDraftProposal = false;
@@ -158,6 +178,18 @@ export class SurfacePlanPanel extends Disposable {
 	private lastStatusStepSignature: string | undefined;
 	private lastCenteredStepId: string | undefined;
 	private statusScrollSyncScheduled = false;
+
+	/** Status tracker DOM for Mode Shell's top Steps panel. */
+	get statusTrackerElement(): HTMLElement {
+		return this.statusTrackerEl;
+	}
+
+	/** Mount the Steps tracker into the shell top-panel host. */
+	attachStatusTracker(host: HTMLElement): void {
+		if (this.statusTrackerEl.parentElement !== host) {
+			host.appendChild(this.statusTrackerEl);
+		}
+	}
 
 	constructor(
 		private readonly root: HTMLElement,
@@ -200,7 +232,8 @@ export class SurfacePlanPanel extends Disposable {
 		);
 		this.composeEl = $('div.custom-mode-surface-plan-compose-host.hidden');
 		this.treeAnchor = $('div.custom-mode-surface-plan-tree-anchor');
-		this.root.appendChild($('div.custom-mode-surface-plan', undefined, this.statusTrackerEl, this.composeEl, this.treeAnchor));
+		// Steps tracker mounts into the Mode Shell top panel (not the content canvas).
+		this.root.appendChild($('div.custom-mode-surface-plan', undefined, this.composeEl, this.treeAnchor));
 
 		this.treeView = this._register(new SurfaceProposalTreeView(webviewService, () => this.treeView.republish()));
 		this.onDidChangeCards = this.treeView.onDidChangeCards;
@@ -253,6 +286,7 @@ export class SurfacePlanPanel extends Disposable {
 		this.lastProposalPhases = [];
 		this.workflowDocument = undefined;
 		this.phaseProgressDocument = undefined;
+		this.blockersDocument = undefined;
 		this.candidates = undefined;
 		this.hasPlanContent = false;
 		this.hasDraftProposal = false;
@@ -294,6 +328,7 @@ export class SurfacePlanPanel extends Disposable {
 			this.lastProposalPhases = [];
 			this.workflowDocument = undefined;
 			this.phaseProgressDocument = undefined;
+			this.blockersDocument = undefined;
 			this.renderStatusTracker();
 			this.clearCompose();
 			this.showTreeMessage(localize('surfacePlan.noWorkspace', 'Open a workspace folder to load plan.md.'));
@@ -310,6 +345,10 @@ export class SurfacePlanPanel extends Disposable {
 			return;
 		}
 		await this.refreshPhaseProgress(workspaceFolder, surfaceId, generation);
+		if (generation !== this.loadGeneration) {
+			return;
+		}
+		await this.refreshBlockersDocument(workspaceFolder, surfaceId, surfacePath, generation);
 		if (generation !== this.loadGeneration) {
 			return;
 		}
@@ -424,16 +463,26 @@ export class SurfacePlanPanel extends Disposable {
 			}
 		}
 
+		const snapshot = await this.loadProposalCompareSnapshot(workspaceFolder);
+		if (generation !== this.loadGeneration) {
+			return;
+		}
+		// Catch Steps up to durable progress: pending phase-progress handshake, then a
+		// full structural compare pass can complete remaining generate phases.
+		await this.applyPhaseProgressUpdate();
+		if (generation !== this.loadGeneration) {
+			return;
+		}
+		await this.reconcileStructuralPhaseSteps(proposal, snapshot);
+		if (generation !== this.loadGeneration) {
+			return;
+		}
 		await this.syncWorkflowDocument(workspaceFolder, surfaceId);
 		if (generation !== this.loadGeneration) {
 			return;
 		}
 		this.renderStatusTracker();
 		this.treeAnchor.classList.remove('hidden');
-		const snapshot = await this.loadProposalCompareSnapshot(workspaceFolder);
-		if (generation !== this.loadGeneration) {
-			return;
-		}
 		const partition = proposal ? partitionProposalWorkstreams(proposal) : undefined;
 		const graph = proposal
 			? (snapshot ? buildProposalDiffGraph(proposal, snapshot) : buildProposalPreviewGraph(proposal))
@@ -512,13 +561,22 @@ export class SurfacePlanPanel extends Disposable {
 				// best-effort
 			}
 			const regions = await discoverIxSubsystemRegions(this.ixIntegrationService, workspaceFolder);
+			if (!regions.length) {
+				return {
+					regions: [],
+					message: localize(
+						'surfacePlan.graphDiscoverEmpty',
+						'Ix returned no subsystems for this workspace. Run `ix map --all-items .` (and ensure the Ix backend is up), then refresh.',
+					),
+				};
+			}
 			const scoped = scopeIxRegionsToSurface(regions, surface, surfacePath);
 			if (!scoped.length) {
 				return {
 					regions: [],
 					message: localize(
 						'surfacePlan.graphEmpty',
-						'No Ix subsystems matched this surface yet. Map the surface path or refresh after scaffold.',
+						'No Ix subsystems matched this surface yet. Map the surface path, set surface.ixSubsystems in workspace.goal.json, or refresh after scaffold.',
 					),
 				};
 			}
@@ -573,6 +631,11 @@ export class SurfacePlanPanel extends Disposable {
 			store.add(this.fileService.watch(taskTreesFolder(workspaceFolder)));
 			store.add(this.fileService.watch(joinPath(workspaceFolder, '.ix-scaffold', 'graph-compare')));
 			store.add(this.fileService.watch(workspaceFolder));
+			const surfaceAppPath = surfacePath?.trim() || `apps/${surfaceId}`;
+			const surfaceAppSegments = surfaceAppPath.split('/').filter(Boolean);
+			if (surfaceAppSegments.length) {
+				store.add(this.fileService.watch(joinPath(workspaceFolder, ...surfaceAppSegments)));
+			}
 			store.add(this.fileService.onDidFilesChange(e => {
 				if (
 					!this.lastOptions
@@ -580,6 +643,7 @@ export class SurfacePlanPanel extends Disposable {
 					|| this.candidatesWriteInFlight
 					|| this.workflowWriteInFlight
 					|| this.phaseProgressWriteInFlight
+					|| this.blockersWriteInFlight
 				) {
 					return;
 				}
@@ -602,6 +666,25 @@ export class SurfacePlanPanel extends Disposable {
 					});
 					return;
 				}
+				const blockersUri = surfaceBlockersResource(workspaceFolder, surfaceId);
+				const envExampleUri = joinPath(workspaceFolder, ...surfaceAppSegments, '.env.example');
+				const envLocalUri = joinPath(workspaceFolder, ...surfaceAppSegments, '.env.local');
+				const envUri = joinPath(workspaceFolder, ...surfaceAppSegments, '.env');
+				if (
+					e.affects(blockersUri)
+					|| e.affects(envExampleUri)
+					|| e.affects(envLocalUri)
+					|| e.affects(envUri)
+				) {
+					void this.refreshBlockersDocument(workspaceFolder, surfaceId, surfacePath, this.loadGeneration).then(() => {
+						this.renderStatusTracker();
+						void this.persistResolvedWorkflow(
+							resolveSurfacePlanWorkflowStatus(this.workflowSignals()).steps,
+						);
+					});
+					return;
+				}
+				// Reload so load() can reconcile Steps from a newly written full pass.
 				const compareSnapshotUri = proposalCompareSnapshotResource(workspaceFolder);
 				if (e.affects(compareSnapshotUri) || e.contains(compareSnapshotUri)) {
 					void this.load(this.lastOptions);
@@ -670,8 +753,9 @@ export class SurfacePlanPanel extends Disposable {
 	}
 
 	private workflowSignals(): SurfacePlanWorkflowSignals {
+		const surface = this.lastOptions?.surface;
 		return {
-			surfaceConfirmed: this.lastOptions ? Boolean(this.lastOptions.surface) : undefined,
+			surfaceConfirmed: this.lastOptions ? Boolean(surface) : undefined,
 			hasPlanContent: this.hasPlanContent,
 			hasCandidates: Boolean(this.candidates?.repos.length),
 			candidatesStatus: this.candidates?.status,
@@ -682,6 +766,11 @@ export class SurfacePlanPanel extends Disposable {
 			completedStepIds: completedStepIdsFromWorkflow(this.workflowDocument),
 			phaseInFlightStepId: phaseInFlightStepIdFromProgress(this.phaseProgressDocument),
 			failedPhaseStepId: failedPhaseStepIdFromProgress(this.phaseProgressDocument),
+			previewEnabled: isSurfacePreviewWired({
+				localUrl: this.lastOptions?.localUrl ?? surface?.localUrl,
+				devCommand: surface?.devCommand,
+			}),
+			openBlockers: openBlockerStepRefs(this.blockersDocument),
 		};
 	}
 
@@ -760,13 +849,18 @@ export class SurfacePlanPanel extends Disposable {
 		);
 	}
 
-	private emitSelectOwningSurface(): void {
+	private emitSelectOwningSurface(step?: Pick<SurfacePlanWorkflowStepState, 'id' | 'kind'>): void {
 		const surfaceId = this.lastOptions?.surfaceId?.trim();
 		const surfaceName = this.owningSurfaceName();
 		if (!surfaceId || !surfaceName) {
 			return;
 		}
-		this._onDidSelectOwningSurface.fire({ surfaceId, surfaceName });
+		this._onDidSelectOwningSurface.fire({
+			surfaceId,
+			surfaceName,
+			stepId: step?.id,
+			stepKind: step?.kind,
+		});
 	}
 
 	private renderStatusSteps(steps: readonly SurfacePlanWorkflowStepState[]): void {
@@ -828,7 +922,7 @@ export class SurfacePlanPanel extends Disposable {
 						return;
 					}
 					event.preventDefault();
-					this.emitSelectOwningSurface();
+					this.emitSelectOwningSurface(step);
 				}));
 			}
 			if (index < steps.length - 1) {
@@ -1017,6 +1111,52 @@ export class SurfacePlanPanel extends Disposable {
 		}
 	}
 
+	private async refreshBlockersDocument(
+		workspaceFolder: URI,
+		surfaceId: string,
+		surfacePath: string | undefined,
+		generation: number,
+	): Promise<void> {
+		this.blockersWriteInFlight = true;
+		try {
+			const doc = await loadAndProbeSurfaceBlockers(
+				this.fileService,
+				workspaceFolder,
+				surfaceId,
+				surfacePath ?? this.lastOptions?.surface?.path,
+			);
+			if (generation !== this.loadGeneration) {
+				return;
+			}
+			this.blockersDocument = doc;
+		} catch {
+			if (generation !== this.loadGeneration) {
+				return;
+			}
+			this.blockersDocument = undefined;
+		} finally {
+			this.blockersWriteInFlight = false;
+		}
+	}
+
+	private async writeBlockersDocument(doc: SurfaceBlockersDocument): Promise<void> {
+		const options = this.lastOptions;
+		if (!options?.workspaceFolder) {
+			return;
+		}
+		this.blockersWriteInFlight = true;
+		try {
+			await this.fileService.createFolder(joinPath(options.workspaceFolder, '.agent', 'surfaces'));
+			await this.fileService.writeFile(
+				surfaceBlockersResource(options.workspaceFolder, options.surfaceId),
+				VSBuffer.fromString(serializeSurfaceBlockersDocument(doc)),
+			);
+			this.blockersDocument = doc;
+		} finally {
+			this.blockersWriteInFlight = false;
+		}
+	}
+
 	/**
 	 * Claude finished (or failed) a phase via phase-progress.json.
 	 * Console owns marking workflow.json completed.
@@ -1029,9 +1169,20 @@ export class SurfacePlanPanel extends Disposable {
 			return;
 		}
 		if (progress.status === 'completed' && progress.stepId) {
-			const alreadyDone = completedStepIdsFromWorkflow(this.workflowDocument).includes(progress.stepId);
-			if (!alreadyDone) {
-				await this.markStepCompleted(progress.stepId);
+			if (isBlockerStepId(progress.stepId) && this.blockersDocument) {
+				const resolved = resolveBlockerInDocument(this.blockersDocument, progress.stepId);
+				await this.writeBlockersDocument(resolved);
+				await this.refreshBlockersDocument(
+					options.workspaceFolder,
+					options.surfaceId,
+					options.surfacePath ?? options.surface?.path,
+					this.loadGeneration,
+				);
+			} else {
+				const alreadyDone = completedStepIdsFromWorkflow(this.workflowDocument).includes(progress.stepId);
+				if (!alreadyDone) {
+					await this.markStepCompleted(progress.stepId);
+				}
 			}
 			await this.writePhaseProgress(createIdlePhaseProgress(options.surfaceId, progress));
 			this.renderStatusTracker();
@@ -1102,6 +1253,10 @@ export class SurfacePlanPanel extends Disposable {
 		}
 	}
 
+	/**
+	 * Console owns durable Step file writes here. ModeShell then runs Custom AI
+	 * orchestration and dispatches tool-heavy work to Claude (see surfacePlanOrchestration).
+	 */
 	private async runStatusNextAction(): Promise<void> {
 		const actionId = this.statusNextActionButton.dataset.actionId as SurfacePlanWorkflowActionId | undefined;
 		const stepId = this.statusNextActionButton.dataset.stepId;
@@ -1126,9 +1281,15 @@ export class SurfacePlanPanel extends Disposable {
 				case 'run_next_phase': {
 					// Start phase in-flight — Claude writes completed to phase-progress.json.
 					const rawLabel = this.statusNextActionButton.textContent?.trim() ?? '';
-					const stepLabel = this.lastProposalPhases.find(phase => phase.id === stepId)?.title
-						|| rawLabel.replace(/^Retry:\s*/i, '').trim()
-						|| stepId;
+					const openBlocker = openBlockerStepRefs(this.blockersDocument).find(blocker => blocker.id === stepId);
+					const stepLabel = stepId === VERIFY_GRAPH_STEP_ID
+						? VERIFY_GRAPH_STEP.label
+						: stepId === ENABLE_PREVIEW_STEP_ID
+							? ENABLE_PREVIEW_STEP.label
+							: (openBlocker?.label
+								|| this.lastProposalPhases.find(phase => phase.id === stepId)?.title
+								|| rawLabel.replace(/^Retry:\s*/i, '').trim()
+								|| stepId);
 					await this.writePhaseProgress(createRunningPhaseProgress({
 						surfaceId: this.lastOptions.surfaceId,
 						stepId,
@@ -1207,24 +1368,56 @@ export class SurfacePlanPanel extends Disposable {
 		this.emitNextAction('lock_plan', stepId, localize('surfacePlan.lockPlanStep', 'Lock plan and start build'));
 	}
 
+	/**
+	 * When the latest compare snapshot is a full structural pass against this
+	 * surface's proposal, mark every still-incomplete generate phase complete.
+	 * Does not touch Enable Preview or blockers.
+	 */
+	private async reconcileStructuralPhaseSteps(
+		proposal: GraphProposalDocument | undefined,
+		snapshot: ProposalCompareSnapshot | undefined,
+	): Promise<void> {
+		if (!this.planLocked || !proposal || this.lastProposalPhases.length === 0) {
+			return;
+		}
+		const phaseIds = phaseIdsToCompleteFromStructuralPass({
+			proposal,
+			snapshot,
+			proposalPhases: this.lastProposalPhases,
+			completedStepIds: completedStepIdsFromWorkflow(this.workflowDocument),
+		});
+		if (phaseIds.length === 0) {
+			return;
+		}
+		await this.markStepsCompleted(phaseIds);
+	}
+
 	private async markStepCompleted(stepId: string): Promise<void> {
+		await this.markStepsCompleted([stepId]);
+	}
+
+	private async markStepsCompleted(stepIds: readonly string[]): Promise<void> {
 		const options = this.lastOptions;
-		if (!options?.workspaceFolder) {
+		if (!options?.workspaceFolder || stepIds.length === 0) {
+			return;
+		}
+		const toComplete = new Set(stepIds.filter(id => id.trim()));
+		if (toComplete.size === 0) {
 			return;
 		}
 		const status = resolveSurfacePlanWorkflowStatus({
 			...this.workflowSignals(),
-			// Completing this step — ignore in-flight for the merge snapshot.
+			// Completing these steps — ignore in-flight for the merge snapshot.
 			phaseInFlightStepId: undefined,
 			failedPhaseStepId: undefined,
-			completedStepIds: [...completedStepIdsFromWorkflow(this.workflowDocument), stepId],
+			completedStepIds: [...completedStepIdsFromWorkflow(this.workflowDocument), ...toComplete],
 		});
 		const merged = mergeWorkflowSteps(options.surfaceId, status.steps, this.workflowDocument);
 		const now = new Date().toISOString();
 		this.workflowDocument = {
 			...merged,
 			steps: merged.steps.map(step =>
-				step.id === stepId
+				toComplete.has(step.id)
 					? { ...step, status: 'completed', completedAt: step.completedAt ?? now }
 					: step
 			),

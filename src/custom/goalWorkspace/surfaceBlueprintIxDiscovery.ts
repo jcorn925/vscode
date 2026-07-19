@@ -12,18 +12,31 @@ export async function discoverIxSubsystemRegions(
 	workspaceFolder: URI,
 ): Promise<readonly IxSubsystemRegion[]> {
 	await ix.ensureIxMappedIfEmpty(workspaceFolder);
-	const res = await ix.runJsonQuery(
-		['subsystems', '--list', '--detailed', '--sort', 'importance', '--format', 'json'],
-		workspaceFolder,
-		90_000,
-	);
+	const res = await runSubsystemsListDetailed(ix, workspaceFolder);
 	if (!res.ok) {
 		return [];
 	}
 	return toIxSubsystemRegions(parseIxSubsystemRegions(res.value));
 }
 
-function parseIxSubsystemRegions(json: unknown): readonly {
+/** Prefer --all-items when supported; fall back if the CLI rejects the flag. */
+async function runSubsystemsListDetailed(
+	ix: IIxIntegrationService,
+	workspaceFolder: URI,
+): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
+	const base = ['subsystems', '--list', '--detailed', '--sort', 'importance', '--format', 'json'] as const;
+	const withAllItems = await ix.runJsonQuery([...base, '--all-items'], workspaceFolder, 90_000);
+	if (withAllItems.ok) {
+		return withAllItems;
+	}
+	if (/unknown|unrecognized|unexpected|invalid.*option|--all-items/i.test(withAllItems.error)) {
+		return ix.runJsonQuery([...base], workspaceFolder, 90_000);
+	}
+	return withAllItems;
+}
+
+/** Exported for unit tests. */
+export function parseIxSubsystemRegions(json: unknown): readonly {
 	regionId: string;
 	name: string;
 	entryPath?: string;
@@ -59,9 +72,29 @@ function regionRecords(json: unknown): Record<string, unknown>[] {
 	if (!isRecord(json)) {
 		return [];
 	}
-	for (const key of ['scores', 'regions', 'subsystems', 'items', 'results', 'data']) {
+	// Well-known wrappers from ix CLI / overlay snapshots.
+	for (const key of ['scores', 'regions', 'subsystems', 'discoveredSubsystems', 'items', 'results', 'data']) {
 		const value = json[key];
 		if (Array.isArray(value)) {
+			return value.filter((item): item is Record<string, unknown> => isRecord(item));
+		}
+	}
+	// Last resort: any top-level array whose first element looks like a region.
+	for (const value of Object.values(json)) {
+		if (!Array.isArray(value) || value.length === 0) {
+			continue;
+		}
+		const first = value[0];
+		if (
+			isRecord(first)
+			&& (
+				typeof first.region_id === 'string'
+				|| typeof first.regionId === 'string'
+				|| typeof first.id === 'string'
+				|| typeof first.label === 'string'
+				|| typeof first.label_kind === 'string'
+			)
+		) {
 			return value.filter((item): item is Record<string, unknown> => isRecord(item));
 		}
 	}

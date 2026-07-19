@@ -83,6 +83,36 @@ that phase, update the same file to \`status: "completed"\` (same \`stepId\` /
 sees \`completed\`. Do not start the next phase until Console Next kicks it.
 Do not begin generate phases on Plan lock alone — wait for Next.
 
+## Code Graph (Console-owned gate)
+
+After generate phases finish — and **before** Enable Preview — Console shows a
+**Code Graph** Steps row (\`verify_graph\`). When Console Next kicks it, run
+\`remap_and_wait\` + \`compare_proposal\` against
+\`.agent/task-trees/<surface-id>.graph-proposal.json\`, then mark phase-progress
+\`completed\` for \`verify_graph\`. Do not invent \`.workflow.json\` completions.
+Do not start Enable Preview until Code Graph is completed.
+
+## Enable Preview (Console-owned gate)
+
+After Code Graph finishes, Console shows an **Enable Preview** Steps row.
+That step is done only when this surface in \`workspace.goal.json\` has both
+\`localUrl\` (e.g. \`http://localhost:<unique-port>\`) and \`devCommand\` that
+serves it (prefer \`npm run dev --prefix apps/<surface-id> -- --port <port>\`).
+When Console Next kicks \`enable_preview\`, write those fields (and \`path\` if
+missing), then mark phase-progress \`completed\`. Do not invent \`.workflow.json\`
+completions. Local Preview is enough — public deploy is optional.
+
+## Operational blockers (Console-owned gate)
+
+After Enable Preview, Console may show **blocker** Steps from
+\`.agent/surfaces/<surface-id>.blockers.json\` (e.g. missing \`.env.local\` keys
+from \`.env.example\`). Console auto-probes env keys; you may also append
+\`kind: "manual"\` open blockers when you discover operational gaps (API keys,
+webhooks, etc.). Never invent secrets — ask the human to paste real values.
+When Console Next kicks \`blocker:…\`, clear that blocker, then mark
+phase-progress \`completed\` (and/or set the blocker \`status: "resolved"\`).
+Do not invent \`.workflow.json\` completions.
+
 ## Research recipe (planning only)
 
 Draft graph shape from a real comparable repo **first**, then adapt it to this
@@ -149,6 +179,8 @@ Write/destructive commands stay gated.
 | \`.agent/surfaces/<id>.reference-candidates.json\` | Found GitHub priors; user selects which to clone/map |
 | \`.agent/surfaces/<id>.phase-progress.json\` | Claude↔Console phase handshake (\`running\` / \`completed\` / \`failed\`) |
 | \`.agent/surfaces/<id>.workflow.json\` | Console-owned Steps row (do not invent completions) |
+| \`.agent/surfaces/<id>.blockers.json\` | Operational blockers (env keys / agent-declared gaps) |
+| \`workspace.goal.json\` | Surface registry — Preview needs \`localUrl\` + \`devCommand\` |
 | \`.agent/references/*\` | Shallow clones for planning maps only |
 
 ### Plan vs Proposal split

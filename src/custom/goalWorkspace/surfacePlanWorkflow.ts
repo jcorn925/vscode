@@ -113,7 +113,7 @@ function normalizeStep(value: unknown): SurfacePlanWorkflowStepState | undefined
 	if (!id || !label) {
 		return undefined;
 	}
-	const kind = record.kind === 'stage' || record.kind === 'action' || record.kind === 'phase'
+	const kind = record.kind === 'stage' || record.kind === 'action' || record.kind === 'phase' || record.kind === 'blocker'
 		? record.kind
 		: 'stage';
 	const status = normalizeStatus(record.status);

@@ -42,10 +42,16 @@ export function scopeIxRegionsToSurface(
 		...(surface.ix?.subsystemIds ?? []),
 		...(surface.ix?.subsystemLabels ?? []),
 	].map(normalizeIxText).filter(Boolean));
-	const declaredMatched = regions.filter(region =>
-		declaredValues.has(normalizeIxText(region.regionId))
-		|| declaredValues.has(normalizeIxText(region.name))
-	);
+	// Match declared metadata against id/name/path (same candidates as matchSurfaceToIxSubsystems).
+	const declaredMatched = regions.filter(region => {
+		const candidates = [
+			region.regionId,
+			region.name,
+			region.entryPath ?? '',
+			...(region.memberFiles ?? []),
+		].map(normalizeIxText).filter(Boolean);
+		return candidates.some(candidate => declaredValues.has(candidate));
+	});
 
 	const byId = new Map<string, IxSubsystemRegion>();
 	for (const region of [...pathScoped, ...declaredMatched]) {

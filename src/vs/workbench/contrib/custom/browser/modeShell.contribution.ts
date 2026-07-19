@@ -16,7 +16,7 @@ import { URI, UriComponents } from '../../../../base/common/uri.js';
 import { basename, extUri, isEqual, isEqualOrParent, joinPath, resolvePath } from '../../../../base/common/resources.js';
 import { localize } from '../../../../nls.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
-import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
+import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
@@ -29,6 +29,10 @@ import { collectUniqueSurfacePorts, parsePortFromLocalUrl } from '../../../../..
 import { IDefaultProjectService } from '../../../../../custom/devserver/DefaultProjectService.js';
 import { IModeService, Mode } from '../../../../../custom/mode/ModeService.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
+import { ILabelService, Verbosity } from '../../../../platform/label/common/label.js';
+import { splitRecentLabel } from '../../../../base/common/labels.js';
+import { IHostService } from '../../../services/host/browser/host.js';
+import { IRecentWorkspace, IWorkspacesService, isRecentFolder, isRecentWorkspace } from '../../../../platform/workspaces/common/workspaces.js';
 import { ITerminalService, type ITerminalInstance } from '../../terminal/browser/terminal.js';
 import { TerminalExitReason } from '../../../../platform/terminal/common/terminal.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
@@ -41,11 +45,11 @@ import { IDialogService, IFileDialogService } from '../../../../platform/dialogs
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { INativeEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { createUiClickOverlayScript, UiClickOverlayMessage } from './uiClickOverlayScript.js';
-import { IChatService, type IChatModelReference } from '../../chat/common/chatService/chatService.js';
+import { ChatSendResult, IChatService, ResponseModelState, type IChatModelReference } from '../../chat/common/chatService/chatService.js';
 import { IChatWidgetService } from '../../chat/browser/chat.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { ChatWidget } from '../../chat/browser/widget/chatWidget.js';
-import { ChatAgentLocation, ChatModeKind } from '../../chat/common/constants.js';
+import { ChatAgentLocation, ChatModeKind, ChatPermissionLevel } from '../../chat/common/constants.js';
 import type { IChatRequestFileEntry } from '../../chat/common/attachments/chatVariableEntries.js';
 import { ILanguageModelsService } from '../../chat/common/languageModels.js';
 import { IPluginGitService } from '../../chat/common/plugins/pluginGitService.js';
@@ -89,6 +93,14 @@ import { SetupGuidePanel } from './setupGuidePanel.js';
 import { IConsoleService, type WorkspaceSurface } from '../../../../../custom/goalWorkspace/ConsoleService.js';
 import { buildCadreClaudeMcpJson, buildSurfacePlanKickoffPrompt, buildWorkspacePlanKickoffPrompt, CADRE_CLAUDE_SETTINGS_JSON, CADRE_INSPECT_GOAL_WORKSPACE_PY, CADRE_SURFACE_CLAUDE_MD } from '../../../../../custom/goalWorkspace/cadreSurfaceClaudeTemplate.js';
 import {
+	buildClaudeDispatchNotification,
+	buildSurfacePlanOrchestrationPrompt,
+	parseDispatchClaudeMarker,
+	shouldExecuteClaudeAfterOrchestration,
+	shouldOrchestratePlanAction,
+	type SurfacePlanOrchestrationActionId,
+} from '../../../../../custom/goalWorkspace/surfacePlanOrchestration.js';
+import {
 	DEFAULT_WORKSPACE_PLAN_BUSINESS_NAME,
 	DEFAULT_WORKSPACE_PLAN_INTENT,
 	DEFAULT_WORKSPACE_PLAN_MARKDOWN,
@@ -113,6 +125,7 @@ import {
 	type ConsoleWorkflowStepState,
 } from '../../../../../custom/goalWorkspace/consoleWorkflowStatus.js';
 import { resolveSurfacePendingPlanAction } from '../../../../../custom/goalWorkspace/surfacePlanPendingAction.js';
+import { resolveSurfaceSectionIdForStep } from '../../../../../custom/goalWorkspace/surfacePlanWorkflowStatus.js';
 import {
 	brandFolderResource,
 	deleteGoalWorkspaceSurface,
@@ -156,7 +169,14 @@ import type { WorkflowSpec, WorkflowStep } from '../../../../../custom/goalWorks
 import { buildTaskPrompt } from './agentTaskTreeChatExecutor.js';
 import { SurfacePlanPanel } from './surfacePlanPanel.js';
 import { SurfaceClaudeMdPanel } from './surfaceClaudeMdPanel.js';
-import { CARD_RAIL_DEFAULT_WIDTH, CARD_RAIL_STYLESHEET, cardRailItemsEqual, clampCardRailWidth, createCardRailLayout, type CardRailItem, type CardRailLayout } from './cardRailLayout.js';
+import { CARD_RAIL_AUTO_HIDE_MS, CARD_RAIL_DEFAULT_WIDTH, CARD_RAIL_STYLESHEET, cardRailItemsEqual, clampCardRailWidth, createCardRailLayout, type CardRailItem, type CardRailLayout } from './cardRailLayout.js';
+import {
+	claudeTerminalTitleFor,
+	isClaudeTerminalTitle,
+	LEGACY_CLAUDE_TERMINAL_TITLE,
+	parseClaudeTerminalKey,
+	WORKSPACE_CLAUDE_KEY,
+} from './claudeTerminalKeys.js';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
@@ -165,19 +185,30 @@ const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
 const STORAGE_ACTIVE_UI_CHAT_SURFACE = 'modeShell.activeUiChatSurface';
 const STORAGE_UI_CHAT_DRAFT_PREFIX = 'modeShell.uiChatDraft.';
 const STORAGE_SURFACE_MAIN_VIEW_PREFIX = 'modeShell.surfaceMainView.';
+/** Last focused surface section card per surface id (plan / files / …). */
+const STORAGE_SURFACE_SECTION_PREFIX = 'modeShell.surfaceSection.';
 const STORAGE_WORKSPACE_HOME_VIEW = 'modeShell.workspaceHomeView';
 const STORAGE_CONSOLE_SECTION = 'modeShell.consoleSection';
 const STORAGE_CONSOLE_EXPANDED = 'modeShell.consoleExpanded';
 const STORAGE_CARD_RAIL_WIDTH = 'modeShell.cardRailWidth';
 const STORAGE_SURFACE_FEATURE_CHECKLIST_HIDDEN = 'modeShell.surfaceFeatureChecklistHidden';
 const STORAGE_CLAUDE_TERMINAL_HEIGHT = 'modeShell.claudeTerminalHeight';
-const STORAGE_CLAUDE_TERMINAL_ACTIVE = 'modeShell.claudeTerminalActive';
-const CLAUDE_TERMINAL_TITLE = 'Claude — New Surface';
+const STORAGE_CLAUDE_TERMINAL_ACTIVE_KEYS = 'modeShell.claudeTerminalActiveKeys';
+/** Legacy boolean — migrated into {@link STORAGE_CLAUDE_TERMINAL_ACTIVE_KEYS}. */
+const STORAGE_CLAUDE_TERMINAL_ACTIVE_LEGACY = 'modeShell.claudeTerminalActive';
 const CLAUDE_TERMINAL_MIN_HEIGHT = 120;
 const CLAUDE_TERMINAL_DEFAULT_HEIGHT = 240;
+/** Pointer distance from the UI container's bottom edge that re-shows a collapsed Claude pane. */
+const CLAUDE_TERMINAL_REVEAL_EDGE_PX = 14;
+/** Pointer distance from the UI container's top edge that re-shows a collapsed Steps pane. */
+const STEPS_REVEAL_EDGE_PX = 14;
+/** Pointer distance from the body row's right edge that re-shows a dismissed AI chat. */
+const UI_CHAT_REVEAL_EDGE_PX = 14;
+/** Hold Surface card order after selection before applying recent-step reordering. */
+const SURFACE_RAIL_REORDER_DELAY_MS = 1200;
 const ADD_SURFACE_ID = '__add_surface__';
 
-/** Section shown inside the Console host (Plan / Rules / Brand / Surfaces). */
+/** Section shown inside the Console host (Plan / Surfaces / Rules / Brand). */
 type WorkspaceHomeView = ConsoleHomeSection;
 
 function isWorkspaceHomeView(value: string | undefined): value is WorkspaceHomeView {
@@ -271,18 +302,43 @@ class ModeShellContribution extends Disposable {
 	private readonly processChatReopenBtn: HTMLButtonElement;
 	private readonly uiMainColumn: HTMLElement;
 	private readonly uiBodyRow: HTMLElement;
+	private readonly uiStepsPane: HTMLElement;
+	private readonly uiStepsHost: HTMLElement;
+	private readonly uiStepsReopenBtn: HTMLButtonElement;
+	private readonly uiStepsReopenPendingDot: HTMLElement;
 	private readonly uiClaudeTerminalPane: HTMLElement;
 	private readonly uiClaudeTerminalSash: HTMLElement;
 	private readonly uiClaudeTerminalHost: HTMLElement;
 	private readonly uiClaudeTerminalEmpty: HTMLElement;
+	private readonly uiClaudeTerminalReopenBtn: HTMLButtonElement;
 	private uiClaudeTerminalStatus!: HTMLElement;
+	private uiClaudeTerminalKeyLabel!: HTMLElement;
 	private readonly claudeKickoffLogs: string[] = [];
-	private claudeTerminalInstance: ITerminalInstance | undefined;
-	private readonly claudeTerminalLifecycle = this._register(new MutableDisposable());
+	/** Keep-alive Claude Code terminals keyed by surface id or {@link WORKSPACE_CLAUDE_KEY}. */
+	private readonly claudeTerminalByKey = new Map<string, ITerminalInstance>();
+	private readonly claudeTerminalLifecycleByKey = new Map<string, IDisposable>();
+	private visibleClaudeTerminalKey: string | undefined;
 	private claudeTerminalHeight = CLAUDE_TERMINAL_DEFAULT_HEIGHT;
+	private claudeTerminalCollapsed = true;
+	private claudeTerminalHovering = false;
+	private claudeTerminalHideTimer: number | undefined;
+	private claudeTerminalLastPointerX = 0;
+	private claudeTerminalLastPointerY = 0;
+	private stepsCollapsed = false;
+	private stepsHovering = false;
+	private stepsHideTimer: number | undefined;
+	/** When the Console card column is expanded, Steps stays open (one-way couple). */
+	private consoleRailCollapsed = false;
+	private uiChatHovering = false;
+	private uiChatHideTimer: number | undefined;
 	private claudeTerminalRestoreInFlight = false;
-	private claudeTerminalAutoRestoreAttempts = 0;
-	private claudeTerminalAutoRestoreWindowStart = 0;
+	/** Keys currently creating/starting a Claude terminal so selection does not wait on Steps/planning. */
+	private readonly claudeTerminalEnsureInFlightByKey = new Set<string>();
+	/** Coalesce concurrent createTerminal calls for the same Claude key. */
+	private readonly claudeTerminalCreateInFlightByKey = new Map<string, Promise<{ terminal: ITerminalInstance; created: boolean }>>();
+	/** Keys that already had `claude` / `claude --continue` sent for the current PTY. */
+	private readonly claudeCliStartedByKey = new Set<string>();
+	private readonly claudeTerminalAutoRestoreAttemptsByKey = new Map<string, { attempts: number; windowStart: number }>();
 	private readonly uiFeatureChecklistColumn: HTMLElement;
 	private readonly uiChatColumn: HTMLElement;
 	private readonly uiChatTitleEl: HTMLElement;
@@ -341,8 +397,15 @@ class ModeShellContribution extends Disposable {
 	private surfaceRailCards: readonly CardRailItem[] = [];
 	/** True while a surface is open and its section cards have not published yet. */
 	private surfaceRailCardsLoading = false;
-	/** surfaceId → next human Plan CTA label (Start planning / Confirm repos / Lock & build / …). */
+	/** Prefer this section when surface cards finish loading after a Step click. */
+	private pendingSurfaceSectionId: string | undefined;
+	/** surfaceId → pending Next CTA or in-progress step label (Surface / Steps attention dots). */
 	private readonly surfacePendingActionById = new Map<string, string>();
+	/** surfaceId → most recent associated plan-step activity (ms since epoch). */
+	private readonly surfaceStepActivityById = new Map<string, number>();
+	/** When set, Surface cards keep this order until {@link surfaceReorderDelayTimer} fires. */
+	private frozenSurfaceOrderIds: string[] | undefined;
+	private surfaceReorderDelayTimer: number | undefined;
 	private surfacePendingActionRefreshGeneration = 0;
 	private readonly surfacePendingActionWatcher = this._register(new MutableDisposable());
 	/** Which left-rail card is highlighted — independent of surface open state so section/home cards can stick. */
@@ -350,8 +413,8 @@ class ModeShellContribution extends Disposable {
 	private uiWorkspacePlanHomePanel!: HTMLElement;
 	private uiWorkspaceClaudeMdPanelRoot!: HTMLElement;
 	private workspaceClaudeMdPanel: SurfaceClaudeMdPanel | undefined;
-	/** Active Console section (Plan / Rules / Brand / Surfaces). */
-	private workspaceHomeView: WorkspaceHomeView = 'workspacePlan';
+	/** Active Console section (Plan / Surfaces / Rules / Brand). */
+	private workspaceHomeView: WorkspaceHomeView = 'surfaces';
 	/** When true (and no surface open), Console section cards appear under the Console rail card. */
 	private consoleExpanded = true;
 	private uiConsoleHomeHost!: HTMLElement;
@@ -413,6 +476,10 @@ class ModeShellContribution extends Disposable {
 	private readonly uiSurfaceEmptyState: HTMLElement;
 	private readonly uiSurfaceEmptyTitle: HTMLElement;
 	private readonly uiSurfaceEmptySubtitle: HTMLElement;
+	private readonly uiSurfaceEmptyFolders: HTMLElement;
+	private readonly uiSurfaceEmptyActions: HTMLElement;
+	private readonly emptyOpenableFolderListeners = this._register(new DisposableStore());
+	private emptyOpenableFoldersEnabled = false;
 	private readonly uiSurfaceButtons = new Map<string, HTMLButtonElement>();
 	private selectedSurfaceId: string | undefined;
 	/** Bumped on each surface open / deselect so in-flight opens cannot re-select after collapse. */
@@ -431,6 +498,7 @@ class ModeShellContribution extends Disposable {
 	private reachabilityUrl: string | undefined;
 	private appReachable = false;
 	private readonly uiDevServerProbeScheduler = this._register(new RunOnceScheduler(() => this.scheduleEmbeddedUiDevServerProbe(), 2500));
+	private readonly surfacePreviewRetryScheduler = this._register(new RunOnceScheduler(() => this.retrySelectedSurfacePreview(), 2500));
 	private readonly chatSessionsCts = this._register(new CancellationTokenSource());
 	private readonly chatSessionManager: ModeShellChatSessionManager;
 	private readonly embeddedChatRefs = {
@@ -516,6 +584,9 @@ class ModeShellContribution extends Disposable {
 		@IOpenerService private readonly openerService: IOpenerService,
 		@IFileDialogService private readonly fileDialogService: IFileDialogService,
 		@IDialogService private readonly dialogService: IDialogService,
+		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
+		@IHostService private readonly hostService: IHostService,
+		@ILabelService private readonly labelService: ILabelService,
 		@IStartupGuideService private readonly startupGuideService: IStartupGuideService,
 		@IAppLaunchGuideService private readonly appLaunchGuideService: IAppLaunchGuideService,
 		@IConsoleService private readonly consoleService: IConsoleService,
@@ -531,6 +602,10 @@ class ModeShellContribution extends Disposable {
 		this._register(toDisposable(() => {
 			if (ModeShellContribution.activeInstance === this) {
 				ModeShellContribution.activeInstance = undefined;
+			}
+			if (this.surfaceReorderDelayTimer !== undefined) {
+				mainWindow.clearTimeout(this.surfaceReorderDelayTimer);
+				this.surfaceReorderDelayTimer = undefined;
 			}
 		}));
 
@@ -587,6 +662,22 @@ class ModeShellContribution extends Disposable {
 				gap: 12px;
 			}
 
+			/* Start-preview chrome is full-bleed inside the content host (own toolbar + body padding). */
+			.monaco-workbench .custom-mode-ui-workspace-home-rail .custom-mode-card-rail-content:has(> .custom-mode-ui-surface-launch-panel:not(.hidden)) {
+				padding: 0;
+				gap: 0;
+				overflow: hidden;
+			}
+
+			/* Collapsed rail: clear the left Console edge chip so it cannot cover titles/cards. */
+			.monaco-workbench .custom-mode-ui-workspace-home-rail.collapsed .custom-mode-card-rail-content {
+				padding-left: 40px;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-home-rail.collapsed .custom-mode-card-rail-content:has(> .custom-mode-ui-surface-launch-panel:not(.hidden)) {
+				padding-left: 0;
+			}
+
 			.monaco-workbench .custom-mode-ui-workspace-home-rail .custom-mode-card-rail-content > .hidden {
 				display: none !important;
 			}
@@ -604,7 +695,7 @@ class ModeShellContribution extends Disposable {
 				display: none !important;
 			}
 
-			/* Code mode: prominent back control to leave the separate editor and return to Console. */
+			/* Code mode: prominent ← Console on the shell top bar (top-left). */
 			.monaco-workbench.custom-mode-shell-enabled.custom-mode-code .custom-mode-ui-project-name {
 				background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-hoverBackground));
 				color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
@@ -883,6 +974,133 @@ class ModeShellContribution extends Disposable {
 				position: relative;
 			}
 
+			.monaco-workbench .custom-mode-ui-claude-reopen {
+				display: flex;
+				position: absolute;
+				left: 50%;
+				bottom: 0;
+				transform: translateX(-50%) translateY(4px);
+				z-index: 25;
+				align-items: center;
+				justify-content: center;
+				padding: 6px 14px;
+				border: 1px solid var(--vscode-panel-border);
+				border-bottom: none;
+				border-radius: 6px 6px 0 0;
+				background-color: var(--vscode-sideBar-background);
+				color: var(--vscode-foreground);
+				font-size: 12px;
+				font-weight: 600;
+				cursor: pointer;
+				box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.2);
+				opacity: 0;
+				pointer-events: none;
+				transition: opacity 120ms ease, transform 160ms ease;
+			}
+
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-claude-collapsed.visible .custom-mode-ui-claude-reopen {
+				opacity: 1;
+				pointer-events: auto;
+				transform: translateX(-50%) translateY(0);
+			}
+
+			.monaco-workbench .custom-mode-ui-claude-reopen:hover {
+				background-color: var(--vscode-toolbar-hoverBackground, var(--vscode-sideBar-background));
+			}
+
+			.monaco-workbench .custom-mode-ui-steps-pane {
+				display: flex;
+				flex-direction: column;
+				flex: 0 0 auto;
+				min-height: 0;
+				padding: 8px 12px 8px;
+				box-sizing: border-box;
+				overflow: hidden;
+				transition: flex-basis 160ms ease, height 160ms ease, min-height 160ms ease, opacity 120ms ease, padding 160ms ease;
+			}
+
+			.monaco-workbench .custom-mode-ui-steps-pane.hidden {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-ui-steps-host {
+				display: flex;
+				flex-direction: column;
+				min-width: 0;
+				width: 100%;
+			}
+
+			.monaco-workbench .custom-mode-ui-steps-host > .custom-mode-surface-plan-status-tracker.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-steps-collapsed .custom-mode-ui-steps-pane:not(.hidden) {
+				flex: 0 0 0 !important;
+				height: 0 !important;
+				min-height: 0 !important;
+				padding-top: 0 !important;
+				padding-bottom: 0 !important;
+				opacity: 0;
+				overflow: hidden;
+				pointer-events: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-steps-reopen {
+				display: flex;
+				position: absolute;
+				left: 50%;
+				top: 0;
+				transform: translateX(-50%) translateY(-4px);
+				z-index: 25;
+				align-items: center;
+				justify-content: center;
+				gap: 6px;
+				padding: 6px 14px;
+				border: 1px solid var(--vscode-panel-border);
+				border-top: none;
+				border-radius: 0 0 6px 6px;
+				background-color: var(--vscode-sideBar-background);
+				color: var(--vscode-foreground);
+				font-size: 12px;
+				font-weight: 600;
+				cursor: pointer;
+				box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+				opacity: 0;
+				pointer-events: none;
+				transition: opacity 120ms ease, transform 160ms ease;
+			}
+
+			.monaco-workbench .custom-mode-ui-steps-reopen.hidden {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-steps-collapsed.visible .custom-mode-ui-steps-reopen:not(.hidden) {
+				opacity: 1;
+				pointer-events: auto;
+				transform: translateX(-50%) translateY(0);
+			}
+
+			.monaco-workbench .custom-mode-ui-steps-reopen:hover {
+				background-color: var(--vscode-toolbar-hoverBackground, var(--vscode-sideBar-background));
+			}
+
+			/* Flashing attention dot when Steps has a pending / in-progress action. */
+			.monaco-workbench .custom-mode-ui-steps-reopen-pending-dot {
+				display: none;
+				width: 8px;
+				height: 8px;
+				border-radius: 50%;
+				flex: 0 0 auto;
+				background: var(--vscode-textLink-foreground, var(--vscode-focusBorder, #3794ff));
+				box-shadow: 0 0 0 0 color-mix(in srgb, var(--vscode-textLink-foreground, #3794ff) 55%, transparent);
+				animation: custom-mode-card-rail-pending-pulse 1.6s ease-out infinite;
+				pointer-events: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-steps-reopen.has-pending-action .custom-mode-ui-steps-reopen-pending-dot {
+				display: block;
+			}
+
 			.monaco-workbench .custom-mode-ui-claude-terminal-sash {
 				flex: 0 0 5px;
 				height: 5px;
@@ -894,6 +1112,7 @@ class ModeShellContribution extends Disposable {
 				cursor: ns-resize;
 				position: relative;
 				z-index: 5;
+				transition: flex-basis 160ms ease, height 160ms ease, opacity 120ms ease, border-color 120ms ease;
 			}
 
 			.monaco-workbench .custom-mode-ui-claude-terminal-sash::before {
@@ -917,6 +1136,33 @@ class ModeShellContribution extends Disposable {
 				min-height: ${CLAUDE_TERMINAL_MIN_HEIGHT}px;
 				background: var(--vscode-terminal-background, var(--vscode-panel-background));
 				overflow: hidden;
+				transition: flex-basis 160ms ease, height 160ms ease, min-height 160ms ease, opacity 120ms ease;
+			}
+
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-claude-collapsed .custom-mode-ui-claude-terminal-sash {
+				flex: 0 0 0 !important;
+				height: 0 !important;
+				opacity: 0;
+				overflow: hidden;
+				pointer-events: none;
+				border: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-claude-collapsed .custom-mode-ui-claude-terminal {
+				flex: 0 0 0 !important;
+				height: 0 !important;
+				min-height: 0 !important;
+				opacity: 0;
+				overflow: hidden;
+				pointer-events: none;
+				border: none;
+			}
+
+			/* File/media drag target feedback — green outline while dragging into Claude. */
+			.monaco-workbench .custom-mode-ui-claude-terminal.dragover {
+				outline: 2px solid var(--vscode-charts-green, #89d185);
+				outline-offset: -2px;
+				box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--vscode-charts-green, #89d185) 35%, transparent);
 			}
 
 			.monaco-workbench .custom-mode-ui-claude-terminal-header {
@@ -930,6 +1176,18 @@ class ModeShellContribution extends Disposable {
 				font-size: 12px;
 				font-weight: 600;
 				flex: 0 0 auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-claude-terminal-key {
+				flex: 0 1 auto;
+				min-width: 0;
+				max-width: 40%;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+				font-weight: 500;
 			}
 
 			.monaco-workbench .custom-mode-ui-claude-terminal-status {
@@ -1195,10 +1453,19 @@ class ModeShellContribution extends Disposable {
 				min-height: 0;
 				border-left: 1px solid var(--vscode-panel-border);
 				background-color: var(--vscode-editorBackground);
+				overflow: hidden;
+				transition: flex-basis 160ms ease, width 160ms ease, min-width 160ms ease, max-width 160ms ease, opacity 120ms ease, border-color 120ms ease;
 			}
 
 			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-chat-dismissed .custom-mode-ui-chat-column {
-				display: none !important;
+				flex: 0 0 0 !important;
+				width: 0 !important;
+				min-width: 0 !important;
+				max-width: 0 !important;
+				opacity: 0;
+				overflow: hidden;
+				pointer-events: none;
+				border-left-color: transparent;
 			}
 
 			.monaco-workbench .custom-mode-ui-chat-header {
@@ -1248,11 +1515,11 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-chat-reopen {
-				display: none;
+				display: flex;
 				position: absolute;
 				right: 0;
 				top: 50%;
-				transform: translateY(-50%);
+				transform: translateY(-50%) translateX(4px);
 				z-index: 25;
 				align-items: center;
 				justify-content: center;
@@ -1268,10 +1535,15 @@ class ModeShellContribution extends Disposable {
 				font-weight: 600;
 				cursor: pointer;
 				box-shadow: -2px 0 8px rgba(0, 0, 0, 0.2);
+				opacity: 0;
+				pointer-events: none;
+				transition: opacity 120ms ease, transform 160ms ease;
 			}
 
 			.monaco-workbench .custom-mode-ui-container.custom-mode-ui-chat-dismissed.visible .custom-mode-ui-chat-reopen {
-				display: flex;
+				opacity: 1;
+				pointer-events: auto;
+				transform: translateY(-50%) translateX(0);
 			}
 
 			.monaco-workbench .custom-mode-ui-chat-column .custom-mode-embedded-chat.custom-mode-ui-side-chat.visible {
@@ -1603,27 +1875,242 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-tab-activeForeground);
 			}
 
+			/*
+			 * Start-preview chrome lives in the card-rail content host (same pane as Plan).
+			 * Live webview takes over that pane beside the cards (full-bleed sibling column).
+			 */
 			.monaco-workbench .custom-mode-ui-surface-launch-panel {
 				display: none;
-				flex: 0 0 auto;
-				gap: 8px;
-				align-items: center;
-				padding: 8px 10px;
-				border-bottom: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.24));
-				background-color: var(--vscode-editorWidget-background);
+				flex-direction: column;
+				align-items: stretch;
+				justify-content: stretch;
+				gap: 0;
+				flex: 1 1 auto;
+				width: 100%;
+				min-width: 0;
+				min-height: 0;
+				padding: 0;
+				border: 0;
+				background: var(--vscode-editorBackground);
 				color: var(--vscode-foreground);
-				font-size: 12px;
+				font-size: 13px;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-launch-panel:not(.hidden) {
 				display: flex;
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-launch-copy {
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible .custom-mode-ui-surface-main-content {
+				flex-direction: row;
+				align-items: stretch;
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible .custom-mode-ui-surface-setup:not(.hidden) {
+				flex: 0 0 auto;
+				width: auto;
+				min-width: 0;
+				max-width: none;
+				order: 1;
+				position: relative;
+				z-index: 5;
+				overflow: visible;
+				border-right: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.24)));
+				background: transparent;
+			}
+
+			/* Live preview: cards stay; content host yields to the webview column. */
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible .custom-mode-ui-workspace-home-rail .custom-mode-card-rail-content {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible .custom-mode-ui-workspace-home-rail {
+				position: relative;
+				z-index: 6;
+				overflow: visible;
+				height: 100%;
+				background: transparent;
+			}
+
+			/*
+			 * Collapsed over live preview: native <webview> paints over HTML, so the Console chip
+			 * needs a real layout strip — match common light app chrome so it doesn't read as a
+			 * dark "padding bar" against the preview.
+			 */
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible:not(.custom-mode-ui-surface-preview-waiting) .custom-mode-ui-surface-setup:has(.custom-mode-card-rail.collapsed) {
+				flex: 0 0 22px;
+				width: 22px;
+				min-width: 22px;
+				border-right: none;
+				background: #f5f5f5;
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible:not(.custom-mode-ui-surface-preview-waiting) .custom-mode-card-rail.collapsed {
+				display: flex;
+				flex-direction: row;
+				align-items: stretch;
+				width: 22px;
+				min-width: 22px;
+				overflow: visible;
+				background: #f5f5f5;
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible .custom-mode-card-rail.collapsed > .custom-mode-card-rail-reveal.has-label {
+				position: relative;
+				left: auto;
+				top: auto;
+				transform: none;
+				align-self: center;
+				margin: 0;
+				z-index: 40;
+				pointer-events: auto;
+			}
+
+			/* Waiting chrome is HTML — float the chip with no gutter so the pane stays flush. */
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible.custom-mode-ui-surface-preview-waiting .custom-mode-ui-surface-setup:has(.custom-mode-card-rail.collapsed) {
+				flex: 0 0 0;
+				width: 0;
+				min-width: 0;
+				border-right: none;
+				overflow: visible;
+				background: transparent;
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible.custom-mode-ui-surface-preview-waiting .custom-mode-card-rail.collapsed {
+				position: absolute;
+				left: 0;
+				top: 0;
+				bottom: 0;
+				width: 0;
+				min-width: 0;
+				overflow: visible;
+				pointer-events: none;
+				background: transparent;
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible.custom-mode-ui-surface-preview-waiting .custom-mode-card-rail.collapsed > .custom-mode-card-rail-reveal.has-label {
+				position: absolute;
+				left: 0;
+				top: 50%;
+				transform: translateY(-50%);
+				pointer-events: auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible .custom-mode-ui-surface-launch-panel:not(.hidden),
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible .custom-mode-ui-frame,
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-preview-visible .custom-mode-ui-webview {
+				flex: 1 1 auto;
+				width: auto;
+				min-width: 0;
+				min-height: 0;
+				height: auto;
+				align-self: stretch;
+				order: 2;
+				position: relative;
+				z-index: 1;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-chrome {
+				display: flex;
+				flex-direction: column;
+				flex: 1 1 auto;
+				width: 100%;
+				height: 100%;
+				min-height: 0;
+				margin: 0;
+				border: 0;
+				border-radius: 0;
+				overflow: hidden;
+				background: var(--vscode-editorBackground);
+				box-shadow: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-toolbar {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				flex: 0 0 auto;
+				padding: 10px 12px;
+				border-bottom: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.22));
+				background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-dots {
+				display: flex;
+				gap: 5px;
+				flex: 0 0 auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-dots > span {
+				width: 8px;
+				height: 8px;
+				border-radius: 50%;
+				background: var(--vscode-descriptionForeground);
+				opacity: 0.45;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-url {
 				flex: 1 1 auto;
 				min-width: 0;
-				padding: 6px 8px;
-				border-radius: 6px;
+				padding: 6px 10px;
+				border-radius: 999px;
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.22));
+				background: var(--vscode-input-background, var(--vscode-editor-background));
+				color: var(--vscode-descriptionForeground);
+				font-family: var(--monaco-monospace-font, ui-monospace, monospace);
+				font-size: 11px;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-body {
+				display: flex;
+				flex-direction: column;
+				align-items: flex-start;
+				justify-content: center;
+				gap: 10px;
+				flex: 1 1 auto;
+				min-height: 0;
+				padding: 32px 36px;
+				box-sizing: border-box;
+				background:
+					radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent), transparent 55%),
+					var(--vscode-editorBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-body > * {
+				max-width: min(560px, 100%);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-kicker {
+				margin: 0;
+				font-size: 11px;
+				font-weight: 700;
+				letter-spacing: 0.06em;
+				text-transform: uppercase;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-title {
+				margin: 0;
+				font-size: 18px;
+				font-weight: 650;
+				line-height: 1.25;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-copy {
+				margin: 0;
+				color: var(--vscode-descriptionForeground);
+				font-size: 12px;
+				line-height: 1.45;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-command {
+				width: min(560px, 100%);
+				box-sizing: border-box;
+				margin: 4px 0 0;
+				padding: 8px 10px;
+				border-radius: 8px;
 				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.2));
 				background-color: var(--vscode-textCodeBlock-background);
 				color: var(--vscode-editor-foreground);
@@ -1634,30 +2121,38 @@ class ModeShellContribution extends Disposable {
 				text-overflow: ellipsis;
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-launch-meta {
-				flex: 0 1 auto;
-				min-width: 0;
-				color: var(--vscode-descriptionForeground);
-				white-space: nowrap;
-				overflow: hidden;
-				text-overflow: ellipsis;
+			.monaco-workbench .custom-mode-ui-surface-launch-actions {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px;
+				margin-top: 6px;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-launch-run {
 				flex: 0 0 auto;
-				height: 26px;
-				padding: 0 10px;
-				border-radius: 6px;
+				height: 32px;
+				padding: 0 14px;
+				border-radius: 8px;
 				border: 1px solid var(--vscode-button-border, transparent);
-				background-color: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
-				color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+				background-color: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
 				cursor: pointer;
 				font-size: 12px;
 				font-weight: 600;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-launch-run:hover {
-				background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
+				background-color: var(--vscode-button-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-run.secondary {
+				background-color: var(--vscode-button-secondaryBackground, transparent);
+				color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+				border-color: var(--vscode-widget-border, rgba(128, 128, 128, 0.28));
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-launch-run.secondary:hover {
+				background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-main-view-toggle {
@@ -2675,10 +3170,9 @@ class ModeShellContribution extends Disposable {
 				cursor: default;
 			}
 
-			/* The surface setup dashboard stays visible in plan overlay mode — it hosts the shared card rail. */
-			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-overlay .custom-mode-ui-frame,
-			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-overlay .custom-mode-ui-webview,
-			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-overlay .custom-mode-ui-surface-empty {
+			/* Live Preview webview sits beside the rail only while Preview is selected. */
+			.monaco-workbench .custom-mode-ui-browser-shell:not(.custom-mode-ui-surface-preview-visible) > .custom-mode-ui-surface-main-content > .custom-mode-ui-frame,
+			.monaco-workbench .custom-mode-ui-browser-shell:not(.custom-mode-ui-surface-preview-visible) > .custom-mode-ui-surface-main-content > .custom-mode-ui-webview {
 				display: none !important;
 			}
 
@@ -2900,18 +3394,17 @@ class ModeShellContribution extends Disposable {
 				display: none;
 			}
 
+			/* Content-sized in the stacked Console list (host scrolls), same as Surface .section. */
 			.monaco-workbench .custom-mode-ui-workspace-claude-md-panel {
+				flex: 0 0 auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-claude-md-body {
 				min-height: 220px;
 				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.24));
 				border-radius: 8px;
 				overflow: hidden;
 				background: var(--vscode-editorWidget-background);
-			}
-
-			/* Rules fills the section host; markdown body scrolls inside (same as Surface CLAUDE.md). */
-			.monaco-workbench .custom-mode-ui-workspace-claude-md-panel:not(.hidden) {
-				flex: 1 1 auto;
-				min-height: 0;
 			}
 
 			.monaco-workbench .custom-mode-ui-workspace-home-toggle {
@@ -3076,12 +3569,12 @@ class ModeShellContribution extends Disposable {
 				gap: 12px;
 			}
 
-			/* Danger-zone footer on the workspace Plan home — hosts Clear all Surfaces. */
-			.monaco-workbench .custom-mode-ui-workspace-plan-home-actions {
+			.monaco-workbench .custom-mode-ui-surface-starters-header-actions {
 				display: flex;
+				align-items: center;
 				justify-content: flex-end;
+				gap: 8px;
 				flex: 0 0 auto;
-				padding-top: 4px;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-starters-header .custom-mode-ui-surface-surfaces-title {
@@ -3255,12 +3748,7 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-descriptionForeground);
 			}
 
-			.monaco-workbench .custom-mode-ui-console-home > .custom-mode-surface-plan-status-tracker {
-				flex: 0 0 auto;
-			}
-
-			.monaco-workbench .custom-mode-ui-console-home-status.hidden,
-			.monaco-workbench .custom-mode-ui-console-home > .custom-mode-surface-plan-status-tracker.hidden {
+			.monaco-workbench .custom-mode-ui-console-home-status.hidden {
 				display: none;
 			}
 
@@ -3270,13 +3758,18 @@ class ModeShellContribution extends Disposable {
 				flex: 1 1 auto;
 				min-height: 0;
 				min-width: 0;
-				/* Same role as Surface proposal-tree `.sections` — scroll all card content. */
+				/* Same role as Surface proposal-tree .sections — scroll all card content. */
 				overflow: auto;
 				padding-right: 4px;
 			}
 
 			.monaco-workbench .custom-mode-ui-console-section-host > .custom-mode-ui-workspace-home-panel {
 				margin: 0;
+				scroll-margin-top: 16px;
+			}
+
+			.monaco-workbench .custom-mode-ui-console-section-host > .custom-mode-ui-workspace-home-panel + .custom-mode-ui-workspace-home-panel {
+				margin-top: 12px;
 			}
 
 			.monaco-workbench .custom-mode-ui-workspace-surfaces,
@@ -4179,7 +4672,8 @@ class ModeShellContribution extends Disposable {
 				display: flex;
 				flex-direction: column;
 				gap: 8px;
-				max-width: 440px;
+				max-width: 520px;
+				width: min(520px, 100%);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-empty-title {
@@ -4193,6 +4687,100 @@ class ModeShellContribution extends Disposable {
 					color: var(--vscode-descriptionForeground);
 					white-space: pre-line;
 				}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-folders {
+				display: none;
+				flex-direction: column;
+				gap: 6px;
+				margin-top: 12px;
+				text-align: left;
+				max-height: min(360px, 50vh);
+				overflow: auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-folders:not(.hidden) {
+				display: flex;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-folders-heading {
+				font-size: 11px;
+				font-weight: 600;
+				letter-spacing: 0.04em;
+				text-transform: uppercase;
+				color: var(--vscode-descriptionForeground);
+				margin-bottom: 2px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-folder {
+				display: flex;
+				flex-direction: column;
+				align-items: flex-start;
+				gap: 2px;
+				width: 100%;
+				padding: 10px 12px;
+				border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.24));
+				border-radius: 6px;
+				background: var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
+				color: var(--vscode-foreground);
+				cursor: pointer;
+				text-align: left;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-folder:hover {
+				background: var(--vscode-list-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-folder:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: 1px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-folder-name {
+				font-size: 13px;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-folder-path {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+				word-break: break-all;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-actions {
+				display: none;
+				flex-wrap: wrap;
+				justify-content: center;
+				gap: 8px;
+				margin-top: 14px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-actions:not(.hidden) {
+				display: flex;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-action {
+				padding: 7px 12px;
+				border: 1px solid var(--vscode-button-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.35)));
+				border-radius: 6px;
+				background: var(--vscode-button-secondaryBackground, transparent);
+				color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+				cursor: pointer;
+				font-size: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-action:hover {
+				background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-action.primary {
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+				border-color: var(--vscode-button-background);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-empty-action.primary:hover {
+				background: var(--vscode-button-hoverBackground);
+			}
 
 			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-missing-url .custom-mode-ui-frame,
 			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-missing-url .custom-mode-ui-webview {
@@ -5224,23 +5812,12 @@ class ModeShellContribution extends Disposable {
 				line-height: 1.45;
 			}
 			
-			.monaco-workbench .custom-mode-setup {
-				display: none;
-				position: absolute;
-				top: 12px;
-				left: 12px;
-				right: 12px;
-				max-width: min(680px, calc(100% - 24px));
-				z-index: 2200;
-				border-radius: 8px;
-				background-color: var(--vscode-editorWidget-background);
-				border: 1px solid var(--vscode-editorWidget-border);
-				box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-				overflow: hidden;
-			}
-
-			.monaco-workbench .custom-mode-setup.custom-mode-setup-active:not(.custom-mode-setup-hidden) {
-				display: block;
+			/*
+			 * UI Mode Start App / runtime overlay removed — preview + surface launch chrome own
+			 * startup UX. Scope to the UI column only; Process mode still uses .custom-mode-setup.
+			 */
+			.monaco-workbench .custom-mode-ui-main > .custom-mode-setup {
+				display: none !important;
 			}
 
 			.monaco-workbench .custom-mode-ui-selection-pill {
@@ -5513,10 +6090,26 @@ class ModeShellContribution extends Disposable {
 		if (this._uiChatDismissed) {
 			this.uiContainer.classList.add('custom-mode-ui-chat-dismissed');
 		}
+		this.uiStepsHost = $('div.custom-mode-ui-steps-host');
+		this.uiStepsPane = $('div.custom-mode-ui-steps-pane.hidden', {
+			role: 'region',
+			'aria-label': localize('customMode.stepsPanelLabel', 'Steps'),
+		}, this.uiStepsHost);
+		this.uiStepsReopenPendingDot = $('span.custom-mode-ui-steps-reopen-pending-dot', {
+			'aria-hidden': 'true',
+		});
+		this.uiStepsReopenBtn = $('button.custom-mode-ui-steps-reopen.hidden', {
+			type: 'button',
+			title: localize('customMode.stepsReopen', 'Open Steps'),
+			'aria-label': localize('customMode.stepsReopen', 'Open Steps'),
+		},
+			$('span.custom-mode-ui-steps-reopen-label', undefined, localize('customMode.stepsReopenShort', 'Steps')),
+			this.uiStepsReopenPendingDot,
+		) as HTMLButtonElement;
 		this.uiBodyRow = $('div.custom-mode-ui-body-row');
 		this.uiMainColumn = $('div.custom-mode-ui-main');
 		this.uiClaudeTerminalEmpty = $('div.custom-mode-ui-claude-terminal-empty', undefined,
-			localize('customMode.claudeTerminalEmpty', 'Claude will appear here when you create a New Surface.'),
+			localize('customMode.claudeTerminalStarting', 'Starting Claude…'),
 		);
 		this.uiClaudeTerminalHost = $('div.custom-mode-ui-claude-terminal-host', undefined, this.uiClaudeTerminalEmpty);
 		this.uiClaudeTerminalSash = $('div.custom-mode-ui-claude-terminal-sash', {
@@ -5529,13 +6122,20 @@ class ModeShellContribution extends Disposable {
 		this.uiClaudeTerminalStatus = $('span.custom-mode-ui-claude-terminal-status', {
 			title: localize('customMode.claudeKickoffStatusTitle', 'Claude kickoff status'),
 		});
+		this.uiClaudeTerminalKeyLabel = $('span.custom-mode-ui-claude-terminal-key');
 		this.uiClaudeTerminalPane = $('div.custom-mode-ui-claude-terminal', undefined,
 			$('div.custom-mode-ui-claude-terminal-header', undefined,
 				$('span', undefined, localize('customMode.claudeTerminalTitle', 'Claude')),
+				this.uiClaudeTerminalKeyLabel,
 				this.uiClaudeTerminalStatus,
 			),
 			this.uiClaudeTerminalHost,
 		);
+		this.uiClaudeTerminalReopenBtn = $('button.custom-mode-ui-claude-reopen', {
+			type: 'button',
+			title: localize('customMode.claudeTerminalReopen', 'Open Claude'),
+			'aria-label': localize('customMode.claudeTerminalReopen', 'Open Claude'),
+		}, localize('customMode.claudeTerminalReopenShort', 'Claude')) as HTMLButtonElement;
 		this.uiFeatureChecklistColumn = $('div.custom-mode-ui-feature-checklist-column');
 		if (this.isSurfaceFeatureChecklistHidden()) {
 			this.uiFeatureChecklistColumn.classList.add('hidden');
@@ -5548,7 +6148,7 @@ class ModeShellContribution extends Disposable {
 				: void this.playSelectedSurfaceWorkflow(surfaceId),
 			() => this.setSurfaceFeatureChecklistHidden(true),
 		));
-		this.uiSetup = $('div.custom-mode-setup');
+		this.uiSetup = $('div.custom-mode-setup.custom-mode-setup-hidden');
 		this.uiSelectionCountEl = $('span.custom-mode-ui-selection-count', undefined, '0');
 		this.uiSelectionPill = $('div.custom-mode-ui-selection-pill', undefined,
 			this.uiSelectionCountEl,
@@ -5670,6 +6270,8 @@ class ModeShellContribution extends Disposable {
 			this.webviewService,
 			this.ixIntegrationService,
 		));
+		this.surfacePlanPanel.attachStatusTracker(this.uiStepsHost);
+		this.surfacePlanPanel.statusTrackerElement.classList.add('hidden');
 		this._register(this.surfacePlanPanel.onDidRequestBuild(request => {
 			this.selectOwningSurfaceCard(request.surfaceId);
 			void this.submitPlanBuildIntent(request);
@@ -5683,7 +6285,7 @@ class ModeShellContribution extends Disposable {
 			void this.notifyClaudePlanNextAction(request);
 		}));
 		this._register(this.surfacePlanPanel.onDidSelectOwningSurface(request => {
-			this.selectOwningSurfaceCard(request.surfaceId);
+			this.selectSurfaceForPlanStep(request);
 		}));
 		this._register(this.surfacePlanPanel.onDidChangeCards(cards => {
 			// Ignore tree republishes after the surface was collapsed — otherwise stale section
@@ -5703,16 +6305,22 @@ class ModeShellContribution extends Disposable {
 			this.surfaceRailCardsLoading = false;
 			if (cardRailItemsEqual(this.surfaceRailCards, next)) {
 				if (wasLoading) {
-					// First section-card publish after open — keep owning SURFACE card selected.
-					this.selectOwningSurfaceCard(openSurfaceId);
+					// First section-card publish after open — focus last-used / first ready section.
+					this.selectDefaultSurfaceSectionOrOwner(openSurfaceId);
 				}
 				return;
 			}
 			this.surfaceRailCards = next;
-			if (wasLoading || !this.activeRailCardId?.startsWith('surface:')) {
-				this.selectOwningSurfaceCard(openSurfaceId);
-			} else {
+			const activeSectionId = this.activeRailCardId?.startsWith('surfaceSection:')
+				? this.activeRailCardId.slice('surfaceSection:'.length)
+				: undefined;
+			if (wasLoading || this.activeRailCardId === `surface:${openSurfaceId}`) {
+				this.selectDefaultSurfaceSectionOrOwner(openSurfaceId);
+			} else if (activeSectionId && next.some(card => card.id === `surfaceSection:${activeSectionId}`)) {
 				this.syncWorkspaceHomeView();
+				this.surfacePlanPanel?.selectSection(activeSectionId);
+			} else {
+				this.selectDefaultSurfaceSectionOrOwner(openSurfaceId);
 			}
 		}));
 		this.uiSurfaceClaudeMdPanelRoot = $('div.custom-mode-ui-surface-claude-md-panel.hidden');
@@ -5731,23 +6339,34 @@ class ModeShellContribution extends Disposable {
 			this.syncSurfaceMainView();
 			this.syncUiChatInputToTaskTreeStep(tree);
 		}));
-		this.uiSurfaceSetupDashboard = this.createSurfaceSetupDashboard();
+		// Empty-state copy lives in the card-rail content host so the side cards stay visible.
 		this.uiSurfaceEmptyTitle = $('div.custom-mode-ui-surface-empty-title');
 		this.uiSurfaceEmptySubtitle = $('div.custom-mode-ui-surface-empty-subtitle');
+		this.uiSurfaceEmptyFolders = $('div.custom-mode-ui-surface-empty-folders.hidden', {
+			role: 'list',
+			'aria-label': localize('customMode.emptyOpenableFoldersAria', 'Folders you can open'),
+		});
+		this.uiSurfaceEmptyActions = $('div.custom-mode-ui-surface-empty-actions.hidden');
 		this.uiSurfaceEmptyState = $('div.custom-mode-ui-surface-empty.hidden', undefined,
 			$('div.custom-mode-ui-surface-empty-inner', undefined,
 				this.uiSurfaceEmptyTitle,
-				this.uiSurfaceEmptySubtitle
+				this.uiSurfaceEmptySubtitle,
+				this.uiSurfaceEmptyFolders,
+				this.uiSurfaceEmptyActions,
 			)
 		);
-		// The surface plan panel renders inside the shared card rail's content host (see
-		// createSurfaceSetupDashboard), so Console home and surface views share one card column.
+		this._register(this.workspacesService.onDidChangeRecentlyOpened(() => {
+			if (this.emptyOpenableFoldersEnabled) {
+				void this.refreshEmptyOpenableFolders();
+			}
+		}));
+		this.uiSurfaceSetupDashboard = this.createSurfaceSetupDashboard();
+		// Plan + Start-preview chrome render inside the shared card rail content host (see
+		// createSurfaceSetupDashboard). Live webview stays a sibling so it can paint full-bleed.
 		this.uiSurfaceMainContent = $('div.custom-mode-ui-surface-main-content', undefined,
-			this.uiSurfaceLaunchPanel,
 			this.uiSurfaceClaudeMdPanelRoot,
 			this.uiSurfaceIxSubsystemsPanelRoot,
 			this.uiSurfaceSetupDashboard,
-			this.uiSurfaceEmptyState,
 			this.uiBrowser,
 		);
 		this.uiBrowserShell.appendChild(this.uiSurfaceMainViewToggle);
@@ -5787,13 +6406,21 @@ class ModeShellContribution extends Disposable {
 		this.uiBodyRow.appendChild(this.uiMainColumn);
 		this.uiBodyRow.appendChild(this.uiChatColumn);
 		this.uiBodyRow.appendChild(this.uiChatReopenBtn);
+		this.uiContainer.appendChild(this.uiStepsPane);
 		this.uiContainer.appendChild(this.uiBodyRow);
 		this.uiContainer.appendChild(this.uiClaudeTerminalSash);
 		this.uiContainer.appendChild(this.uiClaudeTerminalPane);
+		this.uiContainer.appendChild(this.uiClaudeTerminalReopenBtn);
+		this.uiContainer.appendChild(this.uiStepsReopenBtn);
 		this.restoreClaudeTerminalHeight();
 		this.bindClaudeTerminalSash();
+		this.bindClaudeTerminalAutoHide();
+		this.bindStepsAutoHide();
+		this.bindUiChatAutoHide();
+		this.bindClaudeTerminalDragOverFeedback();
 		const claudeHostObserver = new ResizeObserver(() => {
-			if (this.claudeTerminalInstance && !this.claudeTerminalInstance.isDisposed) {
+			const visible = this.getVisibleClaudeTerminalInstance();
+			if (visible && !visible.isDisposed) {
 				this.relayoutTerminalInstances();
 			}
 		});
@@ -5801,18 +6428,29 @@ class ModeShellContribution extends Disposable {
 		this._register(toDisposable(() => claudeHostObserver.disconnect()));
 		void this.restoreClaudeTerminalSession();
 		this._register(this.terminalService.onDidChangeInstances(() => {
-			if (!this.claudeTerminalInstance || this.claudeTerminalInstance.isDisposed) {
-				const restored = this.findClaudeTerminalInstance();
-				if (restored) {
-					this.bindClaudeTerminalInstance(restored);
-					this.relayoutTerminalInstances();
-				}
+			const key = this.resolveClaudeTerminalKeyForSelection();
+			if (!key) {
+				return;
 			}
+			// Persisted PTYs often appear after the first restore attempt — rebind when
+			// the preferred key has a terminal but the host is still empty.
+			this.syncClaudeTerminalMapFromService();
+			const restored = this.findClaudeTerminalInstance(key);
+			if (!restored) {
+				return;
+			}
+			const visible = this.getVisibleClaudeTerminalInstance();
+			if (visible === restored && restored.domElement?.parentElement === this.uiClaudeTerminalHost) {
+				return;
+			}
+			this.showClaudeTerminalForKey(key);
 		}));
 
 		this._register(addDisposableListener(this.uiChatNewButton, 'click', () => void this.startNewUiChatConversation()));
 		this._register(addDisposableListener(uiCloseBtn, 'click', () => this.setUiChatDismissed(true)));
 		this._register(addDisposableListener(this.uiChatReopenBtn, 'click', () => this.setUiChatDismissed(false)));
+		this._register(addDisposableListener(this.uiClaudeTerminalReopenBtn, 'click', () => this.setClaudeTerminalCollapsed(false)));
+		this._register(addDisposableListener(this.uiStepsReopenBtn, 'click', () => this.setStepsCollapsed(false)));
 
 		SurfaceBlueprintOrchestrator.setRepairHandler(({ report, surfaceName, attempt }) => {
 			const repairPrompt = localize(
@@ -6144,6 +6782,16 @@ class ModeShellContribution extends Disposable {
 					return;
 				}
 				this.pushUiRuntimeLog(`[load-failed] ${desc}${url ? ` (${url})` : ''}`);
+				const surface = this.getSelectedSurface();
+				if (evt?.isMainFrame !== false && surface?.localUrl && this.urlsShareOrigin(url, surface.localUrl)) {
+					// The preview navigation itself failed (dev server not up yet): swap the blank
+					// error page for the server-down copy and keep probing until it responds.
+					this.setAppReachable(false);
+					if (this.isPreviewSectionSelected()) {
+						this.setSurfaceServerDownState(surface, surface.localUrl);
+					}
+					this.surfacePreviewRetryScheduler.schedule();
+				}
 			}));
 		}
 
@@ -6443,10 +7091,11 @@ class ModeShellContribution extends Disposable {
 		this.uiContainer.classList.toggle('visible', isUi);
 		this.processContainer.classList.toggle('visible', mode === 'Process');
 
-		// Embedded chat in UI/Process; keep sidebar chat session switching for Code only.
+		// Embedded chat in UI/Process. Code uses the workbench Chat side bar only when
+		// the user opens it — never auto-reveal on mode switch.
 		void this.updateEmbeddedChat(mode);
 		if (mode === 'Code') {
-			void this.chatSessionManager.openSessionForMode(mode, this.chatSessionsCts.token);
+			this.layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
 		}
 
 		this.syncTabGuides(mode);
@@ -6538,6 +7187,8 @@ class ModeShellContribution extends Disposable {
 			const startY = event.clientY;
 			const startHeight = this.uiClaudeTerminalPane.clientHeight || this.claudeTerminalHeight;
 			this.uiClaudeTerminalSash.classList.add('active');
+			this.setClaudeTerminalCollapsed(false);
+			this.clearClaudeTerminalHideTimer();
 			try {
 				this.uiClaudeTerminalSash.setPointerCapture(event.pointerId);
 			} catch {
@@ -6559,6 +7210,7 @@ class ModeShellContribution extends Disposable {
 				mainWindow.removeEventListener('pointermove', onMove);
 				mainWindow.removeEventListener('pointerup', onUp);
 				this.applyClaudeTerminalHeight(this.claudeTerminalHeight, { persist: true });
+				this.scheduleClaudeTerminalHide();
 			};
 			mainWindow.addEventListener('pointermove', onMove);
 			mainWindow.addEventListener('pointerup', onUp);
@@ -6567,18 +7219,385 @@ class ModeShellContribution extends Disposable {
 			const step = event.shiftKey ? 40 : 16;
 			if (event.key === 'ArrowUp') {
 				event.preventDefault();
+				this.setClaudeTerminalCollapsed(false);
 				this.applyClaudeTerminalHeight(this.claudeTerminalHeight + step);
 			} else if (event.key === 'ArrowDown') {
 				event.preventDefault();
+				this.setClaudeTerminalCollapsed(false);
 				this.applyClaudeTerminalHeight(this.claudeTerminalHeight - step);
 			} else if (event.key === 'Home') {
 				event.preventDefault();
+				this.setClaudeTerminalCollapsed(false);
 				this.applyClaudeTerminalHeight(this.getClaudeTerminalMaxHeight());
 			} else if (event.key === 'End') {
 				event.preventDefault();
+				this.setClaudeTerminalCollapsed(false);
 				this.applyClaudeTerminalHeight(CLAUDE_TERMINAL_MIN_HEIGHT);
 			}
 		}));
+	}
+
+	private clearClaudeTerminalHideTimer(): void {
+		if (this.claudeTerminalHideTimer !== undefined) {
+			mainWindow.clearTimeout(this.claudeTerminalHideTimer);
+			this.claudeTerminalHideTimer = undefined;
+		}
+	}
+
+	private setClaudeTerminalCollapsed(collapsed: boolean): void {
+		if (this.claudeTerminalCollapsed === collapsed) {
+			if (!collapsed) {
+				this.clearClaudeTerminalHideTimer();
+				this.scheduleClaudeTerminalHide();
+			}
+			return;
+		}
+		this.claudeTerminalCollapsed = collapsed;
+		this.uiContainer.classList.toggle('custom-mode-ui-claude-collapsed', collapsed);
+		if (!collapsed) {
+			this.clearClaudeTerminalHideTimer();
+			this.applyClaudeTerminalHeight(this.claudeTerminalHeight, { persist: false });
+			queueMicrotask(() => this.relayoutTerminalInstances());
+			this.scheduleClaudeTerminalHide();
+		} else {
+			this.clearClaudeTerminalHideTimer();
+		}
+	}
+
+	/** True when the pointer is currently over the Claude pane / sash / reopen chip. */
+	private isPointerOverClaudeTerminal(clientX = this.claudeTerminalLastPointerX, clientY = this.claudeTerminalLastPointerY): boolean {
+		const hit = mainWindow.document.elementFromPoint(clientX, clientY);
+		if (hit instanceof Node) {
+			if (this.uiClaudeTerminalPane.contains(hit)
+				|| this.uiClaudeTerminalSash.contains(hit)
+				|| this.uiClaudeTerminalReopenBtn.contains(hit)) {
+				return true;
+			}
+		}
+		for (const el of [this.uiClaudeTerminalPane, this.uiClaudeTerminalSash, this.uiClaudeTerminalReopenBtn]) {
+			const rect = el.getBoundingClientRect();
+			if (rect.width <= 0 || rect.height <= 0) {
+				continue;
+			}
+			if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private scheduleClaudeTerminalHide(): void {
+		if (this.uiClaudeTerminalSash.classList.contains('active')) {
+			return;
+		}
+		this.clearClaudeTerminalHideTimer();
+		this.claudeTerminalHideTimer = mainWindow.setTimeout(() => {
+			this.claudeTerminalHideTimer = undefined;
+			if (this.uiClaudeTerminalSash.classList.contains('active')) {
+				return;
+			}
+			// Re-check geometry — preview webviews often swallow pointerleave and leave
+			// `claudeTerminalHovering` stuck true, which used to block auto-hide forever.
+			if (this.isPointerOverClaudeTerminal()) {
+				this.claudeTerminalHovering = true;
+				this.scheduleClaudeTerminalHide();
+				return;
+			}
+			this.claudeTerminalHovering = false;
+			this.setClaudeTerminalCollapsed(true);
+		}, CARD_RAIL_AUTO_HIDE_MS);
+	}
+
+	private bindClaudeTerminalAutoHide(): void {
+		const onEnter = (): void => {
+			this.claudeTerminalHovering = true;
+			this.setClaudeTerminalCollapsed(false);
+		};
+		const onLeave = (): void => {
+			this.claudeTerminalHovering = false;
+			this.scheduleClaudeTerminalHide();
+		};
+		this._register(addDisposableListener(this.uiClaudeTerminalPane, 'pointerenter', onEnter));
+		this._register(addDisposableListener(this.uiClaudeTerminalPane, 'pointerleave', onLeave));
+		this._register(addDisposableListener(this.uiClaudeTerminalSash, 'pointerenter', onEnter));
+		this._register(addDisposableListener(this.uiClaudeTerminalSash, 'pointerleave', onLeave));
+		this._register(addDisposableListener(this.uiClaudeTerminalReopenBtn, 'pointerenter', onEnter));
+		this._register(addDisposableListener(this.uiClaudeTerminalReopenBtn, 'pointerleave', onLeave));
+		this._register(addDisposableListener(this.uiClaudeTerminalReopenBtn, 'focus', () => this.setClaudeTerminalCollapsed(false)));
+		// Preview webviews steal pointer events — clear the hover latch when the main
+		// content / launch panel is entered so Claude can still auto-hide.
+		const clearHoverFromMain = (): void => {
+			if (!this.claudeTerminalHovering && this.claudeTerminalCollapsed) {
+				return;
+			}
+			this.claudeTerminalHovering = false;
+			this.scheduleClaudeTerminalHide();
+		};
+		this._register(addDisposableListener(this.uiBrowserShell, 'pointerenter', clearHoverFromMain));
+		this._register(addDisposableListener(this.uiSurfaceLaunchPanel, 'pointerenter', clearHoverFromMain));
+		this._register(addDisposableListener(this.uiContainer, 'pointermove', (event: PointerEvent) => {
+			this.claudeTerminalLastPointerX = event.clientX;
+			this.claudeTerminalLastPointerY = event.clientY;
+			const overClaude = this.isPointerOverClaudeTerminal(event.clientX, event.clientY);
+			if (this.claudeTerminalHovering && !overClaude) {
+				this.claudeTerminalHovering = false;
+				this.scheduleClaudeTerminalHide();
+			}
+			if (!this.claudeTerminalCollapsed) {
+				return;
+			}
+			const rect = this.uiContainer.getBoundingClientRect();
+			if (rect.bottom - event.clientY <= CLAUDE_TERMINAL_REVEAL_EDGE_PX) {
+				this.setClaudeTerminalCollapsed(false);
+			}
+		}));
+		this._register(toDisposable(() => this.clearClaudeTerminalHideTimer()));
+		// Mount collapsed; only edge / reopen / explicit reveal opens Claude.
+		this.uiContainer.classList.add('custom-mode-ui-claude-collapsed');
+	}
+
+	private clearStepsHideTimer(): void {
+		if (this.stepsHideTimer !== undefined) {
+			mainWindow.clearTimeout(this.stepsHideTimer);
+			this.stepsHideTimer = undefined;
+		}
+	}
+
+	private setStepsCollapsed(collapsed: boolean): void {
+		if (this.uiStepsPane.classList.contains('hidden')) {
+			return;
+		}
+		// Console expanded ⇒ Steps stays visible (Steps alone does not force Console).
+		if (collapsed && !this.consoleRailCollapsed) {
+			return;
+		}
+		if (this.stepsCollapsed === collapsed) {
+			if (!collapsed) {
+				this.clearStepsHideTimer();
+				this.scheduleStepsHide();
+			}
+			return;
+		}
+		this.stepsCollapsed = collapsed;
+		this.uiContainer.classList.toggle('custom-mode-ui-steps-collapsed', collapsed);
+		if (!collapsed) {
+			this.clearStepsHideTimer();
+			this.scheduleStepsHide();
+		} else {
+			this.clearStepsHideTimer();
+		}
+	}
+
+	private scheduleStepsHide(): void {
+		if (this.stepsHovering || this.uiStepsPane.classList.contains('hidden') || !this.consoleRailCollapsed) {
+			return;
+		}
+		this.clearStepsHideTimer();
+		this.stepsHideTimer = mainWindow.setTimeout(() => {
+			this.stepsHideTimer = undefined;
+			if (!this.stepsHovering && !this.uiStepsPane.classList.contains('hidden') && this.consoleRailCollapsed) {
+				this.setStepsCollapsed(true);
+			}
+		}, CARD_RAIL_AUTO_HIDE_MS);
+	}
+
+	/** One-way couple: Console card column shown ⇒ Steps shown; Steps does not open Console. */
+	private onConsoleRailCollapsedChange(collapsed: boolean): void {
+		this.consoleRailCollapsed = collapsed;
+		if (!collapsed) {
+			this.setStepsCollapsed(false);
+			return;
+		}
+		// Collapse together on the same 1s clock — do not start a second Steps timer.
+		if (!this.stepsHovering) {
+			this.setStepsCollapsed(true);
+		}
+	}
+
+	private bindStepsAutoHide(): void {
+		const onEnter = (): void => {
+			this.stepsHovering = true;
+			this.setStepsCollapsed(false);
+		};
+		const onLeave = (): void => {
+			this.stepsHovering = false;
+			this.scheduleStepsHide();
+		};
+		this._register(addDisposableListener(this.uiStepsPane, 'pointerenter', onEnter));
+		this._register(addDisposableListener(this.uiStepsPane, 'pointerleave', onLeave));
+		this._register(addDisposableListener(this.uiStepsReopenBtn, 'pointerenter', onEnter));
+		this._register(addDisposableListener(this.uiStepsReopenBtn, 'pointerleave', onLeave));
+		this._register(addDisposableListener(this.uiStepsReopenBtn, 'focus', () => this.setStepsCollapsed(false)));
+		this._register(addDisposableListener(this.uiContainer, 'pointermove', (event: PointerEvent) => {
+			if (!this.stepsCollapsed || this.uiStepsPane.classList.contains('hidden')) {
+				return;
+			}
+			const rect = this.uiContainer.getBoundingClientRect();
+			if (event.clientY - rect.top <= STEPS_REVEAL_EDGE_PX) {
+				this.setStepsCollapsed(false);
+			}
+		}));
+		this._register(toDisposable(() => this.clearStepsHideTimer()));
+	}
+
+	/**
+	 * Show the top Steps panel for Console lifecycle or Surface plan Steps.
+	 * Hides the pane entirely when neither context is active.
+	 */
+	private syncStepsPanel(): void {
+		const showConsole = this.isConsoleCardSelected();
+		const showSurface = Boolean(this.getOpenSurfaceId());
+		const active = showConsole || showSurface;
+
+		this.uiStepsPane.classList.toggle('hidden', !active);
+		this.uiStepsReopenBtn.classList.toggle('hidden', !active);
+
+		const surfaceTracker = this.surfacePlanPanel?.statusTrackerElement;
+		if (surfaceTracker) {
+			this.surfacePlanPanel?.attachStatusTracker(this.uiStepsHost);
+			surfaceTracker.classList.toggle('hidden', !showSurface);
+		}
+		if (this.uiConsoleStatusTracker) {
+			if (this.uiConsoleStatusTracker.parentElement !== this.uiStepsHost) {
+				this.uiStepsHost.appendChild(this.uiConsoleStatusTracker);
+			}
+			// Console visibility is also toggled in renderConsoleWorkflowProgress.
+			this.uiConsoleStatusTracker.classList.toggle('hidden', !showConsole);
+		}
+
+		if (!active) {
+			this.clearStepsHideTimer();
+			this.stepsCollapsed = false;
+			this.uiContainer.classList.remove('custom-mode-ui-steps-collapsed');
+			this.syncStepsReopenAttention();
+			return;
+		}
+
+		if (!this.stepsHovering) {
+			this.scheduleStepsHide();
+		}
+		this.syncStepsReopenAttention();
+	}
+
+	/** Pulse the Steps chip when the active context has a pending or in-progress step. */
+	private syncStepsReopenAttention(): void {
+		if (!this.uiStepsReopenBtn) {
+			return;
+		}
+		const openSurfaceId = this.getOpenSurfaceId();
+		let attentionLabel: string | undefined;
+		if (openSurfaceId) {
+			attentionLabel = this.surfacePendingActionById.get(openSurfaceId);
+		} else if (this.isConsoleCardSelected()) {
+			// Console Steps: surface-level pending/in-progress, or an incomplete Console lifecycle step.
+			attentionLabel = [...this.surfacePendingActionById.values()][0];
+			if (!attentionLabel) {
+				const status = resolveConsoleWorkflowStatus({
+					kickoffInFlight: this.workspacePlanKickoffInFlight,
+					sessionActive: this.workspacePlanSessionActive,
+					hasWorkspacePlan: this.workspacePlanArtifactExists,
+					hasSuggestedSurfaces: Boolean(this.workspaceSuggestedSurfaces?.surfaces.length),
+					suggestedStatus: this.workspaceSuggestedSurfaces?.status,
+					surfaceCount: this.consoleService.getSurfaces().length,
+					anySurfaceRunning: this.startedSurfaceServers.size > 0,
+					anySurfaceBuilding: this.startingSurfaceServers.size > 0,
+				});
+				const current = status.steps.find(step => step.status === 'current');
+				if (current && status.stageId !== 'running') {
+					attentionLabel = current.label;
+				}
+			}
+		}
+		const hasAttention = Boolean(attentionLabel) && !this.uiStepsReopenBtn.classList.contains('hidden');
+		this.uiStepsReopenBtn.classList.toggle('has-pending-action', hasAttention);
+		this.uiStepsReopenBtn.title = attentionLabel
+			? localize('customMode.stepsReopenPending', 'Open Steps — {0}', attentionLabel)
+			: localize('customMode.stepsReopen', 'Open Steps');
+		this.uiStepsReopenBtn.setAttribute(
+			'aria-label',
+			attentionLabel
+				? localize('customMode.stepsReopenPendingAria', 'Open Steps, {0}', attentionLabel)
+				: localize('customMode.stepsReopen', 'Open Steps'),
+		);
+	}
+
+	private clearUiChatHideTimer(): void {
+		if (this.uiChatHideTimer !== undefined) {
+			mainWindow.clearTimeout(this.uiChatHideTimer);
+			this.uiChatHideTimer = undefined;
+		}
+	}
+
+	private scheduleUiChatHide(): void {
+		if (this.uiChatHovering || this._uiChatDismissed) {
+			return;
+		}
+		this.clearUiChatHideTimer();
+		this.uiChatHideTimer = mainWindow.setTimeout(() => {
+			this.uiChatHideTimer = undefined;
+			if (!this.uiChatHovering && !this._uiChatDismissed) {
+				this.setUiChatDismissed(true);
+			}
+		}, CARD_RAIL_AUTO_HIDE_MS);
+	}
+
+	private bindUiChatAutoHide(): void {
+		const onEnter = (): void => {
+			this.uiChatHovering = true;
+			this.setUiChatDismissed(false);
+		};
+		const onLeave = (): void => {
+			this.uiChatHovering = false;
+			this.scheduleUiChatHide();
+		};
+		this._register(addDisposableListener(this.uiChatColumn, 'pointerenter', onEnter));
+		this._register(addDisposableListener(this.uiChatColumn, 'pointerleave', onLeave));
+		this._register(addDisposableListener(this.uiChatReopenBtn, 'pointerenter', onEnter));
+		this._register(addDisposableListener(this.uiChatReopenBtn, 'pointerleave', onLeave));
+		this._register(addDisposableListener(this.uiChatReopenBtn, 'focus', () => this.setUiChatDismissed(false)));
+		this._register(addDisposableListener(this.uiBodyRow, 'pointermove', (event: PointerEvent) => {
+			if (!this._uiChatDismissed) {
+				return;
+			}
+			const rect = this.uiBodyRow.getBoundingClientRect();
+			if (rect.right - event.clientX <= UI_CHAT_REVEAL_EDGE_PX) {
+				this.setUiChatDismissed(false);
+			}
+		}));
+		this._register(toDisposable(() => this.clearUiChatHideTimer()));
+		if (!this._uiChatDismissed) {
+			this.scheduleUiChatHide();
+		}
+	}
+
+	/** Green outline while dragging files/media into the Claude Code terminal pane. */
+	private bindClaudeTerminalDragOverFeedback(): void {
+		const pane = this.uiClaudeTerminalPane;
+		const clear = (): void => pane.classList.remove('dragover');
+		const show = (event: DragEvent): void => {
+			if (!this.dragEventHasFiles(event)) {
+				return;
+			}
+			// Keep the browser drop target live so Claude Code still receives the file.
+			event.preventDefault();
+			if (event.dataTransfer) {
+				event.dataTransfer.dropEffect = 'copy';
+			}
+			this.setClaudeTerminalCollapsed(false);
+			pane.classList.add('dragover');
+		};
+		this._register(addDisposableListener(pane, 'dragenter', show));
+		this._register(addDisposableListener(pane, 'dragover', show));
+		this._register(addDisposableListener(pane, 'dragleave', event => {
+			const related = event.relatedTarget;
+			if (related instanceof Node && pane.contains(related)) {
+				return;
+			}
+			clear();
+		}));
+		// Visual only — do not handle the drop; Claude Code owns the file ingest.
+		this._register(addDisposableListener(pane, 'drop', clear));
+		this._register(addDisposableListener(pane, 'dragend', clear));
 	}
 
 	private relayoutTerminalInstances(): void {
@@ -6586,8 +7605,9 @@ class ModeShellContribution extends Disposable {
 		const fallbackHeight = Math.max(180, Math.floor(mainWindow.innerHeight * 0.28));
 		const claudeHostWidth = this.uiClaudeTerminalHost.clientWidth;
 		const claudeHostHeight = this.uiClaudeTerminalHost.clientHeight;
+		const visibleClaude = this.getVisibleClaudeTerminalInstance();
 		for (const instance of this.terminalService.instances) {
-			if (instance === this.claudeTerminalInstance && claudeHostWidth > 0 && claudeHostHeight > 0) {
+			if (instance === visibleClaude && claudeHostWidth > 0 && claudeHostHeight > 0) {
 				instance.layout(new Dimension(claudeHostWidth, claudeHostHeight));
 				continue;
 			}
@@ -6765,13 +7785,21 @@ class ModeShellContribution extends Disposable {
 
 	private setUiChatDismissed(dismissed: boolean): void {
 		if (this._uiChatDismissed === dismissed) {
+			if (!dismissed) {
+				this.clearUiChatHideTimer();
+				this.scheduleUiChatHide();
+			}
 			return;
 		}
 		this._uiChatDismissed = dismissed;
 		this.uiContainer.classList.toggle('custom-mode-ui-chat-dismissed', dismissed);
 		this.storageService.store(STORAGE_UI_CHAT_DISMISSED, dismissed ? '1' : '0', StorageScope.PROFILE, StorageTarget.USER);
 		if (dismissed) {
+			this.clearUiChatHideTimer();
 			this.endSurfaceSetupHandoff();
+		} else {
+			this.clearUiChatHideTimer();
+			this.scheduleUiChatHide();
 		}
 		const inUi = this.modeService.getMode() === 'UI';
 		const showUiChat = inUi && !dismissed;
@@ -7077,35 +8105,20 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceSetupLogoMarkDropzone = logoMarkDropzone.dropzone;
 		this.uiSurfaceSetupLogoMarkPreview = logoMarkDropzone.preview;
 
-		this.uiWorkspacePlanBrandFields = $('div.custom-mode-ui-surface-business-context.custom-mode-ui-workspace-home-panel.hidden', undefined,
-			$('label.custom-mode-ui-surface-goal-field', undefined,
-				$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalDescriptionLabel', 'Description')),
-				this.uiSurfaceSetupGoalDescriptionInput
-			),
-			$('div.custom-mode-ui-surface-brand-logos', undefined,
-				$('div.custom-mode-ui-surface-brand-logo-slot', undefined,
-					$('div.custom-mode-ui-surface-brand-logo-label', undefined, localize('customMode.surfaceSetupBrandLogo', 'Logo')),
-					this.uiSurfaceSetupLogoDropzone
-				),
-				$('div.custom-mode-ui-surface-brand-logo-slot', undefined,
-					$('div.custom-mode-ui-surface-brand-logo-label', undefined, localize('customMode.surfaceSetupBrandLogoMark', 'Logo mark')),
-					this.uiSurfaceSetupLogoMarkDropzone
-				)
-			),
-			brandColors,
-		);
-
-		this.uiWorkspaceClaudeMdPanelRoot = $('div.custom-mode-ui-workspace-claude-md-panel.custom-mode-ui-workspace-home-panel.hidden');
-		this.workspaceClaudeMdPanel = this._register(new SurfaceClaudeMdPanel(this.uiWorkspaceClaudeMdPanelRoot, this.fileService));
-
 		this.uiWorkspacePlanHomePanel = $('div.custom-mode-ui-workspace-plan-home.custom-mode-ui-workspace-home-panel', undefined,
-			$('label.custom-mode-ui-surface-goal-field', undefined,
-				$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalNameLabel', 'Business name')),
-				this.uiSurfaceSetupGoalNameInput
-			),
-			this.uiWorkspacePlanStrip,
-			$('div.custom-mode-ui-workspace-plan-home-actions', undefined,
-				this.uiClearAllSurfacesBtn,
+			$('div.custom-mode-ui-surface-starters', undefined,
+				$('div.custom-mode-ui-surface-starters-header', undefined,
+					$('div.custom-mode-ui-surface-surfaces-title', undefined, localize('customMode.workspacePlanSectionTitle', 'Plan')),
+				),
+				$('div.custom-mode-ui-workspace-surfaces', undefined,
+					$('div.custom-mode-ui-workspace-surfaces-header', undefined,
+						$('div.custom-mode-ui-workspace-surfaces-title', undefined, localize('customMode.workspacePlanSectionSubtitle', 'Workspace plan')),
+					),
+					$('label.custom-mode-ui-surface-goal-field', undefined,
+						this.uiSurfaceSetupGoalNameInput
+					),
+					this.uiWorkspacePlanStrip,
+				),
 			),
 		);
 
@@ -7113,7 +8126,10 @@ class ModeShellContribution extends Disposable {
 			$('div.custom-mode-ui-surface-starters', undefined,
 				$('div.custom-mode-ui-surface-starters-header', undefined,
 					surfacesTitle,
-					this.uiStartAllSurfacesButton,
+					$('div.custom-mode-ui-surface-starters-header-actions', undefined,
+						this.uiStartAllSurfacesButton,
+						this.uiClearAllSurfacesBtn,
+					),
 				),
 				// Order: real workspace surfaces → suggested → Create Surface.
 				this.uiWorkspaceSurfacesHost,
@@ -7122,29 +8138,75 @@ class ModeShellContribution extends Disposable {
 			),
 		);
 
+		const rulesBody = $('div.custom-mode-ui-workspace-claude-md-body');
+		this.uiWorkspaceClaudeMdPanelRoot = $('div.custom-mode-ui-workspace-claude-md-panel.custom-mode-ui-workspace-home-panel.hidden', undefined,
+			$('div.custom-mode-ui-surface-starters', undefined,
+				$('div.custom-mode-ui-surface-starters-header', undefined,
+					$('div.custom-mode-ui-surface-surfaces-title', undefined, localize('customMode.workspaceRulesSectionTitle', 'Rules')),
+				),
+				$('div.custom-mode-ui-workspace-surfaces', undefined,
+					$('div.custom-mode-ui-workspace-surfaces-header', undefined,
+						$('div.custom-mode-ui-workspace-surfaces-title', undefined, localize('customMode.workspaceRulesSectionSubtitle', 'Workspace agent agreement')),
+					),
+					rulesBody,
+				),
+			),
+		);
+		this.workspaceClaudeMdPanel = this._register(new SurfaceClaudeMdPanel(rulesBody, this.fileService));
+
+		this.uiWorkspacePlanBrandFields = $('div.custom-mode-ui-surface-business-context.custom-mode-ui-workspace-home-panel.hidden', undefined,
+			$('div.custom-mode-ui-surface-starters', undefined,
+				$('div.custom-mode-ui-surface-starters-header', undefined,
+					$('div.custom-mode-ui-surface-surfaces-title', undefined, localize('customMode.workspaceBrandSectionTitle', 'Brand')),
+				),
+				$('div.custom-mode-ui-workspace-surfaces', undefined,
+					$('div.custom-mode-ui-workspace-surfaces-header', undefined,
+						$('div.custom-mode-ui-workspace-surfaces-title', undefined, localize('customMode.workspaceBrandSectionSubtitle', 'Identity')),
+					),
+					$('label.custom-mode-ui-surface-goal-field', undefined,
+						$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalDescriptionLabel', 'Description')),
+						this.uiSurfaceSetupGoalDescriptionInput
+					),
+					$('div.custom-mode-ui-surface-brand-logos', undefined,
+						$('div.custom-mode-ui-surface-brand-logo-slot', undefined,
+							$('div.custom-mode-ui-surface-brand-logo-label', undefined, localize('customMode.surfaceSetupBrandLogo', 'Logo')),
+							this.uiSurfaceSetupLogoDropzone
+						),
+						$('div.custom-mode-ui-surface-brand-logo-slot', undefined,
+							$('div.custom-mode-ui-surface-brand-logo-label', undefined, localize('customMode.surfaceSetupBrandLogoMark', 'Logo mark')),
+							this.uiSurfaceSetupLogoMarkDropzone
+						)
+					),
+					brandColors,
+				),
+			),
+		);
+
 		this.uiConsoleStatusRail = $('div.custom-mode-surface-plan-status-rail', {
 			role: 'list',
 			'aria-label': localize('customMode.consoleWorkflowProgressRail', 'Console lifecycle progress'),
 		});
-		this.uiConsoleStatusTracker = $('div.custom-mode-surface-plan-status-tracker', {
+		this.uiConsoleStatusTracker = $('div.custom-mode-surface-plan-status-tracker.hidden', {
 			'aria-live': 'polite',
 		}, this.uiConsoleStatusRail);
+		// Console Steps share the shell top panel with Surface plan Steps.
+		this.uiStepsHost.appendChild(this.uiConsoleStatusTracker);
 		this.uiConsoleStatusLabel = $('div.custom-mode-ui-console-home-status');
+		// Stack order matches Console section rail cards: Plan → Surfaces → Rules → Brand.
 		this.uiConsoleSectionHost = $('div.custom-mode-ui-console-section-host', undefined,
 			this.uiWorkspacePlanHomePanel,
+			this.uiSurfaceSetupSurfacesBody,
 			this.uiWorkspaceClaudeMdPanelRoot,
 			this.uiWorkspacePlanBrandFields,
-			this.uiSurfaceSetupSurfacesBody,
 		);
 		this.uiConsoleHomeHost = $('div.custom-mode-ui-console-home', undefined,
-			this.uiConsoleStatusTracker,
 			this.uiConsoleStatusLabel,
 			this.uiConsoleSectionHost,
 		);
 
 		const storedConsoleSection = this.storageService.get(STORAGE_CONSOLE_SECTION, StorageScope.WORKSPACE)
 			?? this.storageService.get(STORAGE_WORKSPACE_HOME_VIEW, StorageScope.WORKSPACE);
-		this.workspaceHomeView = isWorkspaceHomeView(storedConsoleSection) ? storedConsoleSection : 'workspacePlan';
+		this.workspaceHomeView = isWorkspaceHomeView(storedConsoleSection) ? storedConsoleSection : 'surfaces';
 		const storedConsoleExpanded = this.storageService.get(STORAGE_CONSOLE_EXPANDED, StorageScope.WORKSPACE);
 		this.consoleExpanded = storedConsoleExpanded !== '0';
 
@@ -7162,6 +8224,9 @@ class ModeShellContribution extends Disposable {
 			className: 'custom-mode-ui-workspace-home-rail',
 			activeId: this.consoleExpanded ? `consoleSection:${this.workspaceHomeView}` : 'console',
 			width: Number.isFinite(storedRailWidth) ? clampCardRailWidth(storedRailWidth) : CARD_RAIL_DEFAULT_WIDTH,
+			autoHideMs: CARD_RAIL_AUTO_HIDE_MS,
+			revealLabel: localize('customMode.consoleEdgeTab', 'Console'),
+			onCollapsedChange: collapsed => this.onConsoleRailCollapsedChange(collapsed),
 			onWidthChange: width => {
 				this.storageService.store(STORAGE_CARD_RAIL_WIDTH, String(width), StorageScope.PROFILE, StorageTarget.USER);
 			},
@@ -7202,14 +8267,16 @@ class ModeShellContribution extends Disposable {
 					if (!sectionId) {
 						return;
 					}
-					// Keep the surface open — highlight section + keep parent surface selected.
-					this.activeRailCardId = id;
 					const openSurfaceId = this.getOpenSurfaceId();
-					this.uiWorkspaceHomeCardRail.setActiveId(
-						id,
-						openSurfaceId ? [`surface:${openSurfaceId}`] : [],
-					);
-					this.surfacePlanPanel?.selectSection(sectionId);
+					if (openSurfaceId) {
+						this.selectSurfaceSectionCard(openSurfaceId, sectionId);
+					} else {
+						this.activeRailCardId = id;
+						this.uiWorkspaceHomeCardRail.setActiveId(id, []);
+						this.surfaceMainView = sectionId === 'preview' ? 'preview' : 'plan';
+						this.syncSurfaceMainView();
+						this.surfacePlanPanel?.selectSection(sectionId);
+					}
 					return;
 				}
 				if (id.startsWith('surface:')) {
@@ -7229,6 +8296,8 @@ class ModeShellContribution extends Disposable {
 			content: [
 				this.uiConsoleHomeHost,
 				this.uiSurfacePlanPanelRoot,
+				this.uiSurfaceLaunchPanel,
+				this.uiSurfaceEmptyState,
 			],
 		});
 		this._register({ dispose: () => this.uiWorkspaceHomeCardRail.dispose() });
@@ -7510,9 +8579,9 @@ class ModeShellContribution extends Disposable {
 				attachmentPaths,
 			});
 			this.logClaudeKickoff(`workspace-plan reset Claude terminal`);
-			await this.resetClaudeTerminalSession();
+			await this.resetClaudeTerminalSession(WORKSPACE_CLAUDE_KEY);
 			this.logClaudeKickoff(`workspace-plan create Claude terminal`);
-			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder, { forceNew: true });
+			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder, WORKSPACE_CLAUDE_KEY, { forceNew: true, reveal: true });
 			await terminal.processReady;
 			await this.prepareTerminalForCommandOutput(terminal, 40, 2000);
 			await terminal.focusWhenReady(true);
@@ -7520,15 +8589,13 @@ class ModeShellContribution extends Disposable {
 			await timeout(120);
 			this.relayoutTerminalInstances();
 			this.logClaudeKickoff(`workspace-plan terminal ${created ? 'created' : 'reused'} id=${terminal.instanceId} host=${this.uiClaudeTerminalHost.clientWidth}x${this.uiClaudeTerminalHost.clientHeight} cols=${terminal.cols}`);
-			if (created) {
+			if (created && this.markClaudeCliStarted(WORKSPACE_CLAUDE_KEY)) {
 				this.logClaudeKickoff(`workspace-plan send 'claude'`);
 				await terminal.sendText('claude', true);
 				await timeout(1800);
 				this.relayoutTerminalInstances();
-				await this.submitClaudePrompt(terminal, prompt);
-			} else {
-				await this.submitClaudePrompt(terminal, prompt);
 			}
+			await this.submitClaudePrompt(terminal, prompt);
 			if (terminal.isDisposed || terminal.exitReason !== undefined) {
 				throw new Error(`Claude terminal exited during kickoff (reason=${terminal.exitReason ?? 'disposed'})`);
 			}
@@ -7608,27 +8675,83 @@ class ModeShellContribution extends Disposable {
 		const generation = ++this.surfacePendingActionRefreshGeneration;
 		if (!folder) {
 			this.surfacePendingActionById.clear();
+			this.surfaceStepActivityById.clear();
 			this.syncWorkspaceHomeView();
+			this.syncStepsReopenAttention();
 			return;
 		}
 		const surfaces = this.consoleService.getSurfaces();
 		const entries = await Promise.all(surfaces.map(async surface => {
-			const action = await resolveSurfacePendingPlanAction(this.fileService, folder, surface.id, {
+			const probe = await resolveSurfacePendingPlanAction(this.fileService, folder, surface.id, {
 				surfacePath: surface.path,
 				surfaceConfirmed: true,
+				localUrl: surface.localUrl,
+				devCommand: surface.devCommand,
 			});
-			return [surface.id, action?.label] as const;
+			return [surface.id, probe.attentionLabel, probe.activityMs] as const;
 		}));
 		if (generation !== this.surfacePendingActionRefreshGeneration) {
 			return;
 		}
 		this.surfacePendingActionById.clear();
-		for (const [surfaceId, label] of entries) {
+		this.surfaceStepActivityById.clear();
+		for (const [surfaceId, label, activityMs] of entries) {
 			if (label) {
 				this.surfacePendingActionById.set(surfaceId, label);
 			}
+			if (activityMs > 0) {
+				this.surfaceStepActivityById.set(surfaceId, activityMs);
+			}
 		}
 		this.syncWorkspaceHomeView();
+		this.syncStepsReopenAttention();
+	}
+
+	/** Surfaces ordered by most recent associated plan-step activity (manifest order as tiebreaker). */
+	private surfacesByRecentStepActivity(): WorkspaceSurface[] {
+		const surfaces = this.consoleService.getSurfaces();
+		return surfaces
+			.map((surface, index) => ({ surface, index, activityMs: this.surfaceStepActivityById.get(surface.id) ?? 0 }))
+			.sort((a, b) => b.activityMs - a.activityMs || a.index - b.index)
+			.map(entry => entry.surface);
+	}
+
+	/** Activity order, or the frozen post-selection order while the reorder delay is active. */
+	private orderedWorkspaceSurfaces(): WorkspaceSurface[] {
+		const byActivity = this.surfacesByRecentStepActivity();
+		const frozen = this.frozenSurfaceOrderIds;
+		if (!frozen?.length) {
+			return byActivity;
+		}
+		const byId = new Map(byActivity.map(surface => [surface.id, surface]));
+		const ordered: WorkspaceSurface[] = [];
+		for (const id of frozen) {
+			const surface = byId.get(id);
+			if (surface) {
+				ordered.push(surface);
+				byId.delete(id);
+			}
+		}
+		for (const surface of byActivity) {
+			if (byId.has(surface.id)) {
+				ordered.push(surface);
+			}
+		}
+		return ordered;
+	}
+
+	/** Keep the rail stable briefly after a Surface is selected, then apply recent-step order. */
+	private scheduleSurfaceRailReorderDelay(): void {
+		this.frozenSurfaceOrderIds = this.orderedWorkspaceSurfaces().map(surface => surface.id);
+		if (this.surfaceReorderDelayTimer !== undefined) {
+			mainWindow.clearTimeout(this.surfaceReorderDelayTimer);
+		}
+		this.surfaceReorderDelayTimer = mainWindow.setTimeout(() => {
+			this.surfaceReorderDelayTimer = undefined;
+			this.frozenSurfaceOrderIds = undefined;
+			this.syncWorkspaceHomeView();
+			this.renderWorkspaceSurfaces();
+		}, SURFACE_RAIL_REORDER_DELAY_MS);
 	}
 
 	private async refreshWorkspaceSuggestedSurfaces(workspaceFolder?: URI): Promise<void> {
@@ -7679,10 +8802,12 @@ class ModeShellContribution extends Disposable {
 		const showSteps = this.isConsoleCardSelected();
 		this.uiConsoleStatusTracker.classList.toggle('hidden', !showSteps);
 		this.uiConsoleStatusLabel.classList.toggle('hidden', !showSteps);
+		this.syncStepsPanel();
 		if (!showSteps) {
 			this.uiConsoleStatusRail.replaceChildren();
 			this.uiConsoleStatusLabel.textContent = '';
 			this.lastConsoleCenteredStepId = undefined;
+			this.syncStepsReopenAttention();
 			return;
 		}
 		const pendingLabels = [...this.surfacePendingActionById.values()];
@@ -7703,10 +8828,9 @@ class ModeShellContribution extends Disposable {
 			const step = status.steps[index]!;
 			this.uiConsoleStatusRail.appendChild(this.createConsoleWorkflowProgressStep(step, index < status.steps.length - 1));
 		}
-		this.uiConsoleStatusLabel.textContent = status.statusLabel
-			|| (status.stageId === 'idle'
-				? localize('customMode.consoleWorkflowIdle', 'Kick off workspace planning to start the Console lifecycle.')
-				: '');
+		this.uiConsoleStatusLabel.textContent = status.stageId === 'idle'
+			? localize('customMode.consoleWorkflowIdle', 'Kick off workspace planning to start the Console lifecycle.')
+			: '';
 		const currentStepId = status.steps.find(step => step.status === 'current')?.id;
 		if (currentStepId && currentStepId !== this.lastConsoleCenteredStepId) {
 			this.lastConsoleCenteredStepId = currentStepId;
@@ -7714,6 +8838,7 @@ class ModeShellContribution extends Disposable {
 		} else if (!currentStepId) {
 			this.lastConsoleCenteredStepId = undefined;
 		}
+		this.syncStepsReopenAttention();
 	}
 
 	private createConsoleWorkflowProgressStep(step: ConsoleWorkflowStepState, withConnector: boolean): HTMLElement {
@@ -7788,34 +8913,160 @@ class ModeShellContribution extends Disposable {
 		this.applySurfaceSelection(ADD_SURFACE_ID, { contextGathering: true });
 		this.syncGoalSurfaceSwitcher();
 		this.syncSurfaceMainView();
+		this.showClaudeTerminalForKey(WORKSPACE_CLAUDE_KEY);
 	}
 
-	/** Highlight the SURFACE card that owns the Steps rail (keep Plan open). */
+	/** Ensure this SURFACE is open and a section card owns the content pane. */
 	private selectOwningSurfaceCard(surfaceId: string): void {
 		const id = surfaceId.trim();
 		if (!id) {
 			return;
 		}
-		const cardId = `surface:${id}`;
-		this.activeRailCardId = cardId;
 		if (this.selectedSurfaceId !== id) {
 			void this.openWorkspaceSuggestedSurfacePlan(id);
 			return;
 		}
-		// Primary selection is always the SURFACE card; section cards stay visible but not focused.
+		const currentSection = this.activeRailCardId?.startsWith('surfaceSection:')
+			? this.activeRailCardId.slice('surfaceSection:'.length)
+			: undefined;
+		if (currentSection && this.surfaceRailCards.some(card => card.id === `surfaceSection:${currentSection}`)) {
+			this.selectSurfaceSectionCard(id, currentSection);
+			return;
+		}
+		this.selectDefaultSurfaceSectionOrOwner(id);
+	}
+
+	/** Step click: open the surface and focus the card associated with that step. */
+	private selectSurfaceForPlanStep(request: {
+		readonly surfaceId: string;
+		readonly stepId?: string;
+		readonly stepKind?: 'stage' | 'action' | 'phase' | 'blocker';
+	}): void {
+		const surfaceId = request.surfaceId.trim();
+		if (!surfaceId) {
+			return;
+		}
+		const available = this.surfaceRailCards
+			.map(card => card.id.startsWith('surfaceSection:') ? card.id.slice('surfaceSection:'.length) : '')
+			.filter((id): id is string => Boolean(id));
+		const sectionId = request.stepId
+			? resolveSurfaceSectionIdForStep(
+				{ id: request.stepId, kind: request.stepKind ?? 'stage' },
+				available,
+			)
+			: undefined;
+		if (sectionId) {
+			this.pendingSurfaceSectionId = sectionId;
+		}
+		if (this.selectedSurfaceId !== surfaceId) {
+			void this.openWorkspaceSuggestedSurfacePlan(surfaceId);
+			return;
+		}
+		if (sectionId && this.surfaceRailCards.some(card => card.id === `surfaceSection:${sectionId}`)) {
+			this.pendingSurfaceSectionId = undefined;
+			this.selectSurfaceSectionCard(surfaceId, sectionId);
+			return;
+		}
+		if (sectionId) {
+			// Cards still loading — pendingSurfaceSectionId is consumed when they publish.
+			this.selectOwningSurfaceCard(surfaceId);
+			return;
+		}
+		this.selectOwningSurfaceCard(surfaceId);
+	}
+
+	private surfaceSectionStorageKey(surfaceId: string): string {
+		return `${STORAGE_SURFACE_SECTION_PREFIX}${surfaceId}`;
+	}
+
+	private getStoredSurfaceSection(surfaceId: string): string | undefined {
+		const stored = this.storageService.get(this.surfaceSectionStorageKey(surfaceId), StorageScope.WORKSPACE)?.trim();
+		return stored || undefined;
+	}
+
+	private persistSurfaceSection(surfaceId: string, sectionId: string): void {
+		this.storageService.store(this.surfaceSectionStorageKey(surfaceId), sectionId, StorageScope.WORKSPACE, StorageTarget.USER);
+	}
+
+	/** Last-used section for this surface, else the first ready section card. */
+	private resolveDefaultSurfaceSectionId(surfaceId: string): string | undefined {
+		if (!this.surfaceRailCards.length) {
+			return undefined;
+		}
+		const pending = this.pendingSurfaceSectionId;
+		if (pending && this.surfaceRailCards.some(card => card.id === `surfaceSection:${pending}`)) {
+			this.pendingSurfaceSectionId = undefined;
+			return pending;
+		}
+		const stored = this.getStoredSurfaceSection(surfaceId);
+		if (stored && this.surfaceRailCards.some(card => card.id === `surfaceSection:${stored}`)) {
+			return stored;
+		}
+		const first = this.surfaceRailCards[0]?.id;
+		return first?.startsWith('surfaceSection:') ? first.slice('surfaceSection:'.length) : undefined;
+	}
+
+	private selectSurfaceSectionCard(surfaceId: string, sectionId: string): void {
+		const id = `surfaceSection:${sectionId}`;
+		this.activeRailCardId = id;
+		this.surfaceMainView = sectionId === 'preview' ? 'preview' : 'plan';
+		this.persistSurfaceMainView(surfaceId, this.surfaceMainView);
+		this.persistSurfaceSection(surfaceId, sectionId);
+		this.uiWorkspaceHomeCardRail?.setActiveId(id, [`surface:${surfaceId}`]);
+		// Preview "not reachable" empty chrome must not stick when focusing Graph/Plan/…
+		// — otherwise syncWorkspaceHomeView keeps the plan column hidden under that copy.
+		if (sectionId !== 'preview') {
+			this.lastSurfacePreviewRouteKey = undefined;
+			this.setSurfaceEmptyState(undefined);
+		}
+		this.syncWorkspaceHomeView();
+		this.syncSurfaceMainView();
+		this.surfacePlanPanel?.selectSection(sectionId);
+		if (sectionId === 'preview') {
+			this.routeSelectedSurfacePreview();
+		}
+	}
+
+	/** Prefer a section card so the content pane is never "surface selected, nothing focused". */
+	private selectDefaultSurfaceSectionOrOwner(surfaceId: string): void {
+		const sectionId = this.resolveDefaultSurfaceSectionId(surfaceId);
+		if (sectionId) {
+			this.selectSurfaceSectionCard(surfaceId, sectionId);
+			return;
+		}
+		const cardId = `surface:${surfaceId}`;
+		this.activeRailCardId = cardId;
 		this.uiWorkspaceHomeCardRail?.setActiveId(cardId, []);
 		this.syncWorkspaceHomeView();
 	}
 
-	private setWorkspaceHomeView(view: WorkspaceHomeView): void {
-		if (this.workspaceHomeView === view) {
-			this.syncWorkspaceHomeView();
-			return;
+	private setWorkspaceHomeView(view: WorkspaceHomeView, options?: { scroll?: boolean }): void {
+		if (this.workspaceHomeView !== view) {
+			this.workspaceHomeView = view;
+			this.storageService.store(STORAGE_WORKSPACE_HOME_VIEW, view, StorageScope.WORKSPACE, StorageTarget.USER);
+			this.storageService.store(STORAGE_CONSOLE_SECTION, view, StorageScope.WORKSPACE, StorageTarget.USER);
 		}
-		this.workspaceHomeView = view;
-		this.storageService.store(STORAGE_WORKSPACE_HOME_VIEW, view, StorageScope.WORKSPACE, StorageTarget.USER);
-		this.storageService.store(STORAGE_CONSOLE_SECTION, view, StorageScope.WORKSPACE, StorageTarget.USER);
 		this.syncWorkspaceHomeView();
+		if (options?.scroll !== false) {
+			this.scrollConsoleHomeSectionIntoView(view);
+		}
+	}
+
+	private getConsoleHomeSectionElement(view: WorkspaceHomeView): HTMLElement | undefined {
+		switch (view) {
+			case 'workspacePlan':
+				return this.uiWorkspacePlanHomePanel;
+			case 'claudeMd':
+				return this.uiWorkspaceClaudeMdPanelRoot;
+			case 'branding':
+				return this.uiWorkspacePlanBrandFields;
+			case 'surfaces':
+				return this.uiSurfaceSetupSurfacesBody;
+		}
+	}
+
+	private scrollConsoleHomeSectionIntoView(view: WorkspaceHomeView): void {
+		this.getConsoleHomeSectionElement(view)?.scrollIntoView({ behavior: 'auto', block: 'start' });
 	}
 
 	private persistConsoleExpanded(): void {
@@ -7857,23 +9108,24 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private getWorkspaceHomeCards(): CardRailItem[] {
-		const existing = this.consoleService.getSurfaces();
+		const existing = this.orderedWorkspaceSurfaces();
 		const openSurfaceId = this.getOpenSurfaceId();
+		// Subtitles only on surface-related cards (Surfaces / New Surface / Surface rows / sections).
 		const cards: CardRailItem[] = [
-			{
-				id: 'code',
-				key: localize('customMode.workspaceHomeCodeKey', 'Code'),
-				value: localize('customMode.workspaceHomeCodeValue', 'Editor'),
-				title: localize('customMode.codeTabTitle', 'Open Code editor'),
-				groupLabel: localize('customMode.workspaceHomeWorkspaceSection', 'Workspace'),
-			},
 			{
 				id: 'console',
 				key: localize('customMode.workspaceHomeConsoleKey', 'Console'),
-				value: localize('customMode.workspaceHomeConsoleValue', 'home'),
+				value: '',
 				title: this.consoleExpanded && !openSurfaceId
 					? localize('customMode.workspaceHomeConsoleCollapse', 'Collapse Console sections')
 					: localize('customMode.workspaceHomeConsoleOpen', 'Open Console'),
+				groupLabel: localize('customMode.workspaceHomeWorkspaceSection', 'Workspace'),
+			},
+			{
+				id: 'code',
+				key: localize('customMode.workspaceHomeCodeKey', 'Code'),
+				value: '',
+				title: localize('customMode.codeTabTitle', 'Open Code editor'),
 			},
 		];
 
@@ -7883,21 +9135,10 @@ class ModeShellContribution extends Disposable {
 				{
 					id: 'consoleSection:workspacePlan',
 					key: localize('customMode.workspaceHomePlanKey', 'Plan'),
-					value: localize('customMode.workspaceHomePlanValue', 'workspace.plan'),
+					value: '',
 					title: localize('customMode.workspaceHomePlan', 'Workspace Plan'),
 					groupStart: true,
-				},
-				{
-					id: 'consoleSection:claudeMd',
-					key: localize('customMode.workspaceHomeClaudeMdKey', 'Rules'),
-					value: localize('customMode.workspaceHomeClaudeMd', 'CLAUDE.md'),
-					title: localize('customMode.workspaceHomeClaudeMd', 'CLAUDE.md'),
-				},
-				{
-					id: 'consoleSection:branding',
-					key: localize('customMode.workspaceHomeBrandingKey', 'Brand'),
-					value: localize('customMode.workspaceHomeBrandingValue', 'logo · colors'),
-					title: localize('customMode.workspaceHomeBranding', 'Branding'),
+					assocGroup: 'console',
 				},
 				{
 					id: 'consoleSection:surfaces',
@@ -7906,13 +9147,46 @@ class ModeShellContribution extends Disposable {
 						? localize('customMode.workspaceHomeSurfacesSuggestedValue', '{0} suggested', suggestedCount)
 						: localize('customMode.workspaceHomeSurfacesValue', 'apps'),
 					title: localize('customMode.workspaceHomeSurfaces', 'Surfaces — suggested apps and create'),
+					assocGroup: 'console',
+				},
+				{
+					id: 'consoleSection:claudeMd',
+					key: localize('customMode.workspaceHomeClaudeMdKey', 'Rules'),
+					value: '',
+					title: localize('customMode.workspaceHomeClaudeMd', 'CLAUDE.md'),
+					assocGroup: 'console',
+				},
+				{
+					id: 'consoleSection:branding',
+					key: localize('customMode.workspaceHomeBrandingKey', 'Brand'),
+					value: '',
+					title: localize('customMode.workspaceHomeBranding', 'Branding'),
+					assocGroup: 'console',
+				},
+			);
+		}
+
+		// New Surface (Describe / Import) above existing Surfaces — only on Console home,
+		// never mixed into an open surface's section cards.
+		if (!openSurfaceId) {
+			cards.push(
+				{
+					id: 'newSurface:describe',
+					key: localize('customMode.workspaceHomeNewSurfaceDescribeKey', 'Describe'),
+					value: '',
+					title: localize('customMode.surfaceDescribeAppTitle', 'Describe an app and start Claude planning'),
+					groupLabel: localize('customMode.workspaceHomeNewSurfaceSection', 'New Surface'),
+				},
+				{
+					id: 'newSurface:import',
+					key: localize('customMode.workspaceHomeNewSurfaceImportKey', 'Import'),
+					value: '',
+					title: localize('customMode.surfaceImportRepoTitle', 'Import an existing repo as a surface'),
 				},
 			);
 		}
 
 		// Surfaces list: existing surfaces, then open-surface section cards (Files / Graph / …).
-		// Describe / Import stay on the workspace home rail only — never mixed into an open
-		// surface's section cards.
 		let surfaceGroupStarted = false;
 		for (const surface of existing) {
 			const open = surface.id === openSurfaceId;
@@ -7940,31 +9214,16 @@ class ModeShellContribution extends Disposable {
 			surfaceGroupStarted = true;
 		}
 		if (openSurfaceId && this.surfaceRailCards.length) {
+			const surfaceAssoc = `surface:${openSurfaceId}`;
 			let sectionGroupStarted = false;
 			for (const card of this.surfaceRailCards) {
 				cards.push({
 					...card,
 					groupStart: !sectionGroupStarted,
+					assocGroup: surfaceAssoc,
 				});
 				sectionGroupStarted = true;
 			}
-		}
-		if (!openSurfaceId) {
-			cards.push(
-				{
-					id: 'newSurface:describe',
-					key: localize('customMode.workspaceHomeNewSurfaceDescribeKey', 'Describe'),
-					value: localize('customMode.workspaceHomeNewSurfaceDescribeValue', 'New app'),
-					title: localize('customMode.surfaceDescribeAppTitle', 'Describe an app and start Claude planning'),
-					groupLabel: localize('customMode.workspaceHomeNewSurfaceSection', 'New Surface'),
-				},
-				{
-					id: 'newSurface:import',
-					key: localize('customMode.workspaceHomeNewSurfaceImportKey', 'Import'),
-					value: localize('customMode.workspaceHomeNewSurfaceImportValue', 'Repo'),
-					title: localize('customMode.surfaceImportRepoTitle', 'Import an existing repo as a surface'),
-				},
-			);
 		}
 		return cards;
 	}
@@ -7984,15 +9243,16 @@ class ModeShellContribution extends Disposable {
 		// the Console host (its visibility is driven by syncSurfaceMainView).
 		const openSurfaceId = this.getOpenSurfaceId();
 		const showConsoleHost = !openSurfaceId;
-		const showClaudeMd = showConsoleHost && this.workspaceHomeView === 'claudeMd';
-		const showPlan = showConsoleHost && this.workspaceHomeView === 'workspacePlan';
-		const showSurfaces = showConsoleHost && this.workspaceHomeView === 'surfaces';
-		const showBranding = showConsoleHost && this.workspaceHomeView === 'branding';
+		// Stack all Console sections in one scrollable host (same pattern as Surface .sections).
+		// workspaceHomeView is the focused/highlighted section, not exclusive visibility.
 
 		const cards = this.getWorkspaceHomeCards();
 		const cardIds = new Set(cards.map(card => card.id));
+		const defaultSurfaceSectionId = openSurfaceId ? this.resolveDefaultSurfaceSectionId(openSurfaceId) : undefined;
 		const fallbackActive = openSurfaceId
-			? `surface:${openSurfaceId}`
+			? (defaultSurfaceSectionId
+				? `surfaceSection:${defaultSurfaceSectionId}`
+				: `surface:${openSurfaceId}`)
 			: (this.consoleExpanded ? `consoleSection:${this.workspaceHomeView}` : 'console');
 		let activeId = this.activeRailCardId && cardIds.has(this.activeRailCardId)
 			? this.activeRailCardId
@@ -8007,11 +9267,25 @@ class ModeShellContribution extends Disposable {
 		)) {
 			activeId = fallbackActive;
 		}
+		// Surface open: always focus a section subcard once cards exist (never leave only SURFACE selected).
+		const promoteSurfaceSection = Boolean(
+			openSurfaceId
+			&& defaultSurfaceSectionId
+			&& activeId === `surface:${openSurfaceId}`
+		);
+		if (promoteSurfaceSection && defaultSurfaceSectionId) {
+			activeId = `surfaceSection:${defaultSurfaceSectionId}`;
+		}
 		// Console expanded: always focus a section subcard (never leave only the parent selected).
 		if (!openSurfaceId && this.consoleExpanded && !activeId.startsWith('consoleSection:')) {
 			activeId = `consoleSection:${this.workspaceHomeView}`;
 		}
 		this.activeRailCardId = activeId;
+		if (promoteSurfaceSection && openSurfaceId && defaultSurfaceSectionId) {
+			this.persistSurfaceSection(openSurfaceId, defaultSurfaceSectionId);
+			this.surfaceMainView = defaultSurfaceSectionId === 'preview' ? 'preview' : 'plan';
+			this.surfacePlanPanel?.selectSection(defaultSurfaceSectionId);
+		}
 		// Keep the open Console / surface parent highlighted when a nested section card is focused.
 		const alsoSelected: string[] = [];
 		if (openSurfaceId && activeId !== `surface:${openSurfaceId}`) {
@@ -8029,18 +9303,24 @@ class ModeShellContribution extends Disposable {
 			localize('customMode.surfaceRailCardsLoading', 'Loading surface…'),
 		);
 
-		this.uiConsoleHomeHost.classList.toggle('hidden', !showConsoleHost);
-		this.uiWorkspacePlanHomePanel.classList.toggle('hidden', !showPlan);
-		this.uiWorkspaceClaudeMdPanelRoot.classList.toggle('hidden', !showClaudeMd);
-		this.uiSurfaceSetupSurfacesBody.classList.toggle('hidden', !showSurfaces);
-		this.uiWorkspacePlanBrandFields.classList.toggle('hidden', !showBranding);
-		this.uiWorkspacePlanStrip.classList.toggle('hidden', !showPlan);
+		// Manifest/missing empty copy owns the content pane — keep section hosts hidden.
+		const showEmptyContent = !this.uiSurfaceEmptyState.classList.contains('hidden');
+		const showConsoleSections = showConsoleHost && !showEmptyContent;
+		this.uiConsoleHomeHost.classList.toggle('hidden', !showConsoleSections);
+		this.uiWorkspacePlanHomePanel.classList.toggle('hidden', !showConsoleSections);
+		this.uiWorkspaceClaudeMdPanelRoot.classList.toggle('hidden', !showConsoleSections);
+		this.uiSurfaceSetupSurfacesBody.classList.toggle('hidden', !showConsoleSections);
+		this.uiWorkspacePlanBrandFields.classList.toggle('hidden', !showConsoleSections);
+		this.uiSurfaceEmptyState.classList.toggle('hidden', !showEmptyContent);
+		if (showEmptyContent) {
+			this.uiSurfacePlanPanelRoot.classList.add('hidden');
+			this.uiSurfacePlanPanelRoot.hidden = true;
+		}
+		this.uiWorkspacePlanStrip.classList.toggle('hidden', !showConsoleSections);
 		// Steps row visibility follows Console selection (not merely "no surface open").
 		this.renderConsoleWorkflowProgress();
-		if (showSurfaces) {
+		if (showConsoleSections) {
 			this.renderWorkspaceSurfaces();
-		}
-		if (showClaudeMd) {
 			void this.workspaceClaudeMdPanel?.load({ workspaceFolder: this.getWorkspaceFolderUri() });
 		}
 	}
@@ -8048,7 +9328,7 @@ class ModeShellContribution extends Disposable {
 	private renderWorkspaceSurfaces(): void {
 		this.workspaceSurfaceCardListeners.clear();
 		this.uiWorkspaceSurfacesGrid.replaceChildren();
-		const surfaces = this.consoleService.getSurfaces();
+		const surfaces = this.orderedWorkspaceSurfaces();
 		if (!surfaces.length) {
 			this.uiWorkspaceSurfacesHost.classList.add('hidden');
 			return;
@@ -8312,6 +9592,8 @@ class ModeShellContribution extends Disposable {
 		this.modeService.setMode('UI');
 		const surfaceChanged = this.selectedSurfaceId !== surfaceId;
 		if (surfaceChanged) {
+			// Hold card order so recent-step reordering doesn't jump the rail mid-click.
+			this.scheduleSurfaceRailReorderDelay();
 			// Drop the previous surface's section cards / Steps until the new surface loads.
 			this.surfaceRailCards = [];
 			this.surfaceRailCardsLoading = true;
@@ -8327,6 +9609,7 @@ class ModeShellContribution extends Disposable {
 		this.surfaceMainView = 'plan';
 		this.persistSurfaceMainView(surfaceId, 'plan');
 		this.selectOwningSurfaceCard(surfaceId);
+		this.showClaudeTerminalForKey(surfaceId);
 
 		await this.consoleService.refresh();
 		if (generation !== this.surfacePlanOpenGeneration || this.selectedSurfaceId !== surfaceId) {
@@ -8335,8 +9618,12 @@ class ModeShellContribution extends Disposable {
 		this.syncGoalSurfaceSwitcher();
 		void this.surfaceFeatureChecklistService.refresh();
 		this.setSurfaceMainView('plan');
-		// Re-assert after Plan load / section cards may have shuffled the rail.
-		this.selectOwningSurfaceCard(surfaceId);
+		// Re-assert after Plan load — prefer last-used / first ready section over bare SURFACE.
+		this.selectDefaultSurfaceSectionOrOwner(surfaceId);
+		this.showClaudeTerminalForKey(surfaceId);
+		// Plan overlay used to hide the Preview webview — keep routing the live URL into the main pane.
+		this.lastSurfacePreviewRouteKey = undefined;
+		this.routeSelectedSurfacePreview();
 	}
 
 	private async createSelectedWorkspaceSurfaces(): Promise<void> {
@@ -9113,10 +10400,27 @@ class ModeShellContribution extends Disposable {
 			this.updateUiProjectName();
 			this.routeSelectedSurfacePreview();
 
+			// Custom AI narrates / dispatches before Claude research kickoff.
+			const startPlanningLabel = localize('customMode.planOrchestrateStartPlanning', 'Start planning');
+			const orchestrated = await this.runSurfacePlanOrchestrationTurn({
+				surfaceId,
+				surfaceName,
+				actionId: 'start_planning',
+				stepId: 'intent',
+				stepLabel: startPlanningLabel,
+			});
+			if (!shouldExecuteClaudeAfterOrchestration('start_planning', orchestrated.dispatch)) {
+				this.logClaudeKickoff(`orchestrate dispatch mismatch; falling back to Claude kickoff ${logCtx}`);
+			} else if (!orchestrated.usedFallback) {
+				this.logClaudeKickoff(`Custom AI dispatched start_planning to Claude ${logCtx}`);
+			} else {
+				this.logClaudeKickoff(`Custom AI orchestration fallback; Claude kickoff continues ${logCtx}`);
+			}
+
 			this.logClaudeKickoff(`reset Claude terminal ${logCtx}`);
-			await this.resetClaudeTerminalSession();
+			await this.resetClaudeTerminalSession(surfaceId);
 			this.logClaudeKickoff(`attach/create Claude terminal ${logCtx}`);
-			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder);
+			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder, surfaceId, { reveal: true });
 			this.logClaudeKickoff(`terminal ${created ? 'created' : 'reused'} id=${terminal.instanceId} ${logCtx}`);
 			await terminal.processReady;
 			this.logClaudeKickoff(`process ready ${logCtx}`);
@@ -9133,7 +10437,7 @@ class ModeShellContribution extends Disposable {
 				intent,
 			});
 			this.logClaudeKickoff(`submit kickoff (${prompt.length} chars, terminal ${created ? 'new' : 'reuse'}) ${logCtx}`);
-			if (created) {
+			if (created && this.markClaudeCliStarted(surfaceId)) {
 				// Start Claude, then submit the kickoff as the first turn so the TUI is visible
 				// immediately and we avoid oversized `claude '…'` argv on long intents.
 				this.logClaudeKickoff(`send 'claude' command ${logCtx}`);
@@ -9141,11 +10445,14 @@ class ModeShellContribution extends Disposable {
 				// Claude Code TUI often needs >900ms to paint before it can accept a pasted turn.
 				await timeout(1800);
 				this.relayoutTerminalInstances();
-				await this.submitClaudePrompt(terminal, prompt);
-			} else {
-				await this.submitClaudePrompt(terminal, prompt);
 			}
+			await this.submitClaudePrompt(terminal, prompt);
 			this.logClaudeKickoff(`kickoff submitted ${logCtx}`);
+			this.notificationService.info(localize(
+				'customMode.planKickoffDispatched',
+				'{0}',
+				buildClaudeDispatchNotification(startPlanningLabel, orchestrated.usedFallback),
+			));
 
 			// Refresh Plan tab in case the watcher has not picked up the provisional file yet.
 			const surface = this.consoleService.getSurface(surfaceId);
@@ -9506,7 +10813,7 @@ class ModeShellContribution extends Disposable {
 		readonly surfaceId: string;
 		readonly selectedRepos: ReadonlyArray<{ readonly owner: string; readonly repo: string; readonly url: string }>;
 	}): Promise<void> {
-		const terminal = this.findClaudeTerminalInstance();
+		const terminal = this.findClaudeTerminalInstance(selection.surfaceId);
 		if (!terminal || terminal.isDisposed) {
 			this.notificationService.info(localize(
 				'customMode.referenceSelectionSaved',
@@ -9523,6 +10830,7 @@ class ModeShellContribution extends Disposable {
 			`Skip deselected candidates. Continue the Research recipe from the shallow-clone step.`,
 		].join(' ');
 		try {
+			this.showClaudeTerminalForKey(selection.surfaceId, { reveal: true });
 			await terminal.focusWhenReady(true);
 			await this.submitClaudePrompt(terminal, prompt);
 			this.notificationService.info(localize(
@@ -9559,6 +10867,113 @@ class ModeShellContribution extends Disposable {
 			));
 			return;
 		}
+
+		let usedFallback = true;
+		if (shouldOrchestratePlanAction(request.actionId)) {
+			const orchestrated = await this.runSurfacePlanOrchestrationTurn({
+				surfaceId: request.surfaceId,
+				surfaceName: request.surfaceName,
+				actionId: request.actionId,
+				stepId: request.stepId,
+				stepLabel: request.stepLabel,
+			});
+			usedFallback = orchestrated.usedFallback;
+			if (!shouldExecuteClaudeAfterOrchestration(request.actionId, orchestrated.dispatch)) {
+				this.notificationService.warn(localize(
+					'customMode.planNextActionDispatchMismatch',
+					'Custom AI returned an unexpected dispatch for "{0}"; falling back to Claude.',
+					request.stepLabel,
+				));
+				usedFallback = true;
+			}
+		}
+
+		await this.executeClaudePlanNextAction(request, usedFallback);
+	}
+
+	/**
+	 * Custom AI Plan Steps orchestration turn. Returns a parsed DISPATCH_CLAUDE marker
+	 * when present; on any failure omits the marker so the caller falls back to Claude.
+	 */
+	private async runSurfacePlanOrchestrationTurn(brief: {
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+		readonly actionId: SurfacePlanOrchestrationActionId;
+		readonly stepId: string;
+		readonly stepLabel: string;
+	}): Promise<{ readonly dispatch: ReturnType<typeof parseDispatchClaudeMarker>; readonly usedFallback: boolean }> {
+		try {
+			const sessionResource = this.chatSessionManager.getOrCreateUISurfaceSessionResource(brief.surfaceId);
+			const sessionRef = await this.chatService.acquireOrLoadSession(
+				sessionResource,
+				ChatAgentLocation.Chat,
+				this.chatSessionsCts.token,
+				'ModeShellContribution#runSurfacePlanOrchestrationTurn',
+			);
+			if (!sessionRef) {
+				this.logService.warn('[plan-orchestrate] Could not load Custom AI session; falling back to Claude.');
+				return { dispatch: undefined, usedFallback: true };
+			}
+			try {
+				const prompt = buildSurfacePlanOrchestrationPrompt(brief);
+				const sendResult = await this.chatService.sendRequest(sessionResource, prompt, {
+					agentIdSilent: 'custom.ai',
+					location: ChatAgentLocation.Chat,
+					modeInfo: {
+						kind: ChatModeKind.Agent,
+						isBuiltin: true,
+						modeInstructions: undefined,
+						telemetryModeId: 'agent',
+						applyCodeBlockSuggestionId: undefined,
+						permissionLevel: ChatPermissionLevel.AutoApprove,
+					},
+					isSystemInitiated: true,
+					systemInitiatedLabel: localize('customMode.planOrchestrateLabel', 'Orchestrating: {0}', brief.stepLabel),
+					instructionContext: { modeKind: ChatModeKind.Agent },
+				});
+				let current = sendResult;
+				while (ChatSendResult.isQueued(current)) {
+					current = await current.deferred;
+				}
+				if (!ChatSendResult.isSent(current)) {
+					const reason = ChatSendResult.isRejected(current) ? current.reason : 'unknown';
+					this.logService.warn(`[plan-orchestrate] Custom AI request not sent: ${reason}`);
+					return { dispatch: undefined, usedFallback: true };
+				}
+				const response = await current.data.responseCreatedPromise;
+				await current.data.responseCompletePromise;
+				if (response.state === ResponseModelState.Failed || response.state === ResponseModelState.Cancelled || response.isCanceled) {
+					this.logService.warn('[plan-orchestrate] Custom AI response failed or cancelled; falling back to Claude.');
+					return { dispatch: undefined, usedFallback: true };
+				}
+				const text = response.entireResponse.getMarkdown() || response.entireResponse.toString();
+				const dispatch = parseDispatchClaudeMarker(text);
+				if (!dispatch) {
+					this.logService.info('[plan-orchestrate] No DISPATCH_CLAUDE marker; falling back to Claude.');
+					return { dispatch: undefined, usedFallback: true };
+				}
+				return { dispatch, usedFallback: false };
+			} finally {
+				sessionRef.dispose();
+			}
+		} catch (error: unknown) {
+			this.logService.warn('[plan-orchestrate] Custom AI orchestration failed; falling back to Claude.', error);
+			return { dispatch: undefined, usedFallback: true };
+		}
+	}
+
+	/** Submit the existing Claude Plan Next coding prompt (unchanged contract). */
+	private async executeClaudePlanNextAction(request: {
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+		readonly actionId: string;
+		readonly stepId: string;
+		readonly stepLabel: string;
+	}, usedFallback: boolean): Promise<void> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			return;
+		}
 		const progressPath = `.agent/surfaces/${request.surfaceId}.phase-progress.json`;
 		const prompt = request.actionId === 'lock_plan'
 			? [
@@ -9566,31 +10981,41 @@ class ModeShellContribution extends Disposable {
 				`Do not start generate phases yet — wait for the Console Next button to kick each phase.`,
 				`Do not re-open Research. Do not edit .workflow.json step statuses — the Console owns the Steps row.`,
 			].join(' ')
-			: [
-				`Console started phase "${request.stepLabel}" (${request.stepId}) for surface ${request.surfaceId} (${request.surfaceName}).`,
-				`${progressPath} is status "running" for that stepId.`,
-				`Execute that phase from the graph proposal checklist, then remap_and_wait + compare_proposal.`,
-				`When the phase gate passes, update ${progressPath} to status "completed" for the same stepId/stepLabel (keep surfaceId).`,
-				`On failure, set status "failed" with a short error field, then stop.`,
-				`Do not edit .workflow.json — Console marks Steps completed only after it sees completed progress.`,
-			].join(' ');
+			: request.stepId === 'enable_preview'
+				? [
+					`Console started step "Enable Preview" (${request.stepId}) for surface ${request.surfaceId} (${request.surfaceName}).`,
+					`${progressPath} is status "running" for that stepId.`,
+					`Update this surface entry in workspace.goal.json with path (apps/${request.surfaceId} unless already set), localUrl (http://localhost:<unique-unused-port>), and devCommand that serves that URL (prefer npm run dev --prefix apps/${request.surfaceId} -- --port <port>).`,
+					`Pick a port not used by other surfaces in workspace.goal.json. Local Preview is enough — do not require Vercel/public deploy.`,
+					`When localUrl and devCommand are written, update ${progressPath} to status "completed" for the same stepId/stepLabel (keep surfaceId).`,
+					`On failure, set status "failed" with a short error field, then stop.`,
+					`Do not edit .workflow.json — Console marks Steps completed only after it sees completed progress (or when it detects localUrl+devCommand).`,
+				].join(' ')
+				: [
+					`Console started phase "${request.stepLabel}" (${request.stepId}) for surface ${request.surfaceId} (${request.surfaceName}).`,
+					`${progressPath} is status "running" for that stepId.`,
+					`Execute that phase from the graph proposal checklist, then remap_and_wait + compare_proposal.`,
+					`When the phase gate passes, update ${progressPath} to status "completed" for the same stepId/stepLabel (keep surfaceId).`,
+					`On failure, set status "failed" with a short error field, then stop.`,
+					`Do not edit .workflow.json — Console marks Steps completed only after it sees completed progress.`,
+				].join(' ');
 		try {
-			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder);
+			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder, request.surfaceId, { reveal: true });
 			await terminal.processReady;
 			await this.prepareTerminalForCommandOutput(terminal, 40, 2000);
 			await terminal.focusWhenReady(true);
 			this.relayoutTerminalInstances();
-			if (created) {
-				// Resume the in-flight Claude Code session for this workspace when possible.
+			if (created && this.markClaudeCliStarted(request.surfaceId)) {
+				// Resume the in-flight Claude Code session for this surface when possible.
 				await terminal.sendText('claude --continue', true);
 				await timeout(1800);
 				this.relayoutTerminalInstances();
 			}
 			await this.submitClaudePrompt(terminal, prompt);
 			this.notificationService.info(localize(
-				'customMode.planNextActionSent',
-				'Sent next step to Claude: {0}',
-				request.stepLabel,
+				'customMode.planNextActionDispatched',
+				'{0}',
+				buildClaudeDispatchNotification(request.stepLabel, usedFallback),
 			));
 		} catch (error: unknown) {
 			this.notificationService.warn(localize(
@@ -9602,138 +11027,274 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
-	/** Dispose the Claude panel terminal so the next New Surface starts a clean session. */
-	private async resetClaudeTerminalSession(): Promise<void> {
-		const existing = this.findClaudeTerminalInstance();
-		this.claudeTerminalLifecycle.clear();
-		this.claudeTerminalInstance = undefined;
-		this.setClaudeTerminalMarkedActive(false);
-		this.uiClaudeTerminalEmpty.classList.remove('hidden');
-		if (existing && !existing.isDisposed) {
-			const disposed = Event.toPromise(existing.onDisposed);
-			existing.dispose(TerminalExitReason.User);
-			// Wait so the next create doesn't rebind a half-disposed / dead pty.
-			await Promise.race([disposed, timeout(2000)]);
+	private getVisibleClaudeTerminalInstance(): ITerminalInstance | undefined {
+		if (!this.visibleClaudeTerminalKey) {
+			return undefined;
 		}
+		const terminal = this.claudeTerminalByKey.get(this.visibleClaudeTerminalKey);
+		return terminal && !terminal.isDisposed ? terminal : undefined;
 	}
 
-	/**
-	 * Reattach a persisted Claude terminal after reload/restart, or resume the
-	 * last Claude Code session in this workspace when the process was killed.
-	 */
-	private async restoreClaudeTerminalSession(): Promise<void> {
-		if (this.claudeTerminalRestoreInFlight) {
-			return;
+	private resolveClaudeTerminalKeyForSelection(): string | undefined {
+		if (this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID) {
+			return this.selectedSurfaceId;
 		}
-		if (this.claudeTerminalInstance && !this.claudeTerminalInstance.isDisposed) {
-			return;
+		return WORKSPACE_CLAUDE_KEY;
+	}
+
+	private resolveClaudeTerminalKeyFromInstance(instance: ITerminalInstance): string | undefined {
+		return parseClaudeTerminalKey(instance.shellLaunchConfig.name)
+			?? parseClaudeTerminalKey(instance.title);
+	}
+
+	private syncClaudeTerminalMapFromService(): void {
+		for (const instance of this.terminalService.instances) {
+			if (instance.isDisposed || instance.exitReason !== undefined) {
+				continue;
+			}
+			let key = this.resolveClaudeTerminalKeyFromInstance(instance);
+			if (!key) {
+				const title = instance.shellLaunchConfig.name || instance.title;
+				if (title === LEGACY_CLAUDE_TERMINAL_TITLE) {
+					// One-time migration: adopt the pre-per-surface Claude terminal.
+					key = this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID
+						? this.selectedSurfaceId
+						: WORKSPACE_CLAUDE_KEY;
+					void instance.rename(claudeTerminalTitleFor(key));
+				} else {
+					continue;
+				}
+			}
+			const existing = this.claudeTerminalByKey.get(key);
+			if (existing && existing !== instance && !existing.isDisposed) {
+				continue;
+			}
+			this.registerClaudeTerminalInstance(key, instance);
 		}
-		this.claudeTerminalRestoreInFlight = true;
-		try {
-			await this.terminalService.whenConnected;
-			const existing = this.findClaudeTerminalInstance();
-			if (existing) {
-				this.bindClaudeTerminalInstance(existing);
-				this.relayoutTerminalInstances();
+		this.persistClaudeTerminalActiveKeys();
+	}
+
+	private registerClaudeTerminalInstance(key: string, terminal: ITerminalInstance): void {
+		this.claudeTerminalByKey.set(key, terminal);
+		const previousLifecycle = this.claudeTerminalLifecycleByKey.get(key);
+		if (previousLifecycle) {
+			previousLifecycle.dispose();
+		}
+		this.claudeTerminalLifecycleByKey.set(key, terminal.onDisposed(() => {
+			if (this.claudeTerminalByKey.get(key) !== terminal) {
 				return;
 			}
-			if (!this.isClaudeTerminalMarkedActive()) {
-				return;
-			}
-			const workspaceFolder = this.getWorkspaceFolderUri();
-			if (!workspaceFolder) {
-				this.setClaudeTerminalMarkedActive(false);
-				return;
-			}
-			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder);
-			if (!created) {
-				this.relayoutTerminalInstances();
-				return;
-			}
-			await terminal.processReady;
-			await terminal.focusWhenReady(true);
-			this.relayoutTerminalInstances();
-			// Process did not survive quit — continue the last Claude Code session for this cwd.
-			await terminal.sendText('claude --continue', true);
-		} finally {
-			this.claudeTerminalRestoreInFlight = false;
-		}
-	}
-
-	/**
-	 * The Claude panel terminal died without an explicit reset (e.g. the shell or
-	 * `claude` process crashed). Restart it and resume the last session so an
-	 * in-flight kickoff is not silently lost. Bounded so a shell that dies
-	 * immediately on every start cannot restart forever.
-	 */
-	private maybeAutoRestoreClaudeTerminal(exitReason: TerminalExitReason | undefined): void {
-		if (exitReason === TerminalExitReason.User || exitReason === TerminalExitReason.Shutdown || exitReason === TerminalExitReason.Extension) {
-			return;
-		}
-		const now = Date.now();
-		if (now - this.claudeTerminalAutoRestoreWindowStart > 60_000) {
-			this.claudeTerminalAutoRestoreWindowStart = now;
-			this.claudeTerminalAutoRestoreAttempts = 0;
-		}
-		this.claudeTerminalAutoRestoreAttempts++;
-		if (this.claudeTerminalAutoRestoreAttempts > 2) {
-			this.logClaudeKickoff('Claude terminal keeps exiting — auto-restart paused; start a New Surface to retry', true);
-			return;
-		}
-		this.logClaudeKickoff('Claude terminal exited unexpectedly — restarting with claude --continue', true);
-		void this.restoreClaudeTerminalSession();
-	}
-
-	private findClaudeTerminalInstance(): ITerminalInstance | undefined {
-		if (this.claudeTerminalInstance && !this.claudeTerminalInstance.isDisposed) {
-			return this.claudeTerminalInstance;
-		}
-		return this.terminalService.instances.find(instance =>
-			!instance.isDisposed
-			&& instance.exitReason === undefined
-			&& (instance.title === CLAUDE_TERMINAL_TITLE || instance.shellLaunchConfig.name === CLAUDE_TERMINAL_TITLE)
-		);
-	}
-
-	private async attachOrCreateClaudeTerminal(
-		workspaceFolder: URI,
-		options?: { forceNew?: boolean },
-	): Promise<{ terminal: ITerminalInstance; created: boolean }> {
-		if (!options?.forceNew) {
-			const existing = this.findClaudeTerminalInstance();
-			if (existing) {
-				this.bindClaudeTerminalInstance(existing);
-				return { terminal: existing, created: false };
-			}
-		}
-		const terminal = await this.terminalService.createTerminal({
-			cwd: workspaceFolder,
-			config: {
-				name: CLAUDE_TERMINAL_TITLE,
-				hideFromUser: true,
-				// Persist across reload/restart (background hideFromUser terminals need forcePersist).
-				forcePersist: true,
-				...(isWindows ? {} : { executable: '/bin/bash' }),
-			},
-		});
-		this.bindClaudeTerminalInstance(terminal);
-		this.setClaudeTerminalMarkedActive(true);
-		return { terminal, created: true };
-	}
-
-	private bindClaudeTerminalInstance(terminal: ITerminalInstance): void {
-		this.claudeTerminalInstance = terminal;
-		this.setClaudeTerminalMarkedActive(true);
-		this.claudeTerminalLifecycle.value = terminal.onDisposed(() => {
-			if (this.claudeTerminalInstance === terminal) {
-				this.claudeTerminalInstance = undefined;
+			this.claudeTerminalByKey.delete(key);
+			this.claudeTerminalLifecycleByKey.delete(key);
+			this.claudeCliStartedByKey.delete(key);
+			this.persistClaudeTerminalActiveKeys();
+			if (this.visibleClaudeTerminalKey === key) {
+				this.visibleClaudeTerminalKey = undefined;
 				this.uiClaudeTerminalEmpty.classList.remove('hidden');
+				this.updateClaudeTerminalKeyLabel(undefined);
 				if (this.uiClaudeTerminalStatus && !this.uiClaudeTerminalStatus.classList.contains('error')) {
 					this.uiClaudeTerminalStatus.textContent = '';
 				}
-				this.maybeAutoRestoreClaudeTerminal(terminal.exitReason);
 			}
+			this.maybeAutoRestoreClaudeTerminal(key, terminal.exitReason);
+		}));
+		this.persistClaudeTerminalActiveKeys();
+	}
+
+	/** Returns true once per PTY lifetime so restore/ensure/plan-next do not double-launch Claude. */
+	private markClaudeCliStarted(key: string): boolean {
+		if (this.claudeCliStartedByKey.has(key)) {
+			return false;
+		}
+		this.claudeCliStartedByKey.add(key);
+		return true;
+	}
+
+	private detachVisibleClaudeTerminal(): void {
+		const visible = this.getVisibleClaudeTerminalInstance();
+		if (!visible) {
+			this.visibleClaudeTerminalKey = undefined;
+			return;
+		}
+		try {
+			visible.detachFromElement();
+			visible.setVisible(false);
+		} catch {
+			// Detach is best-effort; process stays alive.
+		}
+		this.visibleClaudeTerminalKey = undefined;
+	}
+
+	private showClaudeTerminalEmpty(key: string | undefined, options?: { starting?: boolean }): void {
+		this.detachVisibleClaudeTerminal();
+		this.uiClaudeTerminalEmpty.classList.remove('hidden');
+		this.updateClaudeTerminalKeyLabel(key);
+		if (options?.starting) {
+			this.uiClaudeTerminalEmpty.textContent = localize(
+				'customMode.claudeTerminalStarting',
+				'Starting Claude…',
+			);
+			return;
+		}
+		if (!this.getWorkspaceFolderUri()) {
+			this.uiClaudeTerminalEmpty.textContent = localize(
+				'customMode.claudeTerminalNeedsWorkspace',
+				'Open a workspace folder to start Claude.',
+			);
+			return;
+		}
+		if (key && key !== WORKSPACE_CLAUDE_KEY) {
+			const surface = this.consoleService.getSurface(key);
+			this.uiClaudeTerminalEmpty.textContent = localize(
+				'customMode.claudeTerminalEmptyForSurface',
+				'Claude is unavailable for {0}.',
+				surface?.name ?? key,
+			);
+		} else {
+			this.uiClaudeTerminalEmpty.textContent = localize(
+				'customMode.claudeTerminalEmpty',
+				'Claude is unavailable for this surface.',
+			);
+		}
+	}
+
+	private updateClaudeTerminalKeyLabel(key: string | undefined): void {
+		if (!this.uiClaudeTerminalKeyLabel) {
+			return;
+		}
+		if (!key) {
+			this.uiClaudeTerminalKeyLabel.textContent = '';
+			this.uiClaudeTerminalKeyLabel.title = '';
+			return;
+		}
+		if (key === WORKSPACE_CLAUDE_KEY) {
+			this.uiClaudeTerminalKeyLabel.textContent = localize('customMode.claudeTerminalWorkspaceLabel', 'Workspace');
+			this.uiClaudeTerminalKeyLabel.title = localize('customMode.claudeTerminalWorkspaceLabelTitle', 'Workspace plan Claude session');
+			return;
+		}
+		const surface = this.consoleService.getSurface(key);
+		this.uiClaudeTerminalKeyLabel.textContent = surface?.name ?? key;
+		this.uiClaudeTerminalKeyLabel.title = key;
+	}
+
+	/**
+	 * Detach the current Claude PTY (if any) and attach the terminal for `key`, or start Claude.
+	 * Does not expand the Claude pane unless `reveal` is set or the pane is already open —
+	 * Surface / Console card selection must not force Claude open.
+	 */
+	private showClaudeTerminalForKey(key: string | undefined, options?: { reveal?: boolean }): void {
+		if (options?.reveal) {
+			this.setClaudeTerminalCollapsed(false);
+			this.scheduleClaudeTerminalHide();
+		} else if (!this.claudeTerminalCollapsed) {
+			// Already open — keep open and refresh the idle timer while switching sessions.
+			this.scheduleClaudeTerminalHide();
+		}
+		this.syncClaudeTerminalMapFromService();
+		if (key && this.visibleClaudeTerminalKey === key) {
+			const current = this.claudeTerminalByKey.get(key);
+			if (current && !current.isDisposed) {
+				// Re-attach if the PTY is registered but no longer in the host (e.g. after detach race).
+				if (current.domElement?.parentElement !== this.uiClaudeTerminalHost) {
+					this.attachClaudeTerminalToHost(key, current);
+					return;
+				}
+				this.updateClaudeTerminalKeyLabel(key);
+				this.uiClaudeTerminalEmpty.classList.add('hidden');
+				return;
+			}
+		}
+		this.detachVisibleClaudeTerminal();
+		if (!key) {
+			this.showClaudeTerminalEmpty(undefined);
+			return;
+		}
+		const terminal = this.findClaudeTerminalInstance(key);
+		if (!terminal) {
+			this.ensureClaudeTerminalInitialized(key, options);
+			return;
+		}
+		this.attachClaudeTerminalToHost(key, terminal);
+	}
+
+	/**
+	 * Create and start Claude for `key` immediately — do not wait for planning / Steps Next.
+	 * Safe to call repeatedly; concurrent ensures for the same key coalesce.
+	 */
+	private ensureClaudeTerminalInitialized(key: string, options?: { reveal?: boolean }): void {
+		if (this.findClaudeTerminalInstance(key)) {
+			this.showClaudeTerminalForKey(key, options);
+			return;
+		}
+		if (this.claudeTerminalEnsureInFlightByKey.has(key)) {
+			this.showClaudeTerminalEmpty(key, { starting: true });
+			return;
+		}
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			this.showClaudeTerminalEmpty(key);
+			return;
+		}
+		this.showClaudeTerminalEmpty(key, { starting: true });
+		this.claudeTerminalEnsureInFlightByKey.add(key);
+		void this.initializeClaudeTerminalForKey(key, workspaceFolder, options).finally(() => {
+			this.claudeTerminalEnsureInFlightByKey.delete(key);
 		});
+	}
+
+	private async initializeClaudeTerminalForKey(key: string, workspaceFolder: URI, options?: { reveal?: boolean }): Promise<void> {
+		try {
+			const existing = this.findClaudeTerminalInstance(key);
+			if (existing) {
+				if (this.resolveClaudeTerminalKeyForSelection() === key) {
+					this.showClaudeTerminalForKey(key, options);
+				}
+				return;
+			}
+			this.logClaudeKickoff(`ensure Claude terminal key=${key}`);
+			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder, key, options);
+			const stillRelevant = this.resolveClaudeTerminalKeyForSelection() === key
+				|| this.visibleClaudeTerminalKey === key
+				|| this.visibleClaudeTerminalKey === undefined;
+			if (stillRelevant && !terminal.isDisposed) {
+				this.showClaudeTerminalForKey(key, options);
+			}
+			if (!created || terminal.isDisposed) {
+				// Adopted an existing PTY — leave it alone (restore / prior kickoff owns launch).
+				return;
+			}
+			await terminal.processReady;
+			if (terminal.isDisposed) {
+				return;
+			}
+			await this.prepareTerminalForCommandOutput(terminal, 40, 2000);
+			if (stillRelevant && this.resolveClaudeTerminalKeyForSelection() === key) {
+				await terminal.focusWhenReady(true);
+				this.relayoutTerminalInstances();
+			}
+			// Interactive Claude session — planning / Steps Next can submit turns later.
+			if (!this.markClaudeCliStarted(key)) {
+				this.logClaudeKickoff(`ensure Claude already started key=${key}`);
+				return;
+			}
+			await terminal.sendText('claude', true);
+			if (stillRelevant && this.resolveClaudeTerminalKeyForSelection() === key) {
+				await timeout(1800);
+				this.relayoutTerminalInstances();
+			}
+			this.logClaudeKickoff(`ensure Claude started key=${key}`);
+		} catch (error: unknown) {
+			this.logClaudeKickoff(`ensure Claude failed key=${key}: ${String((error as Error)?.message ?? error)}`, true);
+			if (this.resolveClaudeTerminalKeyForSelection() === key && !this.findClaudeTerminalInstance(key)) {
+				this.showClaudeTerminalEmpty(key);
+			}
+		}
+	}
+
+	private attachClaudeTerminalToHost(key: string, terminal: ITerminalInstance): void {
+		this.registerClaudeTerminalInstance(key, terminal);
+		this.visibleClaudeTerminalKey = key;
+		this.updateClaudeTerminalKeyLabel(key);
 		this.uiClaudeTerminalEmpty.classList.add('hidden');
 		// Ensure the Claude pane has a usable height before measuring the host —
 		// kickoff was attaching at ~89px and leaving xterm effectively invisible.
@@ -9745,10 +11306,8 @@ class ModeShellContribution extends Disposable {
 		const width = Math.max(480, this.uiClaudeTerminalHost.clientWidth || Math.floor(mainWindow.innerWidth * 0.6));
 		const height = Math.max(CLAUDE_TERMINAL_MIN_HEIGHT, this.uiClaudeTerminalHost.clientHeight || this.claudeTerminalHeight || CLAUDE_TERMINAL_DEFAULT_HEIGHT);
 		terminal.layout(new Dimension(width, height));
-		// Force follow-up layouts after the host paints — first attach often measures
-		// a collapsed host while the Plan pane is still settling.
 		const relayout = () => {
-			if (this.claudeTerminalInstance === terminal && !terminal.isDisposed) {
+			if (this.visibleClaudeTerminalKey === key && this.claudeTerminalByKey.get(key) === terminal && !terminal.isDisposed) {
 				this.relayoutTerminalInstances();
 			}
 		};
@@ -9759,16 +11318,273 @@ class ModeShellContribution extends Disposable {
 		});
 	}
 
-	private isClaudeTerminalMarkedActive(): boolean {
-		return this.storageService.getBoolean(STORAGE_CLAUDE_TERMINAL_ACTIVE, StorageScope.WORKSPACE, false);
+	/** Dispose one surface/workspace Claude terminal; leave sibling sessions alive. */
+	private async resetClaudeTerminalSession(key: string): Promise<void> {
+		const existing = this.findClaudeTerminalInstance(key);
+		this.claudeTerminalLifecycleByKey.get(key)?.dispose();
+		this.claudeTerminalLifecycleByKey.delete(key);
+		this.claudeTerminalByKey.delete(key);
+		this.claudeCliStartedByKey.delete(key);
+		this.claudeTerminalEnsureInFlightByKey.delete(key);
+		this.claudeTerminalCreateInFlightByKey.delete(key);
+		if (this.visibleClaudeTerminalKey === key) {
+			this.visibleClaudeTerminalKey = undefined;
+			this.uiClaudeTerminalEmpty.classList.remove('hidden');
+			this.updateClaudeTerminalKeyLabel(undefined);
+		}
+		this.persistClaudeTerminalActiveKeys();
+		if (existing && !existing.isDisposed) {
+			const disposed = Event.toPromise(existing.onDisposed);
+			existing.dispose(TerminalExitReason.User);
+			await Promise.race([disposed, timeout(2000)]);
+		}
 	}
 
-	private setClaudeTerminalMarkedActive(active: boolean): void {
-		if (active) {
-			this.storageService.store(STORAGE_CLAUDE_TERMINAL_ACTIVE, true, StorageScope.WORKSPACE, StorageTarget.MACHINE);
-		} else {
-			this.storageService.remove(STORAGE_CLAUDE_TERMINAL_ACTIVE, StorageScope.WORKSPACE);
+	/** Dispose every Claude terminal (clear-all surfaces / hard reset). */
+	private async resetAllClaudeTerminalSessions(): Promise<void> {
+		const keys = [...this.claudeTerminalByKey.keys()];
+		this.detachVisibleClaudeTerminal();
+		for (const key of keys) {
+			await this.resetClaudeTerminalSession(key);
 		}
+		// Also dispose any orphan Claude terminals still in the service.
+		for (const instance of [...this.terminalService.instances]) {
+			if (instance.isDisposed) {
+				continue;
+			}
+			const title = instance.shellLaunchConfig.name || instance.title;
+			if (!isClaudeTerminalTitle(title)) {
+				continue;
+			}
+			const disposed = Event.toPromise(instance.onDisposed);
+			instance.dispose(TerminalExitReason.User);
+			await Promise.race([disposed, timeout(2000)]);
+		}
+		this.persistClaudeTerminalActiveKeys();
+		this.showClaudeTerminalEmpty(undefined);
+	}
+
+	/**
+	 * Reattach persisted Claude terminals after reload/restart, then show the
+	 * terminal for the currently selected surface (or workspace plan).
+	 */
+	private async restoreClaudeTerminalSession(): Promise<void> {
+		if (this.claudeTerminalRestoreInFlight) {
+			return;
+		}
+		this.claudeTerminalRestoreInFlight = true;
+		try {
+			await this.terminalService.whenConnected;
+			this.syncClaudeTerminalMapFromService();
+			const preferredKey = this.resolveClaudeTerminalKeyForSelection();
+			const hasAny = this.claudeTerminalByKey.size > 0;
+			const markedKeys = this.getClaudeTerminalActiveKeys();
+			if (hasAny) {
+				this.showClaudeTerminalForKey(preferredKey);
+				this.relayoutTerminalInstances();
+				return;
+			}
+			if (!markedKeys.length) {
+				this.showClaudeTerminalForKey(preferredKey);
+				return;
+			}
+			const workspaceFolder = this.getWorkspaceFolderUri();
+			if (!workspaceFolder) {
+				this.persistClaudeTerminalActiveKeys([]);
+				return;
+			}
+			const restoreKey = (preferredKey && markedKeys.includes(preferredKey) ? preferredKey : markedKeys[0]) || preferredKey;
+			if (!restoreKey) {
+				return;
+			}
+			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder, restoreKey);
+			if (!created) {
+				this.showClaudeTerminalForKey(restoreKey);
+				this.relayoutTerminalInstances();
+				return;
+			}
+			await terminal.processReady;
+			await terminal.focusWhenReady(true);
+			this.showClaudeTerminalForKey(restoreKey);
+			this.relayoutTerminalInstances();
+			// Process did not survive quit — continue the last Claude Code session for this cwd.
+			if (this.markClaudeCliStarted(restoreKey)) {
+				await terminal.sendText('claude --continue', true);
+			}
+		} finally {
+			this.claudeTerminalRestoreInFlight = false;
+		}
+	}
+
+	/**
+	 * A Claude terminal for `key` died without an explicit reset. Restart and
+	 * resume that key only when it is still the selected/visible session.
+	 */
+	private maybeAutoRestoreClaudeTerminal(key: string, exitReason: TerminalExitReason | undefined): void {
+		if (exitReason === TerminalExitReason.User || exitReason === TerminalExitReason.Shutdown || exitReason === TerminalExitReason.Extension) {
+			return;
+		}
+		const now = Date.now();
+		const state = this.claudeTerminalAutoRestoreAttemptsByKey.get(key) ?? { attempts: 0, windowStart: now };
+		if (now - state.windowStart > 60_000) {
+			state.windowStart = now;
+			state.attempts = 0;
+		}
+		state.attempts++;
+		this.claudeTerminalAutoRestoreAttemptsByKey.set(key, state);
+		if (state.attempts > 2) {
+			this.logClaudeKickoff(`Claude terminal for ${key} keeps exiting — auto-restart paused`, true);
+			return;
+		}
+		this.logClaudeKickoff(`Claude terminal for ${key} exited unexpectedly — restarting with claude --continue`, true);
+		void this.autoRestoreClaudeTerminalForKey(key);
+	}
+
+	private async autoRestoreClaudeTerminalForKey(key: string): Promise<void> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			return;
+		}
+		try {
+			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder, key);
+			const stillRelevant = this.resolveClaudeTerminalKeyForSelection() === key
+				|| this.visibleClaudeTerminalKey === key
+				|| this.visibleClaudeTerminalKey === undefined;
+			if (stillRelevant) {
+				this.showClaudeTerminalForKey(key);
+			}
+			if (created) {
+				await terminal.processReady;
+				await terminal.focusWhenReady(true);
+				this.relayoutTerminalInstances();
+				if (this.markClaudeCliStarted(key)) {
+					await terminal.sendText('claude --continue', true);
+				}
+			} else {
+				this.relayoutTerminalInstances();
+			}
+		} catch (error: unknown) {
+			this.logClaudeKickoff(`auto-restore failed for ${key}: ${String((error as Error)?.message ?? error)}`, true);
+		}
+	}
+
+	private findClaudeTerminalInstance(key: string): ITerminalInstance | undefined {
+		const mapped = this.claudeTerminalByKey.get(key);
+		if (mapped && !mapped.isDisposed && mapped.exitReason === undefined) {
+			return mapped;
+		}
+		const title = claudeTerminalTitleFor(key);
+		const found = this.terminalService.instances.find(instance =>
+			!instance.isDisposed
+			&& instance.exitReason === undefined
+			&& (instance.title === title || instance.shellLaunchConfig.name === title)
+		);
+		if (found) {
+			this.registerClaudeTerminalInstance(key, found);
+			return found;
+		}
+		// Adopt a pre-per-surface Claude terminal for this key (one-time migration).
+		const legacy = this.terminalService.instances.find(instance =>
+			!instance.isDisposed
+			&& instance.exitReason === undefined
+			&& (instance.title === LEGACY_CLAUDE_TERMINAL_TITLE || instance.shellLaunchConfig.name === LEGACY_CLAUDE_TERMINAL_TITLE)
+		);
+		if (legacy) {
+			void legacy.rename(title);
+			this.registerClaudeTerminalInstance(key, legacy);
+			return legacy;
+		}
+		return undefined;
+	}
+
+	private async attachOrCreateClaudeTerminal(
+		workspaceFolder: URI,
+		key: string,
+		options?: { forceNew?: boolean; reveal?: boolean },
+	): Promise<{ terminal: ITerminalInstance; created: boolean }> {
+		const showOptions = options?.reveal ? { reveal: true as const } : undefined;
+		if (options?.forceNew) {
+			await this.resetClaudeTerminalSession(key);
+			this.claudeTerminalCreateInFlightByKey.delete(key);
+		} else {
+			const existing = this.findClaudeTerminalInstance(key);
+			if (existing) {
+				this.showClaudeTerminalForKey(key, showOptions);
+				return { terminal: existing, created: false };
+			}
+			const inFlight = this.claudeTerminalCreateInFlightByKey.get(key);
+			if (inFlight) {
+				return inFlight;
+			}
+		}
+		const createPromise = (async (): Promise<{ terminal: ITerminalInstance; created: boolean }> => {
+			const raced = this.findClaudeTerminalInstance(key);
+			if (raced && !options?.forceNew) {
+				this.showClaudeTerminalForKey(key, showOptions);
+				return { terminal: raced, created: false };
+			}
+			const terminal = await this.terminalService.createTerminal({
+				cwd: workspaceFolder,
+				config: {
+					name: claudeTerminalTitleFor(key),
+					hideFromUser: true,
+					// Persist across reload/restart (background hideFromUser terminals need forcePersist).
+					forcePersist: true,
+					...(isWindows ? {} : { executable: '/bin/bash' }),
+				},
+			});
+			this.registerClaudeTerminalInstance(key, terminal);
+			this.showClaudeTerminalForKey(key, showOptions);
+			return { terminal, created: true };
+		})();
+		this.claudeTerminalCreateInFlightByKey.set(key, createPromise);
+		try {
+			return await createPromise;
+		} finally {
+			if (this.claudeTerminalCreateInFlightByKey.get(key) === createPromise) {
+				this.claudeTerminalCreateInFlightByKey.delete(key);
+			}
+		}
+	}
+
+	private getClaudeTerminalActiveKeys(): string[] {
+		const raw = this.storageService.get(STORAGE_CLAUDE_TERMINAL_ACTIVE_KEYS, StorageScope.WORKSPACE);
+		if (raw) {
+			try {
+				const parsed = JSON.parse(raw);
+				if (Array.isArray(parsed)) {
+					return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0);
+				}
+			} catch {
+				// Fall through to legacy.
+			}
+		}
+		if (this.storageService.getBoolean(STORAGE_CLAUDE_TERMINAL_ACTIVE_LEGACY, StorageScope.WORKSPACE, false)) {
+			const legacyKey = this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID
+				? this.selectedSurfaceId
+				: WORKSPACE_CLAUDE_KEY;
+			return [legacyKey];
+		}
+		return [];
+	}
+
+	private persistClaudeTerminalActiveKeys(keys?: readonly string[]): void {
+		const next = keys
+			? [...keys]
+			: [...this.claudeTerminalByKey.entries()]
+				.filter(([, terminal]) => !terminal.isDisposed)
+				.map(([key]) => key);
+		this.storageService.remove(STORAGE_CLAUDE_TERMINAL_ACTIVE_LEGACY, StorageScope.WORKSPACE);
+		if (!next.length) {
+			this.storageService.remove(STORAGE_CLAUDE_TERMINAL_ACTIVE_KEYS, StorageScope.WORKSPACE);
+			return;
+		}
+		this.storageService.store(
+			STORAGE_CLAUDE_TERMINAL_ACTIVE_KEYS,
+			JSON.stringify(next),
+			StorageScope.WORKSPACE,
+			StorageTarget.MACHINE,
+		);
 	}
 
 	private async refreshStarterSurfaceCardStatuses(): Promise<void> {
@@ -9863,16 +11679,18 @@ class ModeShellContribution extends Disposable {
 				: step === 'surfaces'
 					? 'surfaces'
 					: undefined;
+		const shouldScroll = options?.scroll !== false;
 		if (section) {
 			this.consoleExpanded = true;
 			this.persistConsoleExpanded();
 			this.activeRailCardId = `consoleSection:${section}`;
-			this.setWorkspaceHomeView(section);
-		}
-		if (options?.scroll === false) {
+			this.setWorkspaceHomeView(section, { scroll: shouldScroll });
 			return;
 		}
-		this.uiSurfaceSetupSections.get(step)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		if (!shouldScroll) {
+			return;
+		}
+		this.uiSurfaceSetupSections.get(step)?.scrollIntoView({ behavior: 'auto', block: 'start' });
 	}
 
 	private populateSurfaceSetupBuilderFields(): void {
@@ -10034,8 +11852,8 @@ class ModeShellContribution extends Disposable {
 		this.uiProjectName.title = codeOpen
 			? localize('customMode.backToConsoleTitle', 'Back to Console')
 			: localize('customMode.consoleHomeTitle', 'Open Console surfaces home');
-		this.uiProjectName.classList.toggle('hidden', !hasProject);
-		// Code entry lives on the Console rail card; top bar only shows ← Console while in Code mode.
+		this.uiProjectName.classList.toggle('hidden', !hasProject || !codeOpen);
+		// Code entry lives on the Console rail card; top bar only shows ← Console in Code mode.
 		this.uiCodeTab.classList.add('hidden');
 		this.syncContextGatheringUi();
 	}
@@ -10049,7 +11867,7 @@ class ModeShellContribution extends Disposable {
 		this.updateUiProjectName();
 	}
 
-	/** Separate Code mode — full editor; use ← Console in the top bar to return. */
+	/** Separate Code mode — full editor; use ← Console on the top bar to return. */
 	private openCodeTab(): void {
 		this.modeService.setMode('Code');
 		this.syncContextGatheringUi();
@@ -10069,7 +11887,7 @@ class ModeShellContribution extends Disposable {
 	private syncContextGatheringUi(): void {
 		this.container.classList.toggle('custom-mode-context-gathering-open', this.contextGatheringOpen);
 		const codeOpen = this.modeService.getMode() === 'Code';
-		// Console collapses the top tab row; Code mode shows it so ← Console is available.
+		// Console collapses the shell strip; Code mode shows it with ← Console top-left.
 		this.container.classList.toggle('custom-mode-top-collapsed', !codeOpen);
 		const builderOpen = !codeOpen && this.selectedSurfaceId === ADD_SURFACE_ID && this.modeService.getMode() === 'UI';
 		this.uiCodeTab.classList.toggle('active', codeOpen);
@@ -10079,6 +11897,10 @@ class ModeShellContribution extends Disposable {
 		this.uiProjectName.classList.toggle('active', codeOpen || builderOpen);
 		this.uiProjectName.setAttribute('aria-pressed', String(codeOpen || builderOpen));
 		this.uiProjectName.setAttribute('aria-selected', String(codeOpen || builderOpen));
+		// Keep ← Console on the shell top bar (never the editor tabs row).
+		if (this.uiProjectName.parentElement !== this.modeTopBar) {
+			this.uiCodeTab.insertAdjacentElement('afterend', this.uiProjectName);
+		}
 		this.syncTopBarSelectionChrome();
 	}
 
@@ -10092,6 +11914,10 @@ class ModeShellContribution extends Disposable {
 		this.ensureWorkspaceView();
 		this.renderGoalSurfaceButtons(this.consoleService.getSurfaces());
 		this.syncWorkspaceHomeView();
+		// Keep Claude pane aligned with the selected surface (or workspace home).
+		this.showClaudeTerminalForKey(
+			surfaceId !== ADD_SURFACE_ID ? surfaceId : WORKSPACE_CLAUDE_KEY,
+		);
 		if (surfaceId !== ADD_SURFACE_ID) {
 			const storedView = this.getStoredSurfaceMainView(surfaceId);
 			if (storedView) {
@@ -10139,11 +11965,13 @@ class ModeShellContribution extends Disposable {
 			this.uiSurfaceButtons.clear();
 			this.uiSurfaceSwitcher.replaceChildren();
 			this.setGoalWorkspaceManifestStateMessage(state.status, state.diagnostics);
+			this.syncWorkspaceHomeView();
 
 			const activeUrl = this.devServerService.getActiveUrl();
 			if (!this.uiBrowserShell.classList.contains('custom-mode-ui-surface-missing-url') && activeUrl && !this.embeddedUiShowsUrl(activeUrl)) {
 				this.setEmbeddedUiUrl(activeUrl);
 			}
+			this.showClaudeTerminalForKey(undefined);
 			return;
 		}
 
@@ -10155,6 +11983,7 @@ class ModeShellContribution extends Disposable {
 			this.refreshSelectedSurfaceTaskTreeAndRoute();
 			this.refreshStartCommandHints();
 			this.refreshUiChatTabsAndSession();
+			this.showClaudeTerminalForKey(WORKSPACE_CLAUDE_KEY);
 			return;
 		}
 
@@ -10175,6 +12004,8 @@ class ModeShellContribution extends Disposable {
 		this.refreshUiChatTabsAndSession();
 		this.syncTopBarSelectionChrome();
 		this.syncWorkspaceHomeView();
+		// Surface id is restored here — after the early Claude restore ran without it.
+		this.showClaudeTerminalForKey(this.resolveClaudeTerminalKeyForSelection());
 	}
 
 	private async freeWorkspaceSurfacePortsAtStartup(surfaces: readonly WorkspaceSurface[]): Promise<void> {
@@ -10287,15 +12118,13 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private selectGoalSurface(surfaceId: string): void {
-		// Retry surface auto-start whenever the user explicitly switches tabs.
-		this.autoStartAppAttempted = false;
-
 		if (surfaceId === ADD_SURFACE_ID) {
 			this.surfaceRailCards = [];
 			this.surfaceRailCardsLoading = false;
 			this.selectedSurfaceId = ADD_SURFACE_ID;
 			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
 			this.applySurfaceSelection(surfaceId, { contextGathering: true });
+			this.showClaudeTerminalForKey(WORKSPACE_CLAUDE_KEY);
 			return;
 		}
 
@@ -10316,11 +12145,8 @@ class ModeShellContribution extends Disposable {
 		this.clearEmbeddedUiUrl();
 		this.setAppReachable(false);
 		this.applySurfaceSelection(surfaceId, { contextGathering: false, deferPreviewRouting: true });
-		void this.ensureSurfaceServerStarted(surface, { force: true }).then(started => {
-			if (started && this.selectedSurfaceId === surface.id) {
-				this.refreshSelectedSurfaceTaskTreeAndRoute();
-			}
-		}); // gated on verified scaffold / no blueprint
+		this.showClaudeTerminalForKey(surface.id);
+		// Dev servers start only from explicit Start preview / Start App — not on surface select.
 	}
 
 	private async deleteGoalSurface(surfaceId: string): Promise<void> {
@@ -10360,7 +12186,11 @@ class ModeShellContribution extends Disposable {
 				this.activeUiChatSurfaceId = fallbackSurface?.id ?? ADD_SURFACE_ID;
 				this.storageService.store(STORAGE_ACTIVE_UI_CHAT_SURFACE, this.activeUiChatSurfaceId, StorageScope.WORKSPACE, StorageTarget.USER);
 			}
-			await this.resetClaudeTerminalSession();
+			await this.resetClaudeTerminalSession(surfaceId);
+			const showKey = this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID
+				? this.selectedSurfaceId
+				: WORKSPACE_CLAUDE_KEY;
+			this.showClaudeTerminalForKey(showKey);
 			await this.consoleService.refresh();
 			this.syncGoalSurfaceSwitcher();
 			void this.refreshStarterSurfaceCardStatuses();
@@ -10513,7 +12343,7 @@ class ModeShellContribution extends Disposable {
 		this.storageService.store(STORAGE_ACTIVE_UI_CHAT_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
 		this.clearEmbeddedUiUrl();
 		this.setAppReachable(false);
-		await this.resetClaudeTerminalSession();
+		await this.resetAllClaudeTerminalSessions();
 		await this.consoleService.refresh();
 		this.applySurfaceSelection(ADD_SURFACE_ID, { contextGathering: true });
 		this.syncGoalSurfaceSwitcher();
@@ -10554,11 +12384,18 @@ class ModeShellContribution extends Disposable {
 	/** Last route signature — avoid re-entrant preview routing that thrash-logs and leaks listeners. */
 	private lastSurfacePreviewRouteKey: string | undefined;
 
+	/** True when the Preview section card owns the content pane. */
+	private isPreviewSectionSelected(): boolean {
+		return this.surfaceMainView === 'preview'
+			|| this.activeRailCardId === 'surfaceSection:preview';
+	}
+
 	private routeSelectedSurfacePreview(): void {
 		if (this.modeService.getMode() === 'Code') {
 			return;
 		}
-		const routeKey = `${this.contextGatheringOpen ? '1' : '0'}:${this.selectedSurfaceId ?? ''}:${this.surfaceMainView}`;
+		// Include the focused section card so Preview ↔ Graph/Plan re-routes (clears waiting chrome).
+		const routeKey = `${this.contextGatheringOpen ? '1' : '0'}:${this.selectedSurfaceId ?? ''}:${this.surfaceMainView}:${this.activeRailCardId ?? ''}`;
 		if (this.lastSurfacePreviewRouteKey === routeKey) {
 			return;
 		}
@@ -10591,10 +12428,25 @@ class ModeShellContribution extends Disposable {
 				this.setSurfaceEmptyState(undefined);
 			} else {
 				const url = surface.localUrl;
+				// Preview waiting/missing chrome only while the Preview card is focused —
+				// Plan / Rules / … keep the plan column, never the "no preview URL" empty.
+				const previewSelected = this.isPreviewSectionSelected();
 				if (!url) {
-					this.setSurfaceMissingUrlState(surface);
+					if (previewSelected) {
+						this.setSurfaceMissingUrlState(surface);
+					} else {
+						this.setSurfaceEmptyState(undefined);
+					}
 					this.clearEmbeddedUiUrl();
 					this.logSelectedSurfaceRoute(surface, undefined);
+				} else if (previewSelected && !this.appReachable) {
+					// Preview card owns the waiting chrome — keep the plan column intact otherwise.
+					this.setSurfaceServerDownState(surface, url);
+					if (!this.embeddedUiShowsUrl(url)) {
+						this.setEmbeddedUiUrl(url);
+					}
+					void this.checkUrlReachable(url);
+					this.logSelectedSurfaceRoute(surface, url);
 				} else {
 					this.setSurfaceEmptyState(undefined);
 					if (!this.embeddedUiShowsUrl(url)) {
@@ -10682,12 +12534,18 @@ class ModeShellContribution extends Disposable {
 		return this.appReachable && this.embeddedUiShowsUrl(surface.localUrl);
 	}
 
-	private setSurfaceMainView(_view: SurfaceMainView): void {
-		// All surface content lives in one Plan column — ignore view switches.
+	private setSurfaceMainView(view: SurfaceMainView): void {
 		this.ensureWorkspaceView();
-		this.surfaceMainView = 'plan';
+		const next = view === 'taskTree' ? 'plan' : view;
+		this.surfaceMainView = next === 'preview' ? 'preview' : 'plan';
 		if (this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID) {
-			this.persistSurfaceMainView(this.selectedSurfaceId, 'plan');
+			this.persistSurfaceMainView(this.selectedSurfaceId, this.surfaceMainView);
+		}
+		if (this.surfaceMainView === 'preview') {
+			this.activeRailCardId = 'surfaceSection:preview';
+		} else if (this.activeRailCardId === 'surfaceSection:preview') {
+			const openSurfaceId = this.getOpenSurfaceId();
+			this.activeRailCardId = openSurfaceId ? `surface:${openSurfaceId}` : this.activeRailCardId;
 		}
 		this.syncSurfaceMainView();
 		this.syncContextGatheringUi();
@@ -10696,7 +12554,7 @@ class ModeShellContribution extends Disposable {
 
 	private syncSurfaceMainView(): void {
 		this.syncSurfaceSetupDashboardVisibility();
-		if (this.surfaceMainView === 'taskTree') {
+		if (this.surfaceMainView === 'taskTree' || this.surfaceMainView === 'claudeMd' || this.surfaceMainView === 'ixSubsystems') {
 			this.surfaceMainView = 'plan';
 		}
 		const showToggle = shouldShowSurfaceMainViewToggle({
@@ -10707,15 +12565,28 @@ class ModeShellContribution extends Disposable {
 		// Unified Plan column owns Rules / Graph / Preview sections — never show the left rail.
 		this.uiSurfaceMainViewToggle.classList.add('hidden');
 		this.uiBrowserShell.classList.remove('custom-mode-ui-surface-view-cards');
+		const showPreview = showToggle && (
+			this.surfaceMainView === 'preview'
+			|| this.activeRailCardId === 'surfaceSection:preview'
+		);
 		for (const [view, button] of this.uiSurfaceTaskTreeToggleButtons) {
-			const active = view === 'plan';
+			const active = showPreview ? view === 'preview' : view === 'plan';
 			button.classList.toggle('active', active);
 			button.setAttribute('aria-selected', String(active));
 		}
 
-		const showPlan = showToggle;
-		const showOverlay = showPlan;
-		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-main-view-overlay', showOverlay);
+		// Waiting Start-preview chrome fills the card-rail content host; only the live webview
+		// takes over as a sibling column beside the cards (preview-visible).
+		const showPlan = showToggle && !showPreview;
+		const previewLive = showPreview && this.isSelectedSurfacePreviewReachable();
+		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-preview-visible', previewLive);
+		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-main-view-overlay', previewLive);
+		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-preview-waiting', showPreview && !previewLive);
+		// Never let stale Preview waiting empty-state own the pane when a non-Preview section is focused.
+		if (showPlan && !this.uiSurfaceEmptyState.classList.contains('hidden')) {
+			this.uiSurfaceEmptyState.classList.add('hidden');
+			this.uiBrowserShell.classList.remove('custom-mode-ui-surface-missing-url');
+		}
 		this.uiSurfacePlanPanelRoot.classList.toggle('hidden', !showPlan);
 		this.uiSurfacePlanPanelRoot.hidden = !showPlan;
 		this.uiSurfaceClaudeMdPanelRoot.classList.add('hidden');
@@ -10733,6 +12604,7 @@ class ModeShellContribution extends Disposable {
 				workspaceFolder: this.getWorkspaceFolderUri(),
 			});
 		}
+		this.syncStepsPanel();
 		this.syncWorkspaceHomeView();
 		this.renderSelectedSurfaceLaunchPanel();
 		this.syncTopBarSelectionChrome();
@@ -10756,38 +12628,81 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceLaunchPanel.replaceChildren();
 
 		const surface = this.getSelectedSurface();
-		if (!surface || this.contextGatheringOpen || this.surfaceMainView !== 'preview') {
+		const previewSelected = !this.contextGatheringOpen
+			&& (this.surfaceMainView === 'preview' || this.activeRailCardId === 'surfaceSection:preview');
+		if (!surface || !previewSelected || this.isSelectedSurfacePreviewReachable()) {
 			this.uiSurfaceLaunchPanel.classList.add('hidden');
 			this.uiSurfaceLaunchPanel.hidden = true;
 			return;
 		}
 
 		const command = surface.devCommand?.trim();
-		if (!command) {
-			this.uiSurfaceLaunchPanel.classList.remove('hidden');
-			this.uiSurfaceLaunchPanel.hidden = false;
-			this.uiSurfaceLaunchPanel.appendChild($('div.custom-mode-ui-surface-launch-meta', undefined,
-				localize('customMode.surfaceLaunchMissingCommand', 'No start command for {0}. Add devCommand in workspace.goal.json.', surface.name)));
-			return;
-		}
-
 		const workspaceFolder = this.getWorkspaceFolderUri();
-		const displayedCommand = this.alignSurfaceCommandToPreferredPort(command, surface.localUrl);
+		const url = surface.localUrl?.trim();
+		const starting = Boolean(command && workspaceFolder && this.startingSurfaceServers.has(surface.id));
+		const displayedCommand = command
+			? this.alignSurfaceCommandToPreferredPort(command, surface.localUrl)
+			: undefined;
+
 		this.uiSurfaceLaunchPanel.classList.remove('hidden');
 		this.uiSurfaceLaunchPanel.hidden = false;
-		this.uiSurfaceLaunchPanel.appendChild($('div.custom-mode-ui-surface-launch-meta', undefined,
-			surface.localUrl
-				? localize('customMode.surfaceLaunchMetaWithUrl', '{0} -> {1}', surface.name, surface.localUrl)
-				: surface.name));
-		this.uiSurfaceLaunchPanel.appendChild($('code.custom-mode-ui-surface-launch-copy', { title: displayedCommand }, displayedCommand));
-		if (workspaceFolder) {
-			const runButton = $('button.custom-mode-ui-surface-launch-run', { type: 'button' },
-				localize('customMode.surfaceLaunchRunTerminal', 'Run in terminal')) as HTMLButtonElement;
-			this.surfaceLaunchActionDisposables.add(addDisposableListener(runButton, 'click', () => {
-				void this.runSurfaceCommandInTerminal(surface.id, workspaceFolder, surface.name, command, surface.localUrl, { force: true });
-			}));
-			this.uiSurfaceLaunchPanel.appendChild(runButton);
+
+		const toolbar = $('div.custom-mode-ui-surface-launch-toolbar', undefined,
+			$('div.custom-mode-ui-surface-launch-dots', undefined, $('span'), $('span'), $('span')),
+			$('div.custom-mode-ui-surface-launch-url', {
+				title: url || localize('customMode.surfaceLaunchUrlMissing', 'No preview URL yet'),
+			}, url || localize('customMode.surfaceLaunchUrlMissing', 'No preview URL yet')),
+		);
+		const body = $('div.custom-mode-ui-surface-launch-body');
+		body.appendChild($('p.custom-mode-ui-surface-launch-kicker', undefined,
+			localize('customMode.surfaceLaunchKicker', 'Live preview')));
+		body.appendChild($('h2.custom-mode-ui-surface-launch-title', undefined, surface.name));
+		if (!command) {
+			body.appendChild($('p.custom-mode-ui-surface-launch-copy', undefined,
+				localize('customMode.surfaceLaunchMissingCommand', 'No start command for {0}. Add devCommand in workspace.goal.json.', surface.name)));
+		} else if (!url) {
+			body.appendChild($('p.custom-mode-ui-surface-launch-copy', undefined,
+				localize('customMode.surfaceLaunchMissingUrlDetail', 'Add localUrl for this surface in workspace.goal.json, then start the preview.')));
+			body.appendChild($('code.custom-mode-ui-surface-launch-command', { title: displayedCommand }, displayedCommand!));
+		} else if (starting) {
+			body.appendChild($('p.custom-mode-ui-surface-launch-copy', undefined,
+				localize('customMode.surfaceLaunchStartingDetail', 'Starting the dev server. This pane will show the live app when {0} responds.', url)));
+			body.appendChild($('code.custom-mode-ui-surface-launch-command', { title: displayedCommand }, displayedCommand!));
+		} else {
+			body.appendChild($('p.custom-mode-ui-surface-launch-copy', undefined,
+				localize('customMode.surfaceLaunchReadyDetail', 'Preview is wired to {0}. Start the surface to load it here.', url)));
+			body.appendChild($('code.custom-mode-ui-surface-launch-command', { title: displayedCommand }, displayedCommand!));
 		}
+
+		const actions = $('div.custom-mode-ui-surface-launch-actions');
+		if (command && workspaceFolder) {
+			const startButton = $('button.custom-mode-ui-surface-launch-run', { type: 'button' }, starting
+				? localize('customMode.surfaceLaunchStarting', 'Starting…')
+				: localize('customMode.surfaceLaunchStartPreview', 'Start preview')) as HTMLButtonElement;
+			startButton.disabled = starting;
+			this.surfaceLaunchActionDisposables.add(addDisposableListener(startButton, 'click', () => {
+				this.startingSurfaceServers.add(surface.id);
+				this.renderSelectedSurfaceLaunchPanel();
+				void this.runSurfaceCommandInTerminal(surface.id, workspaceFolder, surface.name, command, surface.localUrl, { force: true })
+					.finally(() => this.renderSelectedSurfaceLaunchPanel());
+			}));
+			actions.appendChild(startButton);
+		}
+		if (url) {
+			const openButton = $('button.custom-mode-ui-surface-launch-run.secondary', { type: 'button' },
+				localize('customMode.surfaceLaunchOpenExternal', 'Open in browser')) as HTMLButtonElement;
+			this.surfaceLaunchActionDisposables.add(addDisposableListener(openButton, 'click', () => {
+				void this.openerService.open(URI.parse(url), { openExternal: true });
+			}));
+			actions.appendChild(openButton);
+		}
+		if (actions.childElementCount) {
+			body.appendChild(actions);
+		}
+
+		this.uiSurfaceLaunchPanel.appendChild(
+			$('div.custom-mode-ui-surface-launch-chrome', undefined, toolbar, body),
+		);
 	}
 
 	async playSelectedSurfaceWorkflow(surfaceId?: string): Promise<void> {
@@ -11100,9 +13015,9 @@ class ModeShellContribution extends Disposable {
 				title: localize('customMode.goalWorkspaceNoWorkspaceTitle', 'Build your goal workspace'),
 				subtitle: localize(
 					'customMode.goalWorkspaceNoWorkspaceDetail',
-					'Open a goal workspace to name the business, set brand assets, and generate surfaces one at a time from the Guided Builder.'
+					'Open a folder below, or create a fresh Console workspace to name the business and generate surfaces.'
 				)
-			});
+			}, { showOpenableFolders: true });
 			return;
 		}
 
@@ -11113,28 +13028,205 @@ class ModeShellContribution extends Disposable {
 				subtitle: diagnostic
 					? localize('customMode.goalWorkspaceInvalidDetail', '{0}: {1}', diagnostic.path, diagnostic.message)
 					: localize('customMode.goalWorkspaceInvalidGeneric', 'Fix the manifest diagnostics to show goal surfaces.')
-			});
+			}, { showOpenableFolders: true });
 			return;
 		}
 
 		if (status === 'missing') {
 			this.setSurfaceEmptyState({
 				title: localize('customMode.goalWorkspaceMissingTitle', 'No goal workspace manifest'),
-				subtitle: localize('customMode.goalWorkspaceMissingDetail', 'Add workspace.goal.json at the workspace root or convert this folder into a goal workspace to show business surfaces.')
-			});
+				subtitle: localize(
+					'customMode.goalWorkspaceMissingDetail',
+					'This folder has no workspace.goal.json. Open a goal workspace below, or add a manifest at the root.'
+				)
+			}, { showOpenableFolders: true });
 			return;
 		}
 
 		this.setSurfaceEmptyState(undefined);
 	}
 
-	private setSurfaceEmptyState(message: { readonly title: string; readonly subtitle: string } | undefined): void {
+	private setSurfaceEmptyState(
+		message: { readonly title: string; readonly subtitle: string } | undefined,
+		options?: { readonly showOpenableFolders?: boolean },
+	): void {
 		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-missing-url', Boolean(message));
-		this.uiSurfaceSetupDashboard.classList.add('hidden');
+		// Side cards live on the setup dashboard — never hide them for empty/missing states.
+		this.uiSurfaceSetupDashboard.classList.remove('hidden');
 		this.setSurfaceSetupBuilderOpen(false);
 		this.uiSurfaceEmptyState.classList.toggle('hidden', !message);
 		this.uiSurfaceEmptyTitle.textContent = message?.title ?? '';
 		this.uiSurfaceEmptySubtitle.textContent = message?.subtitle ?? '';
+		this.emptyOpenableFoldersEnabled = Boolean(message && options?.showOpenableFolders);
+		if (this.emptyOpenableFoldersEnabled) {
+			void this.refreshEmptyOpenableFolders();
+		} else {
+			this.clearEmptyOpenableFolders();
+		}
+		if (message) {
+			// Empty copy owns the content pane; keep Console/Plan/preview chrome out of the way.
+			this.uiBrowserShell.classList.remove('custom-mode-ui-surface-main-view-overlay');
+			this.uiBrowserShell.classList.remove('custom-mode-ui-surface-preview-visible');
+			this.uiConsoleHomeHost.classList.add('hidden');
+			this.uiSurfacePlanPanelRoot.classList.add('hidden');
+			this.uiSurfacePlanPanelRoot.hidden = true;
+		} else if (this.uiWorkspaceHomeCardRail) {
+			this.syncWorkspaceHomeView();
+		}
+	}
+
+	private clearEmptyOpenableFolders(): void {
+		this.emptyOpenableFolderListeners.clear();
+		this.uiSurfaceEmptyFolders.replaceChildren();
+		this.uiSurfaceEmptyFolders.classList.add('hidden');
+		this.uiSurfaceEmptyActions.replaceChildren();
+		this.uiSurfaceEmptyActions.classList.add('hidden');
+	}
+
+	private async refreshEmptyOpenableFolders(): Promise<void> {
+		if (!this.emptyOpenableFoldersEnabled) {
+			return;
+		}
+		const folders = await this.collectOpenableFolders();
+		if (!this.emptyOpenableFoldersEnabled) {
+			return;
+		}
+		this.emptyOpenableFolderListeners.clear();
+		this.uiSurfaceEmptyFolders.replaceChildren();
+		this.uiSurfaceEmptyActions.replaceChildren();
+
+		this.uiSurfaceEmptyFolders.appendChild(
+			$('div.custom-mode-ui-surface-empty-folders-heading', undefined,
+				localize('customMode.emptyOpenableFoldersHeading', 'Open a folder')),
+		);
+
+		if (folders.length === 0) {
+			this.uiSurfaceEmptyFolders.appendChild(
+				$('div.custom-mode-ui-surface-empty-folder-path', undefined,
+					localize('customMode.emptyOpenableFoldersNone', 'No recent folders yet.')),
+			);
+		} else {
+			for (const folder of folders) {
+				const button = $('button.custom-mode-ui-surface-empty-folder', {
+					type: 'button',
+					role: 'listitem',
+					title: folder.fullPath,
+					'aria-label': localize('customMode.emptyOpenableFolderAria', 'Open folder {0}', folder.name),
+				},
+					$('span.custom-mode-ui-surface-empty-folder-name', undefined, folder.name),
+					$('span.custom-mode-ui-surface-empty-folder-path', undefined, folder.parentPath || folder.fullPath),
+				) as HTMLButtonElement;
+				this.emptyOpenableFolderListeners.add(addDisposableListener(button, 'click', () => {
+					void this.hostService.openWindow([folder.openable], {
+						forceReuseWindow: true,
+						remoteAuthority: folder.remoteAuthority ?? null,
+					});
+				}));
+				this.uiSurfaceEmptyFolders.appendChild(button);
+			}
+		}
+		this.uiSurfaceEmptyFolders.classList.remove('hidden');
+
+		const openFolderBtn = $('button.custom-mode-ui-surface-empty-action.primary', {
+			type: 'button',
+		}, localize('customMode.emptyOpenFolderAction', 'Open Folder…')) as HTMLButtonElement;
+		const newWorkspaceBtn = $('button.custom-mode-ui-surface-empty-action', {
+			type: 'button',
+		}, localize('customMode.emptyNewConsoleWorkspaceAction', 'New Console workspace')) as HTMLButtonElement;
+		this.emptyOpenableFolderListeners.add(addDisposableListener(openFolderBtn, 'click', () => {
+			void this.fileDialogService.pickFolderAndOpen({ forceNewWindow: false });
+		}));
+		this.emptyOpenableFolderListeners.add(addDisposableListener(newWorkspaceBtn, 'click', () => {
+			void this.defaultProjectService.openFallbackWorkspace();
+		}));
+		this.uiSurfaceEmptyActions.append(openFolderBtn, newWorkspaceBtn);
+		this.uiSurfaceEmptyActions.classList.remove('hidden');
+	}
+
+	private async collectOpenableFolders(): Promise<Array<{
+		readonly name: string;
+		readonly parentPath: string;
+		readonly fullPath: string;
+		readonly openable: { folderUri: URI } | { workspaceUri: URI };
+		readonly remoteAuthority?: string;
+		readonly key: string;
+	}>> {
+		const seen = new Set<string>();
+		const currentFolder = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		const entries: Array<{
+			readonly name: string;
+			readonly parentPath: string;
+			readonly fullPath: string;
+			readonly openable: { folderUri: URI } | { workspaceUri: URI };
+			readonly remoteAuthority?: string;
+			readonly key: string;
+		}> = [];
+
+		const pushFolder = (folderUri: URI, label: string | undefined, remoteAuthority?: string) => {
+			const key = folderUri.toString();
+			if (seen.has(key) || (currentFolder && isEqual(currentFolder, folderUri))) {
+				return;
+			}
+			seen.add(key);
+			const fullPath = label || this.labelService.getWorkspaceLabel(folderUri, { verbose: Verbosity.LONG });
+			const { name, parentPath } = splitRecentLabel(fullPath);
+			entries.push({
+				name: name || basename(folderUri),
+				parentPath,
+				fullPath,
+				openable: { folderUri },
+				remoteAuthority,
+				key,
+			});
+		};
+
+		const pushWorkspace = (recent: IRecentWorkspace) => {
+			const key = recent.workspace.configPath.toString();
+			if (seen.has(key) || this.workspaceContextService.isCurrentWorkspace(recent.workspace)) {
+				return;
+			}
+			seen.add(key);
+			const fullPath = recent.label || this.labelService.getWorkspaceLabel(recent.workspace, { verbose: Verbosity.LONG });
+			const { name, parentPath } = splitRecentLabel(fullPath);
+			entries.push({
+				name: name || basename(recent.workspace.configPath),
+				parentPath,
+				fullPath,
+				openable: { workspaceUri: recent.workspace.configPath },
+				remoteAuthority: recent.remoteAuthority,
+				key,
+			});
+		};
+
+		try {
+			const recentlyOpened = await this.workspacesService.getRecentlyOpened();
+			for (const recent of recentlyOpened.workspaces) {
+				if (isRecentFolder(recent)) {
+					pushFolder(recent.folderUri, recent.label, recent.remoteAuthority);
+				} else if (isRecentWorkspace(recent)) {
+					pushWorkspace(recent);
+				}
+			}
+		} catch {
+			// Recents are best-effort for the empty state.
+		}
+
+		// Also surface managed Custom/* project folders that may not be in recents yet.
+		try {
+			const customRoot = joinPath(URI.file(this.nativeEnvironmentService.userDataPath), 'Custom');
+			if (await this.fileService.exists(customRoot)) {
+				const resolved = await this.fileService.resolve(customRoot);
+				for (const child of resolved.children ?? []) {
+					if (child.isDirectory) {
+						pushFolder(child.resource, undefined);
+					}
+				}
+			}
+		} catch {
+			// Optional discovery.
+		}
+
+		return entries;
 	}
 
 	private formatGoalSurfaceDescription(surface: WorkspaceSurface): string {
@@ -11261,15 +13353,11 @@ class ModeShellContribution extends Disposable {
 	}
 
 	private syncUiStartPanelVisibility(): void {
-		const state = this.devServerService.getState();
-		const starting = state.phase === 'installing' || state.phase === 'starting';
-		this.uiSetup.classList.toggle('custom-mode-setup-active', starting);
-		this.uiSetup.classList.toggle('custom-mode-setup-hidden', !starting);
-
-		if (!starting) {
-			this.uiRuntimeText.textContent = '';
-			this.uiRuntimeLogs.length = 0;
-		}
+		// Start App popup retired — never surface the runtime overlay.
+		this.uiSetup.classList.remove('custom-mode-setup-active');
+		this.uiSetup.classList.add('custom-mode-setup-hidden');
+		this.uiRuntimeText.textContent = '';
+		this.uiRuntimeLogs.length = 0;
 	}
 
 	private updateStartAppControl(): void {
@@ -11511,38 +13599,9 @@ class ModeShellContribution extends Disposable {
 		return Number.isFinite(parsed) ? parsed : undefined;
 	}
 
+	/** Intentionally disabled — start servers only via Start preview / Start App / Start all. */
 	private maybeAutoStartApp(): void {
-		if (this.autoStartAppAttempted) {
-			return;
-		}
-
-		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
-		const hints = this.lastUiStartHints;
-		const goalWorkspaceState = this.consoleService.getState();
-		const selectedSurface = this.getSelectedSurface();
-		const surfaceCommand = selectedSurface?.devCommand?.trim();
-		const canUseFallbackScript = goalWorkspaceState.status !== 'loaded';
-		if (!hasProject || !(surfaceCommand || (canUseFallbackScript && hints?.primaryRunCommand))) {
-			return;
-		}
-
-		const state = this.devServerService.getState();
-		if (state.phase !== 'idle') {
-			this.autoStartAppAttempted = true;
-			return;
-		}
-
-		void (async () => {
-			if (selectedSurface && !(await this.isSurfaceReadyForDevServerAutoStart(selectedSurface))) {
-				this.pushUiRuntimeLog(`[surface-autostart:deferred] ${selectedSurface.id}: waiting for verified scaffold before Start App auto-run`);
-				return;
-			}
-			if (this.autoStartAppAttempted) {
-				return;
-			}
-			this.autoStartAppAttempted = true;
-			void this.onStartAppClicked();
-		})();
+		return;
 	}
 
 	private renderStartHintsInto(root: HTMLElement, hints: DevServerSuggestedCommands | undefined): void {
@@ -12808,6 +14867,10 @@ class ModeShellContribution extends Disposable {
 		this.appReachable = reachable;
 		this.container.classList.toggle('custom-mode-app-reachable', reachable);
 		this.syncTopBarSelectionChrome();
+		// Swap the waiting chrome for the live webview (or back) as soon as reachability flips.
+		if (reachable !== wasReachable) {
+			this.syncSurfaceMainView();
+		}
 
 		// When the dev server transitions from unreachable to reachable, the embedded UI is
 		// almost certainly showing an ERR_CONNECTION_REFUSED page from the initial load attempt
@@ -12884,10 +14947,32 @@ class ModeShellContribution extends Disposable {
 		if (this.devServerService.getState().phase !== 'running') {
 			this.setAppReachable(false);
 			const surface = this.getSelectedSurface();
-			if (surface?.localUrl === url) {
+			if (surface?.localUrl === url && this.isPreviewSectionSelected()) {
 				this.setSurfaceServerDownState(surface, url);
 			}
 		}
+		if (this.getSelectedSurface()?.localUrl === url) {
+			// Keep probing while this surface stays selected — the auto-started dev command can
+			// take a while to boot, and the dev server service does not track servers it did not
+			// start itself, so a state-change event is not guaranteed to arrive.
+			this.surfacePreviewRetryScheduler.schedule();
+		}
+	}
+
+	private urlsShareOrigin(a: string, b: string): boolean {
+		try {
+			return new URL(a).origin === new URL(b).origin;
+		} catch {
+			return false;
+		}
+	}
+
+	private retrySelectedSurfacePreview(): void {
+		const surface = this.getSelectedSurface();
+		if (!surface?.localUrl || this.appReachable) {
+			return;
+		}
+		void this.checkUrlReachable(surface.localUrl);
 	}
 
 	private pushUiRuntimeLog(line: string): void {

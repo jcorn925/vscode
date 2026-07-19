@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import type { SurfaceBlockerStepRef } from './surfaceBlockers.js';
+import { isBlockerStepId } from './surfaceBlockers.js';
 import type { SurfaceReferenceCandidatesStatus } from './surfaceReferenceCandidates.js';
 
 export type SurfacePlanWorkflowStageId =
@@ -29,6 +31,16 @@ export interface SurfacePlanWorkflowPhaseRef {
 	readonly title: string;
 }
 
+/** Console-owned gate: confirm the proposed/live code graph before Preview. */
+export const VERIFY_GRAPH_STEP_ID = 'verify_graph';
+
+/** Console-owned gate: wire Preview via localUrl + devCommand on the surface. */
+export const ENABLE_PREVIEW_STEP_ID = 'enable_preview';
+
+export function isSurfacePreviewWired(input: { readonly localUrl?: string; readonly devCommand?: string } | undefined): boolean {
+	return Boolean(input?.localUrl?.trim() && input?.devCommand?.trim());
+}
+
 export interface SurfacePlanWorkflowSignals {
 	/**
 	 * The surface exists in workspace.goal.json. `false` shows the confirm step as
@@ -47,13 +59,36 @@ export interface SurfacePlanWorkflowSignals {
 	readonly phaseInFlightStepId?: string;
 	/** Phase Claude marked failed — Next becomes Retry for the same step. */
 	readonly failedPhaseStepId?: string;
+	/**
+	 * Surface has both `localUrl` and `devCommand` in workspace.goal.json so the
+	 * Console Preview pane can launch. Completes `enable_preview` only after
+	 * lock + generate phases + Code Graph are done (never ahead of CURRENT phases).
+	 */
+	readonly previewEnabled?: boolean;
+	/**
+	 * Open operational blockers (env keys, agent-declared gaps) shown after Enable Preview.
+	 * Step ids should already be `blocker:<id>`.
+	 */
+	readonly openBlockers?: readonly SurfaceBlockerStepRef[];
 }
 
 export interface SurfacePlanWorkflowStep {
 	readonly id: string;
 	readonly label: string;
-	readonly kind: 'stage' | 'action' | 'phase';
+	readonly kind: 'stage' | 'action' | 'phase' | 'blocker';
 }
+
+export const VERIFY_GRAPH_STEP: SurfacePlanWorkflowStep = {
+	id: VERIFY_GRAPH_STEP_ID,
+	label: 'Code Graph',
+	kind: 'action',
+};
+
+export const ENABLE_PREVIEW_STEP: SurfacePlanWorkflowStep = {
+	id: ENABLE_PREVIEW_STEP_ID,
+	label: 'Enable Preview',
+	kind: 'action',
+};
 
 export interface SurfacePlanWorkflowStepState extends SurfacePlanWorkflowStep {
 	readonly status: SurfacePlanWorkflowStepStatus;
@@ -114,19 +149,33 @@ export function markSurfacePlanLocked(planMarkdown: string): string {
 }
 
 export function inferSurfacePlanWorkflowStage(signals: SurfacePlanWorkflowSignals): SurfacePlanWorkflowStageId {
-	const completed = toCompletedSet(signals.completedStepIds);
+	const completed = effectiveCompletedStepIds(signals);
 	const phases = signals.proposalPhases ?? [];
+	const hasOpenBlockers = (signals.openBlockers ?? []).length > 0;
 	if (signals.surfaceConfirmed === false && !completed.has('confirm_surface')) {
 		return 'confirm_surface';
 	}
 	if (signals.planLocked && phases.length) {
 		const allPhasesDone = phases.every(phase => completed.has(phase.id));
-		if (allPhasesDone && completed.has('lock_plan')) {
+		if (
+			allPhasesDone
+			&& completed.has('lock_plan')
+			&& completed.has(VERIFY_GRAPH_STEP_ID)
+			&& completed.has(ENABLE_PREVIEW_STEP_ID)
+			&& !hasOpenBlockers
+		) {
 			return 'complete';
 		}
 		return 'building';
 	}
 	if (signals.planLocked) {
+		if (completed.has('lock_plan') && (
+			!completed.has(VERIFY_GRAPH_STEP_ID)
+			|| !completed.has(ENABLE_PREVIEW_STEP_ID)
+			|| hasOpenBlockers
+		)) {
+			return 'building';
+		}
 		return 'plan_locked';
 	}
 	if (signals.hasFinalProposal && signals.hasPlanContent) {
@@ -150,8 +199,9 @@ export function inferSurfacePlanWorkflowStage(signals: SurfacePlanWorkflowSignal
 
 export function buildSurfacePlanWorkflowSteps(signals: SurfacePlanWorkflowSignals): readonly SurfacePlanWorkflowStepState[] {
 	const stageId = inferSurfacePlanWorkflowStage(signals);
-	const completed = toCompletedSet(signals.completedStepIds);
+	const completed = effectiveCompletedStepIds(signals);
 	const phases = signals.proposalPhases ?? [];
+	const openBlockers = signals.openBlockers ?? [];
 	const sequence: SurfacePlanWorkflowStep[] = [
 		...PLANNING_STAGES,
 		...phases.map(phase => ({
@@ -159,9 +209,16 @@ export function buildSurfacePlanWorkflowSteps(signals: SurfacePlanWorkflowSignal
 			label: phase.title,
 			kind: 'phase' as const,
 		})),
+		VERIFY_GRAPH_STEP,
+		ENABLE_PREVIEW_STEP,
+		...openBlockers.map(blocker => ({
+			id: blocker.id,
+			label: blocker.label,
+			kind: 'blocker' as const,
+		})),
 	];
 
-	const currentStepId = resolveCurrentStepId(stageId, phases, completed);
+	const currentStepId = resolveCurrentStepId(stageId, phases, completed, openBlockers);
 	return sequence.map(step => {
 		let status: SurfacePlanWorkflowStepStatus = 'pending';
 		if (completed.has(step.id) || isStepImpliedComplete(step.id, stageId, phases, completed)) {
@@ -245,7 +302,15 @@ function resolveNextAction(
 			}
 			const failedId = signals.failedPhaseStepId?.trim();
 			if (failedId) {
-				const failedStep = steps.find(step => step.id === failedId && step.kind === 'phase');
+				const failedStep = steps.find(step =>
+					step.id === failedId
+					&& (
+						step.kind === 'phase'
+						|| step.kind === 'blocker'
+						|| step.id === VERIFY_GRAPH_STEP_ID
+						|| step.id === ENABLE_PREVIEW_STEP_ID
+					)
+				);
 				if (failedStep) {
 					return {
 						id: 'run_next_phase',
@@ -255,13 +320,37 @@ function resolveNextAction(
 				}
 			}
 			const nextPhase = steps.find(step => step.kind === 'phase' && step.status !== 'completed');
-			if (!nextPhase) {
+			if (nextPhase) {
+				return {
+					id: 'run_next_phase',
+					label: nextPhase.label,
+					stepId: nextPhase.id,
+				};
+			}
+			const verifyGraph = steps.find(step => step.id === VERIFY_GRAPH_STEP_ID && step.status !== 'completed');
+			if (verifyGraph) {
+				return {
+					id: 'run_next_phase',
+					label: verifyGraph.label,
+					stepId: verifyGraph.id,
+				};
+			}
+			const enablePreview = steps.find(step => step.id === ENABLE_PREVIEW_STEP_ID && step.status !== 'completed');
+			if (enablePreview) {
+				return {
+					id: 'run_next_phase',
+					label: enablePreview.label,
+					stepId: enablePreview.id,
+				};
+			}
+			const nextBlocker = steps.find(step => step.kind === 'blocker' && step.status !== 'completed');
+			if (!nextBlocker) {
 				return undefined;
 			}
 			return {
 				id: 'run_next_phase',
-				label: nextPhase.label,
-				stepId: nextPhase.id,
+				label: nextBlocker.label,
+				stepId: nextBlocker.id,
 			};
 		}
 		default:
@@ -277,16 +366,29 @@ function resolveCurrentStepId(
 	stageId: SurfacePlanWorkflowStageId,
 	phases: readonly SurfacePlanWorkflowPhaseRef[],
 	completed: ReadonlySet<string>,
+	openBlockers: readonly SurfaceBlockerStepRef[],
 ): string {
 	if (stageId === 'building' || stageId === 'plan_locked') {
 		if (!completed.has('lock_plan')) {
 			return 'lock_plan';
 		}
 		const nextPhase = phases.find(phase => !completed.has(phase.id));
-		return nextPhase?.id ?? phases[phases.length - 1]?.id ?? 'lock_plan';
+		if (nextPhase) {
+			return nextPhase.id;
+		}
+		if (!completed.has(VERIFY_GRAPH_STEP_ID)) {
+			return VERIFY_GRAPH_STEP_ID;
+		}
+		if (!completed.has(ENABLE_PREVIEW_STEP_ID)) {
+			return ENABLE_PREVIEW_STEP_ID;
+		}
+		if (openBlockers.length) {
+			return openBlockers[0]!.id;
+		}
+		return phases[phases.length - 1]?.id ?? ENABLE_PREVIEW_STEP_ID;
 	}
 	if (stageId === 'complete') {
-		return phases[phases.length - 1]?.id ?? 'lock_plan';
+		return ENABLE_PREVIEW_STEP_ID;
 	}
 	if (stageId === 'plan_ready') {
 		return 'plan_ready';
@@ -300,6 +402,10 @@ function isStepImpliedComplete(
 	phases: readonly SurfacePlanWorkflowPhaseRef[],
 	completed: ReadonlySet<string>,
 ): boolean {
+	if (isBlockerStepId(stepId)) {
+		// Open blockers stay pending/current; resolved ones are omitted from the sequence.
+		return false;
+	}
 	const stageOrder = PLANNING_STAGES.map(step => step.id);
 	const stageIndex = stageOrder.indexOf(stepId);
 	const currentIndex = stageOrder.indexOf(stageId === 'building' || stageId === 'plan_locked' || stageId === 'complete'
@@ -311,10 +417,46 @@ function isStepImpliedComplete(
 	if (stepId === 'lock_plan' && (stageId === 'building' || stageId === 'plan_locked' || stageId === 'complete' || completed.has('lock_plan'))) {
 		return stageId !== 'plan_ready';
 	}
-	if (stageId === 'complete' && phases.some(phase => phase.id === stepId)) {
+	if (stageId === 'complete' && (
+		phases.some(phase => phase.id === stepId)
+		|| stepId === VERIFY_GRAPH_STEP_ID
+		|| stepId === ENABLE_PREVIEW_STEP_ID
+	)) {
 		return true;
 	}
 	return false;
+}
+
+function effectiveCompletedStepIds(signals: SurfacePlanWorkflowSignals): Set<string> {
+	const completed = toCompletedSet(signals.completedStepIds);
+	// Legacy workflows completed Enable Preview before Code Graph existed — do not
+	// yank those surfaces back to verify_graph.
+	if (completed.has(ENABLE_PREVIEW_STEP_ID) && !completed.has(VERIFY_GRAPH_STEP_ID)) {
+		completed.add(VERIFY_GRAPH_STEP_ID);
+	}
+	// Preview wiring is often set during early scaffold phases. Do not mark Enable
+	// Preview DONE until lock + phases + Code Graph ahead of it are complete —
+	// otherwise the Steps rail shows DONE after CURRENT/UPCOMING phases.
+	if (signals.previewEnabled && canAutoCompleteEnablePreview(signals, completed)) {
+		completed.add(ENABLE_PREVIEW_STEP_ID);
+	}
+	return completed;
+}
+
+/** Enable Preview sits after Code Graph; only auto-complete once Graph is done. */
+function canAutoCompleteEnablePreview(
+	signals: SurfacePlanWorkflowSignals,
+	completed: ReadonlySet<string>,
+): boolean {
+	if (!(signals.planLocked || completed.has('lock_plan'))) {
+		return false;
+	}
+	const phases = signals.proposalPhases ?? [];
+	if (!phases.every(phase => completed.has(phase.id))) {
+		return false;
+	}
+	// Code Graph is a visible Next gate — do not skip past it when preview is already wired.
+	return completed.has(VERIFY_GRAPH_STEP_ID);
 }
 
 function toCompletedSet(value: ReadonlySet<string> | readonly string[] | undefined): Set<string> {
@@ -322,7 +464,54 @@ function toCompletedSet(value: ReadonlySet<string> | readonly string[] | undefin
 		return new Set();
 	}
 	if (value instanceof Set) {
-		return value;
+		return new Set(value);
 	}
 	return new Set(value);
+}
+
+/**
+ * Map a Plan Steps row item to the surface card-rail section that should open.
+ * Returns the first candidate present in `availableSectionIds`, or undefined.
+ */
+export function resolveSurfaceSectionIdForStep(
+	step: { readonly id: string; readonly kind: SurfacePlanWorkflowStep['kind'] },
+	availableSectionIds: ReadonlySet<string> | readonly string[],
+): string | undefined {
+	const available = availableSectionIds instanceof Set
+		? availableSectionIds
+		: new Set(availableSectionIds);
+	const pick = (...candidates: readonly string[]): string | undefined => {
+		const hit = candidates.find(id => available.has(id));
+		if (hit) {
+			return hit;
+		}
+		// Cards not published yet — return preferred id so callers can pending-select.
+		return available.size === 0 ? candidates[0] : undefined;
+	};
+
+	if (step.kind === 'phase') {
+		return pick('graph', 'phases', 'files', 'architecture', 'plan');
+	}
+	if (step.kind === 'blocker' || isBlockerStepId(step.id)) {
+		return pick('preview', 'plan');
+	}
+	if (step.id === VERIFY_GRAPH_STEP_ID) {
+		return pick('graph', 'plan');
+	}
+	if (step.id === ENABLE_PREVIEW_STEP_ID) {
+		return pick('preview', 'plan');
+	}
+	switch (step.id) {
+		case 'research_survey':
+		case 'awaiting_repo_selection':
+		case 'research_map':
+			return pick('context', 'plan');
+		case 'confirm_surface':
+		case 'intent':
+		case 'plan_ready':
+		case 'lock_plan':
+			return pick('plan');
+		default:
+			return pick('plan');
+	}
 }

@@ -60,22 +60,13 @@ export interface SurfaceProposalTreeCardItem {
 export const SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE = '—';
 
 /**
- * Keep ready surface cards first; push incomplete ones (Graph/Preview/Plan with "—") to the end.
- * Relative order within each group is preserved.
+ * Section cards keep declaration order. Dynamic rail reordering is owned by Mode Shell
+ * (surfaces by most recent associated plan-step activity) — Rules/Plan are not pinned.
  */
 export function orderSurfaceProposalTreeCards(
 	cards: readonly SurfaceProposalTreeCardItem[],
 ): SurfaceProposalTreeCardItem[] {
-	const ready: SurfaceProposalTreeCardItem[] = [];
-	const incomplete: SurfaceProposalTreeCardItem[] = [];
-	for (const card of cards) {
-		if (card.value === SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE) {
-			incomplete.push(card);
-		} else {
-			ready.push(card);
-		}
-	}
-	return incomplete.length === 0 ? [...cards] : [...ready, ...incomplete];
+	return [...cards];
 }
 
 export class SurfaceProposalTreeView extends Disposable {
@@ -537,18 +528,25 @@ export class SurfaceProposalTreeView extends Disposable {
 				return body;
 			}
 
-			function focusSection(id) {
+			let selectedSectionId = null;
+
+			function focusSection(id, options) {
+				const flash = !options || options.flash !== false;
+				selectedSectionId = id;
 				const sectionEl = content.querySelector('details.section[data-section="' + id + '"]');
 				if (!sectionEl) {
 					return;
 				}
 				sectionEl.open = true;
-				sectionEl.classList.remove('flash');
-				// Retrigger flash animation if already present.
-				void sectionEl.offsetWidth;
-				sectionEl.classList.add('flash');
-				window.setTimeout(() => sectionEl.classList.remove('flash'), 900);
-				sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				if (flash) {
+					sectionEl.classList.remove('flash');
+					// Retrigger flash animation if already present.
+					void sectionEl.offsetWidth;
+					sectionEl.classList.add('flash');
+					window.setTimeout(() => sectionEl.classList.remove('flash'), 900);
+				}
+				// Instant snap — smooth scroll felt laggy and lost races to republish resets.
+				sectionEl.scrollIntoView({ behavior: 'auto', block: 'start' });
 			}
 
 			function makeFolderTree(paths) {
@@ -616,13 +614,16 @@ export class SurfaceProposalTreeView extends Disposable {
 				const previewInfo = options.previewInfo;
 				const referenceCandidates = options.referenceCandidates;
 				const proposalMissingMessage = options.proposalMissingMessage;
+				// File watchers republish often — keep the user's place instead of snapping to top.
+				const previousSections = content.querySelector('.sections');
+				const previousScrollTop = previousSections ? previousSections.scrollTop : 0;
 				content.replaceChildren();
 
 				const cards = [];
 				const sections = [];
 
 				// One column of section toggles — no separate view switching.
-				cards.push(metaCard('rules', 'Rules', 'CLAUDE.md'));
+				// Rail card order: progress/views first; Rules/Plan trail (not pinned to top).
 				const rulesSection = section('rules', 'CLAUDE.md', claudeMdMarkdown ? 'md' : '—', true);
 				if (claudeMdMarkdown && claudeMdMarkdown.trim()) {
 					rulesSection.append(renderPlanMarkdown(claudeMdMarkdown));
@@ -630,12 +631,6 @@ export class SurfaceProposalTreeView extends Disposable {
 					rulesSection.append(el('div', 'empty', claudeMdMessage || 'CLAUDE.md not found.'));
 				}
 				sections.push(rulesSection);
-
-				if (planMarkdown && planMarkdown.trim()) {
-					cards.push(metaCard('plan', 'Plan', 'plan.md'));
-				} else {
-					cards.push(metaCard('plan', 'Plan', '—'));
-				}
 
 				cards.push(metaCard('graph', 'Graph', graphRegions.length ? String(graphRegions.length) : '—'));
 				cards.push(metaCard('preview', 'Preview', previewInfo?.localUrl ? 'URL' : '—'));
@@ -877,16 +872,6 @@ export class SurfaceProposalTreeView extends Disposable {
 						sections.push(edgesSection);
 					}
 
-					const prefixes = proposal.node_prefixes || [];
-					if (prefixes.length) {
-						cards.push(metaCard('prefixes', 'Prefixes', prefixes.length));
-						const prefixSection = section('prefixes', 'Node prefixes', prefixes.length, false);
-						const prefixList = el('div', 'prefixes');
-						for (const prefix of prefixes) prefixList.append(el('span', 'prefix', prefix));
-						prefixSection.append(prefixList);
-						sections.push(prefixSection);
-					}
-
 					const removals = (proposal.remove_nodes?.length || 0) + (proposal.remove_edges?.length || 0);
 					if (removals) {
 						cards.push(metaCard('removals', 'Removals', removals));
@@ -901,17 +886,15 @@ export class SurfaceProposalTreeView extends Disposable {
 					sections.push(el('div', 'empty', proposalMissingMessage));
 				}
 
-				// Incomplete cards (value "—") trail ready ones so Graph/Preview don't bury Context etc.
-				const orderedCards = (() => {
-					const ready = [];
-					const incomplete = [];
-					for (const card of cards) {
-						if (card.value === '—') incomplete.push(card);
-						else ready.push(card);
-					}
-					return incomplete.length ? ready.concat(incomplete) : cards;
-				})();
-				vscode.postMessage({ type: 'surfaceProposalTree.cards', cards: orderedCards });
+				// Docs trail progress/view cards — Mode Shell orders Surfaces by step activity only.
+				if (planMarkdown && planMarkdown.trim()) {
+					cards.push(metaCard('plan', 'Plan', 'plan.md'));
+				} else {
+					cards.push(metaCard('plan', 'Plan', '—'));
+				}
+				cards.push(metaCard('rules', 'Rules', 'CLAUDE.md'));
+
+				vscode.postMessage({ type: 'surfaceProposalTree.cards', cards: cards });
 
 				if (!sections.length) {
 					content.append(el('div', 'empty', 'No plan or proposal content yet.'));
@@ -923,6 +906,21 @@ export class SurfaceProposalTreeView extends Disposable {
 					sectionsCol.append(sectionEl);
 				}
 				content.append(sectionsCol);
+				if (selectedSectionId) {
+					const selected = sectionsCol.querySelector('details.section[data-section="' + selectedSectionId + '"]');
+					if (selected) {
+						selected.open = true;
+					}
+					// Preserve mid-section reading position on republish; if scroll was still at 0
+					// (fresh select racing a reload), snap the selected section into place instantly.
+					if (previousScrollTop > 0) {
+						sectionsCol.scrollTop = previousScrollTop;
+					} else if (selected) {
+						selected.scrollIntoView({ behavior: 'auto', block: 'start' });
+					}
+				} else {
+					sectionsCol.scrollTop = previousScrollTop;
+				}
 			}
 
 			window.addEventListener('message', event => {

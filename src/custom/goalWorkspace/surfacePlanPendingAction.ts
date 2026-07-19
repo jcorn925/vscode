@@ -11,15 +11,22 @@ import {
 	completedStepIdsFromWorkflow,
 	parseSurfacePlanWorkflowDocument,
 	surfacePlanWorkflowResource,
+	type SurfacePlanWorkflowDocument,
 } from './surfacePlanWorkflow.js';
 import {
 	failedPhaseStepIdFromProgress,
 	parseSurfacePhaseProgress,
 	phaseInFlightStepIdFromProgress,
 	surfacePhaseProgressResource,
+	type SurfacePhaseProgressDocument,
 } from './surfacePhaseProgress.js';
 import {
+	loadAndProbeSurfaceBlockers,
+	openBlockerStepRefs,
+} from './surfaceBlockers.js';
+import {
 	isSurfacePlanLocked,
+	isSurfacePreviewWired,
 	resolveSurfacePlanWorkflowStatus,
 	type SurfacePlanWorkflowAction,
 	type SurfacePlanWorkflowPhaseRef,
@@ -33,9 +40,46 @@ import {
 	surfaceReferenceCandidatesResource,
 } from './surfaceReferenceCandidates.js';
 
+export interface SurfacePendingPlanProbe {
+	readonly nextAction?: SurfacePlanWorkflowAction;
+	/**
+	 * Human-facing attention label for pending Next CTA or an in-flight phase.
+	 * Prefer this for Surface / Steps chip dots — covers both pending and in-progress.
+	 */
+	readonly attentionLabel?: string;
+	/** Max associated step activity time (ms since epoch), or 0 when none. */
+	readonly activityMs: number;
+}
+
+/**
+ * Max timestamp among workflow.updatedAt, step completedAt, and phase-progress.updatedAt.
+ * Invalid / missing timestamps are ignored; returns 0 when nothing usable exists.
+ */
+export function surfaceAssociatedStepActivityMs(
+	workflow?: SurfacePlanWorkflowDocument,
+	progress?: SurfacePhaseProgressDocument,
+): number {
+	let max = 0;
+	const consider = (value: string | undefined): void => {
+		if (!value) {
+			return;
+		}
+		const ms = Date.parse(value);
+		if (Number.isFinite(ms) && ms > max) {
+			max = ms;
+		}
+	};
+	consider(workflow?.updatedAt);
+	for (const step of workflow?.steps ?? []) {
+		consider(step.completedAt);
+	}
+	consider(progress?.updatedAt);
+	return max;
+}
+
 /**
  * True when the Plan Steps rail would show a human Next CTA for this surface
- * (Start planning / Confirm repos / Lock & build / next phase).
+ * (Start planning / Confirm repos / Lock & build / next phase / Enable Preview / blockers).
  *
  * Reuses the same signals as `resolveSurfacePlanWorkflowStatus` — the open Plan
  * panel already computes this; surface cards need a lightweight file-backed probe.
@@ -47,20 +91,24 @@ export async function resolveSurfacePendingPlanAction(
 	options?: {
 		readonly surfacePath?: string;
 		readonly surfaceConfirmed?: boolean;
+		readonly localUrl?: string;
+		readonly devCommand?: string;
+		readonly previewEnabled?: boolean;
 	},
-): Promise<SurfacePlanWorkflowAction | undefined> {
+): Promise<SurfacePendingPlanProbe> {
 	const id = surfaceId.trim();
 	if (!id) {
-		return undefined;
+		return { activityMs: 0 };
 	}
 
-	const [planMarkdown, candidates, hasDraftProposal, proposal, workflowRaw, progressRaw] = await Promise.all([
+	const [planMarkdown, candidates, hasDraftProposal, proposal, workflowRaw, progressRaw, blockers] = await Promise.all([
 		readPlanMarkdown(fileService, workspaceFolder, id, options?.surfacePath),
 		readCandidates(fileService, workspaceFolder, id),
 		fileService.exists(surfaceGraphProposalDraftResource(workspaceFolder, id)).catch(() => false),
 		readProposalPhases(fileService, workspaceFolder, id),
 		readOptionalText(fileService, surfacePlanWorkflowResource(workspaceFolder, id)),
 		readOptionalText(fileService, surfacePhaseProgressResource(workspaceFolder, id)),
+		loadAndProbeSurfaceBlockers(fileService, workspaceFolder, id, options?.surfacePath, { persist: false }),
 	]);
 
 	const workflow = workflowRaw
@@ -69,6 +117,7 @@ export async function resolveSurfacePendingPlanAction(
 	const progress = progressRaw
 		? parseSurfacePhaseProgress(progressRaw, id)
 		: undefined;
+	const phaseInFlightStepId = phaseInFlightStepIdFromProgress(progress);
 	const status = resolveSurfacePlanWorkflowStatus({
 		surfaceConfirmed: options?.surfaceConfirmed ?? true,
 		hasPlanContent: Boolean(planMarkdown?.trim()),
@@ -79,10 +128,22 @@ export async function resolveSurfacePendingPlanAction(
 		planLocked: isSurfacePlanLocked(planMarkdown),
 		proposalPhases: proposal?.phases ?? [],
 		completedStepIds: completedStepIdsFromWorkflow(workflow),
-		phaseInFlightStepId: phaseInFlightStepIdFromProgress(progress),
+		phaseInFlightStepId,
 		failedPhaseStepId: failedPhaseStepIdFromProgress(progress),
+		previewEnabled: options?.previewEnabled ?? isSurfacePreviewWired({
+			localUrl: options?.localUrl,
+			devCommand: options?.devCommand,
+		}),
+		openBlockers: openBlockerStepRefs(blockers),
 	});
-	return status.nextAction;
+	const inProgressLabel = phaseInFlightStepId
+		? (progress?.stepLabel?.trim() || phaseInFlightStepId)
+		: undefined;
+	return {
+		nextAction: status.nextAction,
+		attentionLabel: status.nextAction?.label ?? inProgressLabel,
+		activityMs: surfaceAssociatedStepActivityMs(workflow, progress),
+	};
 }
 
 async function readPlanMarkdown(

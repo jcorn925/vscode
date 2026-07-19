@@ -49,6 +49,9 @@ suite('CustomAiChatAgent', () => {
 		assert.match(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT, /do not pause for clarifying questions/);
 		assert.match(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT, /\.agent\/surfaces\/<surface-id>\.blueprint\.json/);
 		assert.match(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT, /verifySurfaceBlueprint/);
+		assert.match(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT, /Plan Steps/);
+		assert.match(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT, /DISPATCH_CLAUDE/);
+		assert.match(CUSTOM_AI_PRODUCT_SYSTEM_PROMPT, /Claude Code owns/);
 	});
 
 	test('renders loaded goal workspace context for Custom AI messages', () => {

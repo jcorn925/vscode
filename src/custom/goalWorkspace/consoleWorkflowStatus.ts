@@ -37,7 +37,6 @@ export interface ConsoleWorkflowStepState {
 export interface ConsoleWorkflowStatus {
 	readonly stageId: ConsoleWorkflowStageId;
 	readonly steps: readonly ConsoleWorkflowStepState[];
-	readonly statusLabel: string;
 }
 
 const STAGES: readonly { readonly id: Exclude<ConsoleWorkflowStageId, 'idle'>; readonly label: string }[] = [
@@ -74,7 +73,6 @@ export function resolveConsoleWorkflowStatus(signals: ConsoleWorkflowSignals): C
 		return {
 			stageId,
 			steps: STAGES.map(stage => ({ ...stage, status: 'pending' as const })),
-			statusLabel: '',
 		};
 	}
 
@@ -89,28 +87,11 @@ export function resolveConsoleWorkflowStatus(signals: ConsoleWorkflowSignals): C
 		return { ...stage, status: 'pending' };
 	});
 
-	const statusLabel = (() => {
-		switch (stageId) {
-			case 'planning':
-				return 'Kick off workspace planning to draft the workspace plan.';
-			case 'review_surfaces':
-				return 'Claude is drafting the workspace plan and proposing surfaces.';
-			case 'create_surfaces':
-				return 'Review suggested surfaces and create the apps you want.';
-			case 'building':
-				return 'Surface plans are locked or building.';
-			case 'running':
-				return 'Apps are running — open Preview or Code as needed.';
-			default:
-				return '';
-		}
-	})();
-
-	return { stageId, steps, statusLabel };
+	return { stageId, steps };
 }
 
-export type ConsoleHomeSection = 'workspacePlan' | 'claudeMd' | 'branding' | 'surfaces';
+export type ConsoleHomeSection = 'workspacePlan' | 'surfaces' | 'claudeMd' | 'branding';
 
 export function isConsoleHomeSection(value: string | undefined): value is ConsoleHomeSection {
-	return value === 'workspacePlan' || value === 'claudeMd' || value === 'branding' || value === 'surfaces';
+	return value === 'workspacePlan' || value === 'surfaces' || value === 'claudeMd' || value === 'branding';
 }

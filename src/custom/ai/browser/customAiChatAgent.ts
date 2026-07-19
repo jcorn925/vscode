@@ -55,7 +55,7 @@ import {
 import { CustomAiInvalidApiKeyError, readAllStreamText, toolsToOpenAiFunctions } from './customAiModelProvider.js';
 import { IConsoleService, listCrossAppWorkflows, type WorkspaceContextFile, type IxOverlay, type ConsoleState, type WorkspaceSurface } from '../../goalWorkspace/ConsoleService.js';
 import { SurfaceBuilderHandoffState, type SurfaceBuilderHandoffStateValue } from '../../goalWorkspace/surfaceBuilderHandoffState.js';
-import { CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_LINES } from '../common/customAiSurfaceScaffold.js';
+import { CUSTOM_AI_PLAN_STEPS_ROLE_GUIDANCE, CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE, CUSTOM_AI_SURFACE_SCAFFOLD_LINES } from '../common/customAiSurfaceScaffold.js';
 import { ICustomAiChatTraceService, summarizeTraceMessages } from './customAiChatTrace.js';
 
 const MAX_TOOL_ROUNDS = 15;
@@ -73,6 +73,7 @@ export const CUSTOM_AI_PRODUCT_SYSTEM_PROMPT = [
 	'When creating a new surface, finalize `.agent/surfaces/<surface-id>.blueprint.json` before scaffolding, then register it in workspace.goal.json, scaffold app files, call `verifySurfaceBlueprint`, and connect shared workflows/entities/events.',
 	CUSTOM_AI_SURFACE_SCAFFOLD_GUIDANCE,
 	CUSTOM_AI_SURFACE_BLUEPRINT_WORKFLOW_GUIDANCE,
+	CUSTOM_AI_PLAN_STEPS_ROLE_GUIDANCE,
 	'Ask one focused question only when a missing business decision would materially change the implementation.'
 ].join('\n');
 

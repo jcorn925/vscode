@@ -20,7 +20,7 @@ import { TerminalLocalFileLinkOpener, TerminalLocalFolderInWorkspaceLinkOpener, 
 import { TerminalLocalLinkDetector } from './terminalLocalLinkDetector.js';
 import { TerminalUriLinkDetector } from './terminalUriLinkDetector.js';
 import { TerminalWordLinkDetector } from './terminalWordLinkDetector.js';
-import { ITerminalConfigurationService, ITerminalExternalLinkProvider, TerminalLinkQuickPickEvent } from '../../../terminal/browser/terminal.js';
+import { ITerminalConfigurationService, ITerminalExternalLinkProvider, ITerminalService, TerminalLinkQuickPickEvent } from '../../../terminal/browser/terminal.js';
 import { ILinkHoverTargetOptions, TerminalHover } from '../../../terminal/browser/widgets/terminalHoverWidget.js';
 import { TerminalWidgetManager } from '../../../terminal/browser/widgets/widgetManager.js';
 import { IXtermCore } from '../../../terminal/browser/xterm-private.js';
@@ -35,6 +35,8 @@ import { INotificationService, Severity } from '../../../../../platform/notifica
 import type { IHoverAction } from '../../../../../base/browser/ui/hover/hover.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { isString } from '../../../../../base/common/types.js';
+import { IModeService } from '../../../../../../custom/mode/ModeService.js';
+import { isClaudeTerminalTitle } from '../../../custom/browser/claudeTerminalKeys.js';
 
 export type XtermLinkMatcherHandler = (event: MouseEvent | undefined, link: string) => Promise<void>;
 
@@ -63,6 +65,8 @@ export class TerminalLinkManager extends DisposableStore {
 		@ITerminalConfigurationService terminalConfigurationService: ITerminalConfigurationService,
 		@ITerminalLogService private readonly _logService: ITerminalLogService,
 		@ITunnelService private readonly _tunnelService: ITunnelService,
+		@ITerminalService private readonly _terminalService: ITerminalService,
+		@IModeService private readonly _modeService: IModeService,
 	) {
 		super();
 
@@ -203,7 +207,13 @@ export class TerminalLinkManager extends DisposableStore {
 			// Prevent default electron link handling so Alt+Click mode works normally
 			e.event?.preventDefault();
 			// Require correct modifier on click unless event is coming from linkQuickPick selection
-			if (e.event && !(e.event instanceof TerminalLinkQuickPickEvent) && !this._isLinkActivationModifierDown(e.event)) {
+			// or this is a Claude Code session outside Code view (plain click → open in Code).
+			if (
+				e.event
+				&& !(e.event instanceof TerminalLinkQuickPickEvent)
+				&& !this._isLinkActivationModifierDown(e.event)
+				&& !this._isClaudeTerminalOutsideCodeView()
+			) {
 				return;
 			}
 			// Just call the handler if there is no before listener
@@ -458,6 +468,19 @@ export class TerminalLinkManager extends DisposableStore {
 			return !!event.altKey;
 		}
 		return isMacintosh ? event.metaKey : event.ctrlKey;
+	}
+
+	/** Claude Code in Console/Process: allow plain-click file links (then open in Code view). */
+	private _isClaudeTerminalOutsideCodeView(): boolean {
+		if (this._modeService.getMode() === 'Code') {
+			return false;
+		}
+		const active = this._terminalService.activeInstance;
+		if (!active) {
+			return false;
+		}
+		return isClaudeTerminalTitle(active.title)
+			|| isClaudeTerminalTitle(active.shellLaunchConfig.name);
 	}
 
 	private _getLinkHoverString(uri: string, label: string | undefined): IMarkdownString {

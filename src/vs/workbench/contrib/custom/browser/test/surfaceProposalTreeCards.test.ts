@@ -14,46 +14,27 @@ import {
 suite('orderSurfaceProposalTreeCards', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('moves incomplete Graph/Preview cards after ready sections', () => {
+	test('preserves declaration order without pinning Rules/Plan or reshuffling incomplete cards', () => {
 		const cards: SurfaceProposalTreeCardItem[] = [
-			{ id: 'rules', key: 'Rules', value: 'CLAUDE.md' },
-			{ id: 'plan', key: 'Plan', value: 'plan.md' },
 			{ id: 'graph', key: 'Graph', value: SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE },
-			{ id: 'preview', key: 'Preview', value: SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE },
+			{ id: 'preview', key: 'Preview', value: 'URL' },
 			{ id: 'context', key: 'Context', value: '2/5' },
 			{ id: 'workstreams', key: 'Workstreams', value: '28' },
-			{ id: 'architecture', key: 'Architecture', value: 'tree' },
-			{ id: 'phases', key: 'Phases', value: '4' },
-		];
-		assert.deepStrictEqual(
-			orderSurfaceProposalTreeCards(cards).map(c => c.id),
-			['rules', 'plan', 'context', 'workstreams', 'architecture', 'phases', 'graph', 'preview'],
-		);
-	});
-
-	test('keeps relative order when Graph/Preview are ready', () => {
-		const cards: SurfaceProposalTreeCardItem[] = [
-			{ id: 'rules', key: 'Rules', value: 'CLAUDE.md' },
 			{ id: 'plan', key: 'Plan', value: 'plan.md' },
-			{ id: 'graph', key: 'Graph', value: '3' },
-			{ id: 'preview', key: 'Preview', value: 'URL' },
-			{ id: 'workstreams', key: 'Workstreams', value: '2' },
+			{ id: 'rules', key: 'Rules', value: 'CLAUDE.md' },
 		];
 		assert.deepStrictEqual(
 			orderSurfaceProposalTreeCards(cards).map(c => c.id),
-			['rules', 'plan', 'graph', 'preview', 'workstreams'],
+			['graph', 'preview', 'context', 'workstreams', 'plan', 'rules'],
 		);
 	});
 
-	test('trails incomplete Plan after ready cards', () => {
+	test('returns a shallow copy', () => {
 		const cards: SurfaceProposalTreeCardItem[] = [
-			{ id: 'rules', key: 'Rules', value: 'CLAUDE.md' },
-			{ id: 'plan', key: 'Plan', value: SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE },
-			{ id: 'context', key: 'Context', value: '1/2' },
+			{ id: 'plan', key: 'Plan', value: 'plan.md' },
 		];
-		assert.deepStrictEqual(
-			orderSurfaceProposalTreeCards(cards).map(c => c.id),
-			['rules', 'context', 'plan'],
-		);
+		const ordered = orderSurfaceProposalTreeCards(cards);
+		assert.notStrictEqual(ordered, cards);
+		assert.deepStrictEqual(ordered, cards);
 	});
 });
