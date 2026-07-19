@@ -341,6 +341,28 @@ suite('ConsoleService', () => {
 		assert.deepStrictEqual(service.getAffectedSurfacesForIxSubsystem('declared-booking').map(surface => surface.id), ['booking']);
 	});
 
+	test('service accepts object-keyed ix-surface-map surfaces (scaffold legacy shape)', async () => {
+		const fileService = new TestConsoleFileService(manifestResource, createManifest('cadre-support-bot', 'Cadre Support'));
+		fileService.setFile(agentContextResource(workspaceFolder, IX_OVERLAY_FILE), JSON.stringify({
+			generatedAt: '2026-07-19T00:00:00.000Z',
+			surfaces: {
+				'cadre-support-bot': {
+					path: 'apps/cadre-support-bot',
+					ixSubsystems: ['Cadre Support Bot', 'Ui / Cadre-support-bot'],
+					subsystemIds: ['uuid-support', 'uuid-ui'],
+				},
+			},
+		}));
+		const service = disposables.add(new ConsoleService(new TestContextService(testWorkspace(workspaceFolder)), fileService));
+
+		await service.refresh();
+
+		const overlay = service.getSurfaceIxOverlay('cadre-support-bot');
+		assert.ok(overlay);
+		assert.deepStrictEqual(overlay.subsystemIds, ['uuid-support', 'uuid-ui']);
+		assert.deepStrictEqual(overlay.subsystemLabels, ['Cadre Support Bot', 'Ui / Cadre-support-bot']);
+	});
+
 	test('builds add-training-package cross-app workflow plan from surface capabilities', async () => {
 		const fileService = new TestConsoleFileService(manifestResource, createPersonalTrainingManifest());
 		fileService.setFile(agentContextResource(workspaceFolder, 'workspace.md'), '# Workspace Context\nRun an online personal training business.');

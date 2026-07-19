@@ -215,6 +215,55 @@ A phase is done only when:
 `;
 
 /**
+ * Scoped generate prompt for one parallel (or serialize) workstream Claude.
+ * Streams update workstream-runs.json; Console aggregates phase-progress completion.
+ */
+export function buildWorkstreamGeneratePrompt(options: {
+	readonly surfaceId: string;
+	readonly surfaceName: string;
+	readonly stepId: string;
+	readonly stepLabel: string;
+	readonly workstreamId: string;
+	readonly workstreamLabel: string;
+	readonly mode: 'parallel' | 'serialize';
+	readonly nodes: readonly string[];
+	readonly sharedPrefixes?: readonly string[];
+	readonly forbiddenNodes?: readonly string[];
+	readonly claudeKey: string;
+}): string {
+	const progressPath = `.agent/surfaces/${options.surfaceId}.phase-progress.json`;
+	const runsPath = `.agent/surfaces/${options.surfaceId}.workstream-runs.json`;
+	const proposalPath = `.agent/task-trees/${options.surfaceId}.graph-proposal.json`;
+	const nodeList = options.nodes.length
+		? options.nodes.map(n => `- ${n}`).join('\n')
+		: '- (none listed — stay within this workstream label only)';
+	const forbidden = (options.forbiddenNodes ?? []).slice(0, 80);
+	const forbiddenList = forbidden.length
+		? forbidden.map(n => `- ${n}`).join('\n')
+		: '- (none)';
+	const prefixNote = options.sharedPrefixes?.length
+		? `Shared prefixes for this stream: ${options.sharedPrefixes.join(', ')}.`
+		: '';
+	const modeLine = options.mode === 'serialize'
+		? `You own the SERIALIZE (coupled) clusters for this phase. Finish these shared/coupled files before parallel streams are considered done.`
+		: `You own ONE parallel-safe workstream. Other Claude instances are generating sibling streams concurrently.`;
+
+	return [
+		`Console started phase "${options.stepLabel}" (${options.stepId}) for surface ${options.surfaceId} (${options.surfaceName}).`,
+		`Your Claude session key is ${options.claudeKey} (workstream ${options.workstreamId}: ${options.workstreamLabel}).`,
+		modeLine,
+		prefixNote,
+		`${progressPath} is status "running" for that stepId. Do NOT write phase-progress completed yourself — update ${runsPath} instead.`,
+		`Allowed files for this stream (edit only these unless a tiny local helper is required inside the same folder):\n${nodeList}`,
+		`Do NOT edit these paths (other streams / serialize scope):\n${forbiddenList}`,
+		`Execute this stream's slice of the phase from ${proposalPath}, then remap_and_wait + compare_proposal for your nodes.`,
+		`When your stream's gate passes, update ${runsPath}: set the entry for key "${options.claudeKey}" to status "completed" (keep surfaceId, stepId, stepLabel).`,
+		`On failure, set that entry to status "failed" with a short error, then stop.`,
+		`Do not edit .workflow.json — Console marks Steps completed only after all workstream-runs for this phase are completed.`,
+	].filter(Boolean).join(' ');
+}
+
+/**
  * First user message sent into Claude Code from the empty Plan tab compose box.
  */
 export function buildSurfacePlanKickoffPrompt(options: {

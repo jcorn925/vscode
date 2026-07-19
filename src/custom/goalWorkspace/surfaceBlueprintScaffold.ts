@@ -194,17 +194,14 @@ function buildSharedWorkspaceFiles(
 		].join('\n')],
 		['.agent/ix-surface-map.json', JSON.stringify({
 			generatedAt: now,
-			surfaces: {
-				[manifest.id]: {
-					path: manifest.path,
-					localUrl: manifest.localUrl,
-					ixSubsystems: manifest.ixSubsystems,
-					entrypoints: [
-						`${manifest.path}/app/page.tsx`,
-						`${manifest.path}/lib/workflow.ts`,
-					],
+			surfaces: [
+				{
+					surfaceId: manifest.id,
+					subsystemIds: [],
+					subsystemLabels: [...manifest.ixSubsystems],
+					matchReason: 'scaffold',
 				},
-			},
+			],
 		}, null, '\t') + '\n'],
 	];
 }

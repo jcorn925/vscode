@@ -21,6 +21,7 @@ export type SurfacePlanWorkflowStageId =
 export type SurfacePlanWorkflowActionId =
 	| 'start_planning'
 	| 'confirm_repos'
+	| 'continue_research'
 	| 'lock_plan'
 	| 'run_next_phase';
 
@@ -266,6 +267,47 @@ export function resolveSurfacePlanWorkflowStatus(signals: SurfacePlanWorkflowSig
 	};
 }
 
+/** Compact completion summary for Console surface cards. */
+export interface SurfacePlanWorkflowProgress {
+	readonly completed: number;
+	readonly total: number;
+	readonly percent: number;
+	readonly label: string;
+	readonly stageId: SurfacePlanWorkflowStageId;
+	readonly inProgress: boolean;
+	readonly complete: boolean;
+}
+
+export function summarizeSurfacePlanWorkflowProgress(
+	status: SurfacePlanWorkflowStatus,
+	options?: { readonly inProgressLabel?: string },
+): SurfacePlanWorkflowProgress {
+	const total = status.steps.length;
+	const completed = status.steps.filter(step => step.status === 'completed').length;
+	const complete = status.stageId === 'complete';
+	const inProgress = Boolean(options?.inProgressLabel?.trim());
+	const percent = complete
+		? 100
+		: total === 0
+			? 0
+			: Math.min(99, Math.round((completed / total) * 100));
+	const label = complete
+		? 'Complete'
+		: (options?.inProgressLabel?.trim()
+			|| status.nextAction?.label
+			|| status.current
+			|| 'Not started');
+	return {
+		completed,
+		total,
+		percent,
+		label,
+		stageId: status.stageId,
+		inProgress,
+		complete,
+	};
+}
+
 function resolveNextAction(
 	stageId: SurfacePlanWorkflowStageId,
 	signals: SurfacePlanWorkflowSignals,
@@ -286,6 +328,18 @@ function resolveNextAction(
 				id: 'confirm_repos',
 				label: 'Confirm repos',
 				stepId: 'awaiting_repo_selection',
+			};
+		case 'research_survey':
+			return {
+				id: 'continue_research',
+				label: 'Continue survey',
+				stepId: 'research_survey',
+			};
+		case 'research_map':
+			return {
+				id: 'continue_research',
+				label: 'Continue research',
+				stepId: 'research_map',
 			};
 		case 'plan_ready':
 			return {
@@ -490,13 +544,13 @@ export function resolveSurfaceSectionIdForStep(
 	};
 
 	if (step.kind === 'phase') {
-		return pick('graph', 'phases', 'files', 'architecture', 'plan');
+		return pick('proposed', 'graph', 'phases', 'plan');
 	}
 	if (step.kind === 'blocker' || isBlockerStepId(step.id)) {
 		return pick('preview', 'plan');
 	}
 	if (step.id === VERIFY_GRAPH_STEP_ID) {
-		return pick('graph', 'plan');
+		return pick('graph', 'proposed', 'plan');
 	}
 	if (step.id === ENABLE_PREVIEW_STEP_ID) {
 		return pick('preview', 'plan');
@@ -505,12 +559,12 @@ export function resolveSurfaceSectionIdForStep(
 		case 'research_survey':
 		case 'awaiting_repo_selection':
 		case 'research_map':
-			return pick('context', 'plan');
+			return pick('context', 'proposed', 'plan');
 		case 'confirm_surface':
 		case 'intent':
 		case 'plan_ready':
 		case 'lock_plan':
-			return pick('plan');
+			return pick('proposed', 'plan');
 		default:
 			return pick('plan');
 	}

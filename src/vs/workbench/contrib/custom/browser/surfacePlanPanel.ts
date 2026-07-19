@@ -45,6 +45,13 @@ import {
 	type SurfacePhaseProgressDocument,
 } from '../../../../../custom/goalWorkspace/surfacePhaseProgress.js';
 import {
+	parseSurfaceWorkstreamRuns,
+	surfaceWorkstreamRunsResource,
+	workstreamRunsAllCompleted,
+	workstreamRunsFailed,
+	type SurfaceWorkstreamRunsDocument,
+} from '../../../../../custom/goalWorkspace/surfaceWorkstreamRuns.js';
+import {
 	ENABLE_PREVIEW_STEP,
 	ENABLE_PREVIEW_STEP_ID,
 	VERIFY_GRAPH_STEP,
@@ -69,8 +76,14 @@ import {
 	type SurfaceBlockersDocument,
 } from '../../../../../custom/goalWorkspace/surfaceBlockers.js';
 import { discoverIxSubsystemRegions } from '../../../../../custom/goalWorkspace/surfaceBlueprintIxDiscovery.js';
-import type { WorkspaceSurface } from '../../../../../custom/goalWorkspace/ConsoleService.js';
-import { resolveSurfacePathForIx, scopeIxRegionsToSurface } from '../../../../../custom/goalWorkspace/surfaceIxScope.js';
+import { discoverIxOverlay, type WorkspaceSurface } from '../../../../../custom/goalWorkspace/ConsoleService.js';
+import {
+	enrichSurfaceWithIxOverlay,
+	mergeIxSubsystemRegions,
+	regionsFromIxOverlayDiscovered,
+	resolveSurfacePathForIx,
+	scopeIxRegionsToSurface,
+} from '../../../../../custom/goalWorkspace/surfaceIxScope.js';
 import type { IIxIntegrationService } from '../../../../../custom/ix/IxIntegrationService.js';
 import { IWebviewService } from '../../webview/browser/webview.js';
 import { buildProposalDiffGraph, buildProposalPreviewGraph } from './proposalGraphDiff/buildProposalDiffGraph.js';
@@ -78,6 +91,11 @@ import { partitionProposalWorkstreams } from './proposalGraphDiff/partitionPropo
 import type { GraphProposalDocument, ProposalCompareSnapshot } from './proposalGraphDiff/proposalGraphDiffTypes.js';
 import { computeSurfaceProposalProgress } from './surfaceProposalProgress.js';
 import { phaseIdsToCompleteFromStructuralPass } from './surfaceStepsStructuralReconcile.js';
+import {
+	readSurfaceGraphRegionsCache,
+	writeSurfaceGraphRegionsCache,
+	type SurfaceGraphRegionsCacheDocument,
+} from './surfaceGraphRegionsCache.js';
 import { SurfaceProposalTreeView, type SurfaceProposalTreeCardItem, type SurfaceProposalTreeDocumentOptions, type SurfaceProposalTreeGraphRegion, type SurfaceProposalTreePreviewInfo } from './surfaceProposalTreeView.js';
 
 /** Latest ix compare_proposal snapshot used for Files/Relationships/Workstreams card progress. */
@@ -142,6 +160,22 @@ export class SurfacePlanPanel extends Disposable {
 	/** Section cards for the shared card rail, re-fired whenever the proposal tree re-renders. */
 	readonly onDidChangeCards: Event<readonly SurfaceProposalTreeCardItem[]>;
 
+	/** In-panel tab clicked (e.g. Files inside Proposed Graph) — host should select that rail card. */
+	readonly onDidRequestSection: Event<string>;
+
+	private readonly _onDidRequestRunWorkstreams = this._register(new Emitter<{
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+		readonly stepId?: string;
+		readonly stepLabel?: string;
+	}>());
+	readonly onDidRequestRunWorkstreams: Event<{
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+		readonly stepId?: string;
+		readonly stepLabel?: string;
+	}> = this._onDidRequestRunWorkstreams.event;
+
 	private readonly titleEl: HTMLElement;
 	private readonly pathEl: HTMLElement;
 	private readonly statusEl: HTMLElement;
@@ -161,8 +195,14 @@ export class SurfacePlanPanel extends Disposable {
 	private lastTreeDocument: SurfaceProposalTreeDocumentOptions | undefined;
 	private lastPlanMarkdown: string | undefined;
 	private lastProposalPhases: readonly SurfacePlanWorkflowPhaseRef[] = [];
+	/** In-memory Real Graph regions so reopen paints before Ix CLI returns. */
+	private readonly graphRegionsBySurfaceId = new Map<string, {
+		readonly regions: readonly SurfaceProposalTreeGraphRegion[];
+		readonly message?: string;
+	}>();
 	private workflowDocument: SurfacePlanWorkflowDocument | undefined;
 	private phaseProgressDocument: SurfacePhaseProgressDocument | undefined;
+	private workstreamRunsDocument: SurfaceWorkstreamRunsDocument | undefined;
 	private blockersDocument: SurfaceBlockersDocument | undefined;
 	private loadGeneration = 0;
 	private candidates: SurfaceReferenceCandidates | undefined;
@@ -171,6 +211,8 @@ export class SurfacePlanPanel extends Disposable {
 	private phaseProgressWriteInFlight = false;
 	private blockersWriteInFlight = false;
 	private nextActionInFlight = false;
+	/** Set when a Next click fires; cleared only when the next-action identity changes. */
+	private pendingNextActionKey: string | undefined;
 	private hasPlanContent = false;
 	private hasDraftProposal = false;
 	private hasFinalProposal = false;
@@ -237,12 +279,26 @@ export class SurfacePlanPanel extends Disposable {
 
 		this.treeView = this._register(new SurfaceProposalTreeView(webviewService, () => this.treeView.republish()));
 		this.onDidChangeCards = this.treeView.onDidChangeCards;
+		this.onDidRequestSection = this.treeView.onDidRequestSection;
 		this.treeView.attach(this.treeAnchor);
 		this._register(this.treeView.onDidToggleRepo(request => {
 			void this.toggleRepoSelection(request.owner, request.repo, request.selected);
 		}));
 		this._register(this.treeView.onDidConfirmRepos(() => {
 			void this.confirmReferenceSelection();
+		}));
+		this._register(this.treeView.onDidRequestRunWorkstreams(() => {
+			const options = this.lastOptions;
+			if (!options?.surfaceId) {
+				return;
+			}
+			const inFlight = phaseInFlightStepIdFromProgress(this.phaseProgressDocument);
+			this._onDidRequestRunWorkstreams.fire({
+				surfaceId: options.surfaceId,
+				surfaceName: options.surfaceName?.trim() || options.surfaceId,
+				stepId: inFlight || this.phaseProgressDocument?.stepId,
+				stepLabel: this.phaseProgressDocument?.stepLabel,
+			});
 		}));
 
 		this._register(addDisposableListener(this.refreshButton, 'click', () => {
@@ -263,7 +319,8 @@ export class SurfacePlanPanel extends Disposable {
 		this._register(addDisposableListener(this.statusRailEl, 'scroll', () => {
 			this.scheduleStatusScrollSync();
 		}));
-		this._register(addDisposableListener(this.statusRailEl, 'wheel', (event: WheelEvent) => {
+		// Listen on the whole tracker (rail + chevrons/padding) so wheel/trackpad always pans.
+		this._register(addDisposableListener(this.statusTrackerEl, 'wheel', (event: WheelEvent) => {
 			this.handleStatusRailWheel(event);
 		}, { passive: false }));
 		this._register(toDisposable(() => this.root.replaceChildren()));
@@ -309,6 +366,8 @@ export class SurfacePlanPanel extends Disposable {
 			this.lastStatusStepSignature = undefined;
 			this.lastCenteredStepId = undefined;
 			this.statusRailEl.scrollLeft = 0;
+			this.nextActionInFlight = false;
+			this.pendingNextActionKey = undefined;
 		}
 		const generation = ++this.loadGeneration;
 		const { surfaceId, surfaceName, surfacePath, treeId, workspaceFolder } = options;
@@ -336,6 +395,11 @@ export class SurfacePlanPanel extends Disposable {
 		}
 
 		this.watchPlanAndProposal(workspaceFolder, surfaceId, surfacePath, treeId);
+		// Paint cached Real Graph + section chrome immediately; Ix refresh runs in the background.
+		await this.publishImmediateCachedDocument(options, generation);
+		if (generation !== this.loadGeneration) {
+			return;
+		}
 		await this.refreshReferenceCandidates(workspaceFolder, surfaceId, generation, false);
 		if (generation !== this.loadGeneration) {
 			return;
@@ -345,6 +409,7 @@ export class SurfacePlanPanel extends Disposable {
 			return;
 		}
 		await this.refreshPhaseProgress(workspaceFolder, surfaceId, generation);
+		await this.refreshWorkstreamRuns(workspaceFolder, surfaceId, generation);
 		if (generation !== this.loadGeneration) {
 			return;
 		}
@@ -488,9 +553,9 @@ export class SurfacePlanPanel extends Disposable {
 			? (snapshot ? buildProposalDiffGraph(proposal, snapshot) : buildProposalPreviewGraph(proposal))
 			: undefined;
 		const progress = proposal ? computeSurfaceProposalProgress(proposal, partition, snapshot) : undefined;
-		const [claude, graphRegions, previewInfo] = await Promise.all([
+		const cachedGraph = this.graphRegionsBySurfaceId.get(surfaceId);
+		const [claude, previewInfo] = await Promise.all([
 			this.loadClaudeMd(workspaceFolder),
-			this.loadGraphRegions(workspaceFolder, options.surface),
 			Promise.resolve(this.buildPreviewInfo(options)),
 		]);
 		if (generation !== this.loadGeneration) {
@@ -504,14 +569,83 @@ export class SurfacePlanPanel extends Disposable {
 			planMarkdown,
 			claudeMdMarkdown: claude.markdown,
 			claudeMdMessage: claude.message,
-			graphRegions: graphRegions.regions,
-			graphMessage: graphRegions.message,
+			graphRegions: cachedGraph?.regions,
+			graphMessage: cachedGraph?.regions?.length
+				? cachedGraph.message
+				: (cachedGraph?.message || localize('surfacePlan.graphRefreshing', 'Refreshing code graph…')),
 			previewInfo,
 			referenceCandidates: this.withResolvedRepoReasons(this.candidates, planMarkdown),
 			storageKey: `surfaceProposalTree.visibility.${surfaceId}`,
 			proposalMissingMessage: proposal || planMarkdown || this.candidates
 				? proposalMissingMessage
 				: (proposalMissingMessage || localize('surfacePlan.emptyContent', 'No plan or proposal content yet.')),
+		});
+		void this.refreshGraphRegionsInBackground(workspaceFolder, options.surface, surfaceId, generation);
+	}
+
+	/** First paint: disk/memory graph cache + preview — do not wait on Ix CLI. */
+	private async publishImmediateCachedDocument(
+		options: SurfacePlanPanelLoadOptions,
+		generation: number,
+	): Promise<void> {
+		const { surfaceId, workspaceFolder } = options;
+		if (!workspaceFolder) {
+			return;
+		}
+		let cached = this.graphRegionsBySurfaceId.get(surfaceId);
+		if (!cached) {
+			const fromDisk = await readSurfaceGraphRegionsCache(this.fileService, workspaceFolder, surfaceId);
+			if (generation !== this.loadGeneration) {
+				return;
+			}
+			if (fromDisk) {
+				cached = { regions: fromDisk.regions, message: fromDisk.message };
+				this.graphRegionsBySurfaceId.set(surfaceId, cached);
+			}
+		}
+		this.treeAnchor.classList.remove('hidden');
+		this.publishTreeDocument({
+			graphRegions: cached?.regions,
+			graphMessage: cached?.regions?.length
+				? undefined
+				: localize('surfacePlan.graphRefreshing', 'Refreshing code graph…'),
+			previewInfo: this.buildPreviewInfo(options),
+			referenceCandidates: this.withResolvedRepoReasons(this.candidates, this.lastPlanMarkdown),
+			storageKey: `surfaceProposalTree.visibility.${surfaceId}`,
+			proposalMissingMessage: localize('surfacePlan.loadingContent', 'Loading plan…'),
+		});
+	}
+
+	private async refreshGraphRegionsInBackground(
+		workspaceFolder: URI,
+		surface: WorkspaceSurface | undefined,
+		surfaceId: string,
+		generation: number,
+	): Promise<void> {
+		const graphRegions = await this.loadGraphRegions(workspaceFolder, surface);
+		if (generation !== this.loadGeneration) {
+			return;
+		}
+		this.graphRegionsBySurfaceId.set(surfaceId, graphRegions);
+		const cacheDoc: SurfaceGraphRegionsCacheDocument = {
+			version: 1,
+			surfaceId,
+			updatedAt: new Date().toISOString(),
+			regions: graphRegions.regions,
+			message: graphRegions.message,
+		};
+		try {
+			await writeSurfaceGraphRegionsCache(this.fileService, workspaceFolder, cacheDoc);
+		} catch {
+			// best-effort persist
+		}
+		if (generation !== this.loadGeneration || !this.lastTreeDocument) {
+			return;
+		}
+		this.publishTreeDocument({
+			...this.lastTreeDocument,
+			graphRegions: graphRegions.regions,
+			graphMessage: graphRegions.message,
 		});
 	}
 
@@ -550,7 +684,7 @@ export class SurfacePlanPanel extends Disposable {
 		if (!surface) {
 			return {
 				regions: [],
-				message: localize('surfacePlan.graphNoSurface', 'Select a surface to view the generated code graph.'),
+				message: localize('surfacePlan.graphNoSurface', 'Select a surface to view the code graph.'),
 			};
 		}
 		try {
@@ -560,7 +694,11 @@ export class SurfacePlanPanel extends Disposable {
 			} catch {
 				// best-effort
 			}
-			const regions = await discoverIxSubsystemRegions(this.ixIntegrationService, workspaceFolder);
+			const liveRegions = await discoverIxSubsystemRegions(this.ixIntegrationService, workspaceFolder);
+			// Overlay is written by Refresh Ix Surface Map / Claude — Graph used to ignore it.
+			const ixOverlay = (await discoverIxOverlay(this.fileService, workspaceFolder)).overlay;
+			const overlayRegions = regionsFromIxOverlayDiscovered(ixOverlay?.discoveredSubsystems);
+			const regions = mergeIxSubsystemRegions(liveRegions, overlayRegions);
 			if (!regions.length) {
 				return {
 					regions: [],
@@ -570,13 +708,15 @@ export class SurfacePlanPanel extends Disposable {
 					),
 				};
 			}
-			const scoped = scopeIxRegionsToSurface(regions, surface, surfacePath);
+			const surfaceForScope = enrichSurfaceWithIxOverlay(surface, ixOverlay);
+			const scoped = scopeIxRegionsToSurface(regions, surfaceForScope, surfacePath);
 			if (!scoped.length) {
 				return {
 					regions: [],
 					message: localize(
 						'surfacePlan.graphEmpty',
-						'No Ix subsystems matched this surface yet. Map the surface path, set surface.ixSubsystems in workspace.goal.json, or refresh after scaffold.',
+						'Ix found {0} subsystem(s) in the workspace, but none matched this surface. Declare subsystem ids/labels in `.agent/ix-surface-map.json` (or surface.ixSubsystems), then refresh.',
+						String(regions.length),
 					),
 				};
 			}
@@ -656,6 +796,13 @@ export class SurfacePlanPanel extends Disposable {
 				if (e.affects(progressUri)) {
 					void this.refreshPhaseProgress(workspaceFolder, surfaceId, this.loadGeneration).then(() => {
 						void this.applyPhaseProgressUpdate();
+					});
+					return;
+				}
+				const workstreamRunsUri = surfaceWorkstreamRunsResource(workspaceFolder, surfaceId);
+				if (e.affects(workstreamRunsUri)) {
+					void this.refreshWorkstreamRuns(workspaceFolder, surfaceId, this.loadGeneration).then(() => {
+						void this.applyWorkstreamRunsUpdate();
 					});
 					return;
 				}
@@ -959,23 +1106,38 @@ export class SurfacePlanPanel extends Disposable {
 		this.statusRailEl.scrollBy({ left: direction * amount, behavior: 'auto' });
 	}
 
-	/** Keep horizontal wheel/trackpad motion on the rail instead of bubbling to the page. */
+	/** Map wheel/trackpad (incl. vertical) onto the steps rail; chevrons are a fallback. */
 	private handleStatusRailWheel(event: WheelEvent): void {
 		const el = this.statusRailEl;
 		const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
 		if (maxScroll <= 0) {
 			return;
 		}
-		const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+		// Prefer native horizontal deltas; otherwise treat vertical wheel as horizontal pan.
+		let delta = event.deltaX;
+		if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+			delta = event.deltaY;
+		}
+		if (event.shiftKey && Math.abs(event.deltaY) > 0) {
+			delta = event.deltaY;
+		}
 		if (!delta) {
 			return;
+		}
+		// DOM_DELTA_LINE / PAGE → approximate pixels so scrolling feels consistent.
+		if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+			delta *= 16;
+		} else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+			delta *= el.clientWidth;
 		}
 		const next = Math.max(0, Math.min(maxScroll, el.scrollLeft + delta));
 		if (next === el.scrollLeft) {
 			return;
 		}
 		event.preventDefault();
+		event.stopPropagation();
 		el.scrollLeft = next;
+		this.scheduleStatusScrollSync();
 	}
 
 	private centerStatusStep(stepId: string, smooth: boolean): void {
@@ -1023,6 +1185,8 @@ export class SurfacePlanPanel extends Disposable {
 
 	private renderStatusNextAction(action: SurfacePlanWorkflowAction | undefined): void {
 		if (!action) {
+			this.nextActionInFlight = false;
+			this.pendingNextActionKey = undefined;
 			this.statusNextActionButton.classList.add('hidden');
 			this.statusNextActionButton.disabled = true;
 			this.statusNextActionButton.textContent = '';
@@ -1040,6 +1204,12 @@ export class SurfacePlanPanel extends Disposable {
 			}
 			return;
 		}
+		const actionKey = `${action.id}:${action.stepId}`;
+		if (this.pendingNextActionKey && this.pendingNextActionKey !== actionKey) {
+			// Stage advanced — allow the new next action.
+			this.nextActionInFlight = false;
+			this.pendingNextActionKey = undefined;
+		}
 		const isRetry = Boolean(failedPhaseStepIdFromProgress(this.phaseProgressDocument))
 			&& action.id === 'run_next_phase';
 		for (const child of Array.from(this.statusRailEl.children)) {
@@ -1049,19 +1219,22 @@ export class SurfacePlanPanel extends Disposable {
 		}
 		this.statusTrackerEl.classList.remove('phase-in-flight');
 		this.statusNextActionButton.classList.remove('hidden');
-		this.statusNextActionButton.disabled = this.nextActionInFlight;
+		// Stay disabled after click until this next-action identity changes (prevents re-prompting Claude).
+		this.statusNextActionButton.disabled = this.nextActionInFlight || this.pendingNextActionKey === actionKey;
 		this.statusNextActionButton.textContent = isRetry
 			? localize('surfacePlan.retryPhase', 'Retry: {0}', action.label)
 			: action.label;
 		this.statusNextActionButton.dataset.actionId = action.id;
 		this.statusNextActionButton.dataset.stepId = action.stepId;
-		this.statusNextActionButton.title = isRetry
-			? localize('surfacePlan.retryPhaseTitle', 'Retry failed phase: {0}', action.label)
-			: localize(
-				'surfacePlan.statusNextActionTitle',
-				'Run next plan step: {0}',
-				action.label,
-			);
+		this.statusNextActionButton.title = this.statusNextActionButton.disabled
+			? localize('surfacePlan.statusNextActionInFlightTitle', 'Already sent to Claude — waiting for progress…')
+			: isRetry
+				? localize('surfacePlan.retryPhaseTitle', 'Retry failed phase: {0}', action.label)
+				: localize(
+					'surfacePlan.statusNextActionTitle',
+					'Run next plan step: {0}',
+					action.label,
+				);
 		const currentStepEl = Array.from(this.statusRailEl.children).find(child =>
 			child instanceof HTMLElement && child.classList.contains('current')
 		) as HTMLElement | undefined;
@@ -1157,6 +1330,59 @@ export class SurfacePlanPanel extends Disposable {
 		}
 	}
 
+	private async refreshWorkstreamRuns(workspaceFolder: URI, surfaceId: string, generation: number): Promise<void> {
+		try {
+			const content = await this.fileService.readFile(surfaceWorkstreamRunsResource(workspaceFolder, surfaceId));
+			if (generation !== this.loadGeneration) {
+				return;
+			}
+			this.workstreamRunsDocument = parseSurfaceWorkstreamRuns(content.value.toString(), surfaceId);
+		} catch {
+			if (generation !== this.loadGeneration) {
+				return;
+			}
+			this.workstreamRunsDocument = undefined;
+		}
+	}
+
+	/**
+	 * Parallel workstream Claudes report into workstream-runs.json.
+	 * When all complete (or any failed with none running), write phase-progress accordingly.
+	 */
+	private async applyWorkstreamRunsUpdate(): Promise<void> {
+		const options = this.lastOptions;
+		const runs = this.workstreamRunsDocument;
+		const progress = this.phaseProgressDocument;
+		if (!options?.workspaceFolder || !runs || !progress || progress.status !== 'running') {
+			return;
+		}
+		if (runs.stepId && progress.stepId && runs.stepId !== progress.stepId) {
+			return;
+		}
+		if (workstreamRunsAllCompleted(runs)) {
+			await this.writePhaseProgress({
+				...progress,
+				status: 'completed',
+				updatedAt: new Date().toISOString(),
+				message: localize('surfacePlan.workstreamsComplete', 'All Claude workstreams completed'),
+				inflightWorkstreamKeys: undefined,
+			});
+			await this.applyPhaseProgressUpdate();
+			return;
+		}
+		if (workstreamRunsFailed(runs)) {
+			const failed = runs.keys.find(entry => entry.status === 'failed');
+			await this.writePhaseProgress({
+				...progress,
+				status: 'failed',
+				updatedAt: new Date().toISOString(),
+				error: failed?.error || localize('surfacePlan.workstreamsFailed', 'A Claude workstream failed'),
+				inflightWorkstreamKeys: undefined,
+			});
+			this.renderStatusTracker();
+		}
+	}
+
 	/**
 	 * Claude finished (or failed) a phase via phase-progress.json.
 	 * Console owns marking workflow.json completed.
@@ -1165,6 +1391,16 @@ export class SurfacePlanPanel extends Disposable {
 		const options = this.lastOptions;
 		const progress = this.phaseProgressDocument;
 		if (!options?.workspaceFolder || !progress) {
+			this.renderStatusTracker();
+			return;
+		}
+		// Multi-Claude fan-out: ignore premature phase-progress completed until workstream-runs agree.
+		if (
+			progress.status === 'completed'
+			&& progress.inflightWorkstreamKeys?.length
+			&& this.workstreamRunsDocument
+			&& !workstreamRunsAllCompleted(this.workstreamRunsDocument)
+		) {
 			this.renderStatusTracker();
 			return;
 		}
@@ -1264,7 +1500,12 @@ export class SurfacePlanPanel extends Disposable {
 			return;
 		}
 		this.nextActionInFlight = true;
+		this.pendingNextActionKey = `${actionId}:${stepId}`;
 		this.statusNextActionButton.disabled = true;
+		this.statusNextActionButton.title = localize(
+			'surfacePlan.statusNextActionInFlightTitle',
+			'Already sent to Claude — waiting for progress…',
+		);
 		try {
 			// Always re-select the owning SURFACE card when advancing a step.
 			this.emitSelectOwningSurface();
@@ -1275,6 +1516,14 @@ export class SurfacePlanPanel extends Disposable {
 				case 'confirm_repos':
 					await this.confirmReferenceSelection();
 					break;
+				case 'continue_research': {
+					const stepLabel = this.statusNextActionButton.textContent?.trim()
+						|| (stepId === 'research_survey'
+							? localize('surfacePlan.continueSurvey', 'Continue survey')
+							: localize('surfacePlan.continueResearch', 'Continue research'));
+					this.emitNextAction(actionId, stepId, stepLabel);
+					break;
+				}
 				case 'lock_plan':
 					await this.lockPlanAndContinue(stepId);
 					break;
@@ -1299,8 +1548,11 @@ export class SurfacePlanPanel extends Disposable {
 					break;
 				}
 			}
-		} finally {
+		} catch {
+			// Only re-arm on hard failure — success stays disabled until the stage advances.
 			this.nextActionInFlight = false;
+			this.pendingNextActionKey = undefined;
+		} finally {
 			this.renderStatusTracker();
 		}
 	}
@@ -1440,8 +1692,24 @@ export class SurfacePlanPanel extends Disposable {
 	}
 
 	private publishTreeDocument(options: SurfaceProposalTreeDocumentOptions): void {
-		this.lastTreeDocument = options;
-		this.treeView.setDocument(options);
+		const status = resolveSurfacePlanWorkflowStatus(this.workflowSignals());
+		const phaseInFlight = phaseInFlightStepIdFromProgress(this.phaseProgressDocument);
+		// After lock, Steps Next owns generate-phase fan-out — hide the duplicate Workstreams CTA.
+		const hideRunWorkstreamsButton = Boolean(
+			this.planLocked
+			&& (
+				status.stageId === 'building'
+				|| status.stageId === 'plan_locked'
+				|| status.nextAction?.id === 'run_next_phase'
+				|| phaseInFlight
+			)
+		);
+		const merged: SurfaceProposalTreeDocumentOptions = {
+			...options,
+			hideRunWorkstreamsButton,
+		};
+		this.lastTreeDocument = merged;
+		this.treeView.setDocument(merged);
 	}
 
 	private withResolvedRepoReasons(

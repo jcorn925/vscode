@@ -25,11 +25,18 @@ import {
 	openBlockerStepRefs,
 } from './surfaceBlockers.js';
 import {
+	buildSurfaceAutoContinueFingerprint,
+	isClaudeOwnedAutoContinueStage,
+} from './surfacePlanAutoContinue.js';
+import {
 	isSurfacePlanLocked,
 	isSurfacePreviewWired,
 	resolveSurfacePlanWorkflowStatus,
+	summarizeSurfacePlanWorkflowProgress,
 	type SurfacePlanWorkflowAction,
 	type SurfacePlanWorkflowPhaseRef,
+	type SurfacePlanWorkflowProgress,
+	type SurfacePlanWorkflowStageId,
 } from './surfacePlanWorkflowStatus.js';
 import {
 	resolveSurfacePlanResource,
@@ -42,13 +49,24 @@ import {
 
 export interface SurfacePendingPlanProbe {
 	readonly nextAction?: SurfacePlanWorkflowAction;
+	readonly stageId: SurfacePlanWorkflowStageId;
 	/**
 	 * Human-facing attention label for pending Next CTA or an in-flight phase.
 	 * Prefer this for Surface / Steps chip dots — covers both pending and in-progress.
 	 */
 	readonly attentionLabel?: string;
+	/**
+	 * Set only while Claude is mid-phase (`phase-progress` status `running`).
+	 * Use for the Claude reopen chip — not for idle "Next" CTAs.
+	 */
+	readonly workingLabel?: string;
 	/** Max associated step activity time (ms since epoch), or 0 when none. */
 	readonly activityMs: number;
+	/** Step completion for Console "Your surfaces" cards. */
+	readonly progress: SurfacePlanWorkflowProgress;
+	/** Stable fingerprint for Claude-owned stall auto-continue. */
+	readonly autoContinueFingerprint: string;
+	readonly autoContinueEligible: boolean;
 }
 
 /**
@@ -98,7 +116,23 @@ export async function resolveSurfacePendingPlanAction(
 ): Promise<SurfacePendingPlanProbe> {
 	const id = surfaceId.trim();
 	if (!id) {
-		return { activityMs: 0 };
+		const emptyStatus = resolveSurfacePlanWorkflowStatus({
+			hasPlanContent: false,
+			hasCandidates: false,
+			hasDraftProposal: false,
+			hasFinalProposal: false,
+		});
+		return {
+			stageId: emptyStatus.stageId,
+			activityMs: 0,
+			progress: summarizeSurfacePlanWorkflowProgress(emptyStatus),
+			autoContinueFingerprint: buildSurfaceAutoContinueFingerprint({
+				stageId: emptyStatus.stageId,
+				hasDraftProposal: false,
+				hasFinalProposal: false,
+			}),
+			autoContinueEligible: false,
+		};
 	}
 
 	const [planMarkdown, candidates, hasDraftProposal, proposal, workflowRaw, progressRaw, blockers] = await Promise.all([
@@ -139,11 +173,36 @@ export async function resolveSurfacePendingPlanAction(
 	const inProgressLabel = phaseInFlightStepId
 		? (progress?.stepLabel?.trim() || phaseInFlightStepId)
 		: undefined;
+	const activityMs = Math.max(
+		surfaceAssociatedStepActivityMs(workflow, progress),
+		parseActivityMs(candidates?.updatedAt),
+	);
+	const autoContinueFingerprint = buildSurfaceAutoContinueFingerprint({
+		stageId: status.stageId,
+		candidatesStatus: candidates?.status,
+		hasDraftProposal,
+		hasFinalProposal: Boolean(proposal),
+		phaseInFlightStepId,
+		phaseStatus: progress?.status,
+	});
 	return {
 		nextAction: status.nextAction,
+		stageId: status.stageId,
 		attentionLabel: status.nextAction?.label ?? inProgressLabel,
-		activityMs: surfaceAssociatedStepActivityMs(workflow, progress),
+		workingLabel: inProgressLabel,
+		activityMs,
+		progress: summarizeSurfacePlanWorkflowProgress(status, { inProgressLabel }),
+		autoContinueFingerprint,
+		autoContinueEligible: isClaudeOwnedAutoContinueStage(status.stageId, phaseInFlightStepId),
 	};
+}
+
+function parseActivityMs(value: string | undefined): number {
+	if (!value) {
+		return 0;
+	}
+	const ms = Date.parse(value);
+	return Number.isFinite(ms) ? ms : 0;
 }
 
 async function readPlanMarkdown(

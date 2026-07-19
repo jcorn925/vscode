@@ -110,16 +110,20 @@ export class SurfaceProposalGraphPanel extends Disposable {
 			const graph = buildProposalPreviewGraph(proposal);
 			const partition = partitionProposalWorkstreams(proposal);
 			this.setPathDisplay(resource);
-			const parallelSafe = partition.workstreams.filter(w => w.parallelSafe).length;
+			const serializeHint = partition.serializeGroups.length
+				? localize(
+					'surfaceProposalGraph.serializeHint',
+					' · {0} serialize',
+					String(partition.serializeGroups.length),
+				)
+				: '';
 			this.statusEl.textContent = localize(
 				'surfaceProposalGraph.loadedWithWorkstreams',
 				'Proposal loaded · {0} nodes · {1} edges · {2} workstreams{3}',
 				String(graph.nodes.length),
 				String(graph.edges.length),
 				String(partition.workstreams.length),
-				partition.canParallelize
-					? localize('surfaceProposalGraph.parallelHint', ' · {0} parallel-safe', String(parallelSafe))
-					: '',
+				serializeHint,
 			);
 			this.emptyEl.classList.add('hidden');
 			this.emptyEl.textContent = '';

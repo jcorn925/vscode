@@ -4,10 +4,17 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { parseIxSubsystemRegions } from '../../../../../../custom/goalWorkspace/surfaceBlueprintIxDiscovery.js';
-import { scopeIxRegionsToSurface } from '../../../../../../custom/goalWorkspace/surfaceIxScope.js';
+import {
+	enrichSurfaceWithIxOverlay,
+	mergeIxSubsystemRegions,
+	regionsFromIxOverlayDiscovered,
+	scopeIxRegionsToSurface,
+} from '../../../../../../custom/goalWorkspace/surfaceIxScope.js';
 import { toIxSubsystemRegions } from '../../../../../../custom/goalWorkspace/surfaceIxMatch.js';
+import type { IxOverlay } from '../../../../../../custom/goalWorkspace/ConsoleService.js';
 
 suite('surfaceBlueprintIxDiscovery', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -71,5 +78,82 @@ suite('surfaceBlueprintIxDiscovery', () => {
 		});
 		assert.strictEqual(scoped.length, 1);
 		assert.strictEqual(scoped[0]!.name, 'Cadre Support Bot');
+	});
+
+	test('overlay discoveredSubsystems fill Graph when live Ix regions are empty', () => {
+		const overlay: IxOverlay = {
+			resource: URI.file('/tmp/ws/.agent/ix-surface-map.json'),
+			generatedAt: '2026-07-19T00:00:00.000Z',
+			command: 'ix map --all-items .',
+			discoveredSubsystems: [
+				{
+					id: '8897c2d5-6592-36f6-aea3-dbd48fc8ea23',
+					label: 'Cadre Support Bot',
+					path: 'apps/cadre-support-bot',
+					fileCount: 6,
+				},
+				{
+					id: '9e919031-de8e-3e64-955f-7c96c29adc46',
+					label: 'Ui / Cadre-support-bot',
+					path: 'apps/cadre-support-bot/components',
+					fileCount: 5,
+				},
+				{
+					id: 'other-app',
+					label: 'Other App',
+					path: 'apps/other-app',
+					fileCount: 3,
+				},
+			],
+			surfaces: [
+				{
+					surfaceId: 'cadre-support-bot',
+					subsystemIds: ['8897c2d5-6592-36f6-aea3-dbd48fc8ea23'],
+					subsystemLabels: ['Cadre Support Bot', 'Ui / Cadre-support-bot'],
+					matchReason: 'path',
+				},
+			],
+		};
+
+		const liveRegions: ReturnType<typeof toIxSubsystemRegions> = [];
+		const overlayRegions = regionsFromIxOverlayDiscovered(overlay.discoveredSubsystems);
+		const merged = mergeIxSubsystemRegions(liveRegions, overlayRegions);
+		assert.strictEqual(merged.length, 3);
+
+		const surface = enrichSurfaceWithIxOverlay({
+			id: 'cadre-support-bot',
+			name: 'Cadre AI Support Chatbot',
+			path: 'apps/cadre-support-bot',
+			capabilities: [],
+			entities: [],
+			ixSubsystems: [],
+		}, overlay);
+		assert.ok(surface.ixSubsystems.includes('Cadre Support Bot'));
+		assert.ok(surface.ix?.subsystemIds.includes('8897c2d5-6592-36f6-aea3-dbd48fc8ea23'));
+
+		const scoped = scopeIxRegionsToSurface(merged, surface, 'apps/cadre-support-bot');
+		assert.deepStrictEqual(scoped.map(r => r.regionId).sort(), [
+			'8897c2d5-6592-36f6-aea3-dbd48fc8ea23',
+			'9e919031-de8e-3e64-955f-7c96c29adc46',
+		].sort());
+	});
+
+	test('mergeIxSubsystemRegions prefers live regions over overlay on id collision', () => {
+		const live = toIxSubsystemRegions([{
+			regionId: 'same-id',
+			name: 'Live Name',
+			entryPath: 'apps/cadre-support-bot',
+			fileCount: 10,
+		}]);
+		const overlay = regionsFromIxOverlayDiscovered([{
+			id: 'same-id',
+			label: 'Overlay Name',
+			path: 'apps/cadre-support-bot',
+			fileCount: 2,
+		}]);
+		const merged = mergeIxSubsystemRegions(live, overlay);
+		assert.strictEqual(merged.length, 1);
+		assert.strictEqual(merged[0]!.name, 'Live Name');
+		assert.strictEqual(merged[0]!.fileCount, 10);
 	});
 });

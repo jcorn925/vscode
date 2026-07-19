@@ -15,6 +15,7 @@ import {
 	markSurfacePlanLocked,
 	resolveSurfacePlanWorkflowStatus,
 	resolveSurfaceSectionIdForStep,
+	summarizeSurfacePlanWorkflowProgress,
 } from '../../../../../../custom/goalWorkspace/surfacePlanWorkflowStatus.js';
 import {
 	completedStepIdsFromWorkflow,
@@ -71,6 +72,37 @@ suite('surfacePlanWorkflowStatus', () => {
 			hasDraftProposal: true,
 			hasFinalProposal: false,
 		}), 'research_map');
+	});
+
+	test('research_map exposes Continue research next action', () => {
+		const status = resolveSurfacePlanWorkflowStatus({
+			hasPlanContent: true,
+			hasCandidates: true,
+			candidatesStatus: 'done',
+			hasDraftProposal: false,
+			hasFinalProposal: false,
+		});
+		assert.strictEqual(status.stageId, 'research_map');
+		assert.deepStrictEqual(status.nextAction, {
+			id: 'continue_research',
+			label: 'Continue research',
+			stepId: 'research_map',
+		});
+	});
+
+	test('research_survey exposes Continue survey next action', () => {
+		const status = resolveSurfacePlanWorkflowStatus({
+			hasPlanContent: true,
+			hasCandidates: false,
+			hasDraftProposal: false,
+			hasFinalProposal: false,
+		});
+		assert.strictEqual(status.stageId, 'research_survey');
+		assert.deepStrictEqual(status.nextAction, {
+			id: 'continue_research',
+			label: 'Continue survey',
+			stepId: 'research_survey',
+		});
 	});
 
 	test('plan_ready when final proposal and plan exist', () => {
@@ -432,25 +464,25 @@ suite('surfacePlanWorkflowStatus', () => {
 suite('resolveSurfaceSectionIdForStep', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	const sections = ['rules', 'plan', 'context', 'graph', 'phases', 'files', 'architecture', 'preview'] as const;
+	const sections = ['rules', 'plan', 'context', 'proposed', 'graph', 'phases', 'preview'] as const;
 
-	test('maps planning stages to plan / context', () => {
-		assert.strictEqual(resolveSurfaceSectionIdForStep({ id: 'lock_plan', kind: 'action' }, sections), 'plan');
-		assert.strictEqual(resolveSurfaceSectionIdForStep({ id: 'intent', kind: 'stage' }, sections), 'plan');
+	test('maps planning stages to proposed / plan / context', () => {
+		assert.strictEqual(resolveSurfaceSectionIdForStep({ id: 'lock_plan', kind: 'action' }, sections), 'proposed');
+		assert.strictEqual(resolveSurfaceSectionIdForStep({ id: 'intent', kind: 'stage' }, sections), 'proposed');
 		assert.strictEqual(
 			resolveSurfaceSectionIdForStep({ id: 'awaiting_repo_selection', kind: 'stage' }, sections),
 			'context',
 		);
 	});
 
-	test('maps phases to Graph card with fallbacks', () => {
+	test('maps phases to Proposed card with fallbacks', () => {
 		assert.strictEqual(
 			resolveSurfaceSectionIdForStep({ id: 'phase-streaming', kind: 'phase' }, sections),
-			'graph',
+			'proposed',
 		);
 		assert.strictEqual(
-			resolveSurfaceSectionIdForStep({ id: 'phase-streaming', kind: 'phase' }, ['files', 'plan']),
-			'files',
+			resolveSurfaceSectionIdForStep({ id: 'phase-streaming', kind: 'phase' }, ['plan']),
+			'plan',
 		);
 	});
 
@@ -467,6 +499,49 @@ suite('resolveSurfaceSectionIdForStep', () => {
 			resolveSurfaceSectionIdForStep({ id: 'blocker:missing-env', kind: 'blocker' }, sections),
 			'preview',
 		);
+	});
+
+	test('summarizeSurfacePlanWorkflowProgress reports completion and in-flight labels', () => {
+		const early = resolveSurfacePlanWorkflowStatus({
+			hasPlanContent: false,
+			hasCandidates: false,
+			hasDraftProposal: false,
+			hasFinalProposal: false,
+		});
+		const earlyProgress = summarizeSurfacePlanWorkflowProgress(early);
+		assert.ok(earlyProgress.total > 0);
+		assert.strictEqual(earlyProgress.complete, false);
+		assert.strictEqual(earlyProgress.label, 'Start planning');
+
+		const building = resolveSurfacePlanWorkflowStatus({
+			hasPlanContent: true,
+			hasCandidates: true,
+			hasDraftProposal: true,
+			hasFinalProposal: true,
+			planLocked: true,
+			proposalPhases: [{ id: 'phase-1', title: 'Phase 1' }],
+			completedStepIds: ['lock_plan'],
+			phaseInFlightStepId: 'phase-1',
+		});
+		const running = summarizeSurfacePlanWorkflowProgress(building, { inProgressLabel: 'Phase 1' });
+		assert.strictEqual(running.inProgress, true);
+		assert.strictEqual(running.label, 'Phase 1');
+		assert.ok(running.percent < 100);
+
+		const done = resolveSurfacePlanWorkflowStatus({
+			hasPlanContent: true,
+			hasCandidates: true,
+			hasDraftProposal: true,
+			hasFinalProposal: true,
+			planLocked: true,
+			previewEnabled: true,
+			proposalPhases: [{ id: 'phase-1', title: 'Phase 1' }],
+			completedStepIds: ['lock_plan', 'phase-1', VERIFY_GRAPH_STEP_ID, ENABLE_PREVIEW_STEP_ID],
+		});
+		const complete = summarizeSurfacePlanWorkflowProgress(done);
+		assert.strictEqual(complete.complete, true);
+		assert.strictEqual(complete.percent, 100);
+		assert.strictEqual(complete.label, 'Complete');
 	});
 });
 

@@ -115,8 +115,8 @@ suite('surfaceStepsStructuralReconcile', () => {
 			],
 			completedStepIds: new Set(['phase-1', 'phase-2']),
 		});
-		assert.deepStrictEqual(ids, []);
 		assert.ok(!ids.includes(ENABLE_PREVIEW_STEP_ID));
+		assert.deepStrictEqual(ids, []);
 	});
 
 	test('phaseIdsToCompleteFromStructuralPass only returns generate phase ids from the input list', () => {
@@ -129,8 +129,8 @@ suite('surfaceStepsStructuralReconcile', () => {
 			],
 			completedStepIds: [],
 		});
-		assert.deepStrictEqual(ids, ['phase-1', 'phase-2']);
 		assert.ok(!ids.includes(ENABLE_PREVIEW_STEP_ID));
+		assert.deepStrictEqual(ids, ['phase-1', 'phase-2']);
 	});
 });
 

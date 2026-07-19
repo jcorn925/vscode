@@ -94,7 +94,9 @@ function countMatchedRelationships(proposal: GraphProposalDocument, snapshot: Pr
 
 /**
  * Derives Files / Relationships / Workstreams completion from a proposal and
- * optional compare snapshot. Without a snapshot, matched counts are 0 and
+ * optional compare snapshot. Workstreams counts use parallel-safe subsystems only
+ * (`partition.workstreams`), not coupled serialize groups.
+ * Without a snapshot, matched counts are 0 and
  * {@link SurfaceProposalProgress.hasCompare} is false (cards show totals only).
  */
 export function computeSurfaceProposalProgress(
@@ -104,6 +106,7 @@ export function computeSurfaceProposalProgress(
 ): SurfaceProposalProgress {
 	const filesTotal = proposal.add_nodes?.length ?? 0;
 	const relationshipsTotal = (proposal.add_edges ?? []).reduce((count, raw) => count + (resolveEdgeEndpoints(raw) ? 1 : 0), 0);
+	// Product workstreams = parallelizable subsystems only.
 	const workstreams = partition?.workstreams ?? [];
 
 	if (!snapshot) {

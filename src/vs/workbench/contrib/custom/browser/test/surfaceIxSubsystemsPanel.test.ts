@@ -40,6 +40,33 @@ suite('surfaceIxSubsystemsPanel', () => {
 		assert.deepStrictEqual(scoped.map(region => region.regionId), ['calendar', 'shared-declared']);
 	});
 
+	test('scopeIxRegionsToSurface fuzzy-matches pathless regions by surface id', () => {
+		const regions = [
+			{ regionId: 'uuid-main', name: 'Cadre Support Bot' },
+			{ regionId: 'uuid-ui', name: 'Ui / Cadre-support-bot' },
+			{ regionId: 'uuid-ai', name: 'Ai / Cadre-support-bot' },
+			{ regionId: 'uuid-stale', name: 'Cadre Bot' },
+			{ regionId: 'uuid-other', name: 'Inbound Admin' },
+		];
+		const surface: WorkspaceSurface = {
+			id: 'cadre-support-bot',
+			name: 'Cadre AI Support Chatbot',
+			path: 'apps/cadre-support-bot',
+			capabilities: [],
+			events: [],
+			entities: [],
+			ixSubsystems: [],
+		};
+
+		const scoped = scopeIxRegionsToSurface(regions, surface, 'apps/cadre-support-bot');
+
+		assert.deepStrictEqual(scoped.map(region => region.regionId).sort(), [
+			'uuid-ai',
+			'uuid-main',
+			'uuid-ui',
+		]);
+	});
+
 	test('renders discovered subsystem roots and member files', async () => {
 		const root = document.createElement('div');
 		const ix = createIxService();
@@ -54,6 +81,44 @@ suite('surfaceIxSubsystemsPanel', () => {
 			assert.ok(root.textContent?.includes('apps/content-scheduler/app/calendar/page.tsx'));
 			assert.ok(root.textContent?.includes('1 subsystems'));
 			assert.strictEqual(root.querySelectorAll('.custom-mode-surface-ix-subsystems-node-root').length, 1);
+		} finally {
+			panel.dispose();
+		}
+	});
+
+	test('empty state mentions overlay when Ix returned regions but none matched', async () => {
+		const root = document.createElement('div');
+		const ix = {
+			mapPath: async () => ({ ok: true, raw: '', command: 'ix map apps/other' }),
+			ensureIxMappedIfEmpty: async () => ({ statsPreview: 'nodes (2 total)', ranMap: false, statsOk: true }),
+			runJsonQuery: async () => ({
+				ok: true,
+				raw: '',
+				value: {
+					subsystems: [
+						{ id: 'billing', label: 'Billing System', path: 'apps/subscriptions' },
+						{ id: 'admin', label: 'Admin Console', path: 'apps/admin' },
+					],
+				},
+			}),
+		} as unknown as IIxIntegrationService;
+		const panel = new SurfaceIxSubsystemsPanel(root, ix);
+		try {
+			await panel.load({
+				surface: {
+					id: 'cadre-support-bot',
+					name: 'Cadre Support',
+					path: 'apps/cadre-support-bot',
+					capabilities: [],
+					events: [],
+					entities: [],
+					ixSubsystems: [],
+				},
+				workspaceFolder: URI.file('/workspace'),
+			});
+
+			assert.match(root.textContent ?? '', /Ix found 2 subsystem/);
+			assert.match(root.textContent ?? '', /ix-surface-map\.json/);
 		} finally {
 			panel.dispose();
 		}

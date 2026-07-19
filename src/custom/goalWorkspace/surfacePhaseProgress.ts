@@ -22,6 +22,8 @@ export interface SurfacePhaseProgressDocument {
 	readonly updatedAt: string;
 	readonly message?: string;
 	readonly error?: string;
+	/** Claude session keys still generating for this phase (parallel workstreams). */
+	readonly inflightWorkstreamKeys?: readonly string[];
 }
 
 export function surfacePhaseProgressResource(workspaceFolder: URI, surfaceId: string): URI {
@@ -54,6 +56,10 @@ export function parseSurfacePhaseProgress(
 	if (!surfaceId || !stepId) {
 		return undefined;
 	}
+	const inflightRaw = record.inflightWorkstreamKeys;
+	const inflightWorkstreamKeys = Array.isArray(inflightRaw)
+		? inflightRaw.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map(item => item.trim())
+		: undefined;
 	return {
 		surfaceId,
 		stepId,
@@ -62,6 +68,7 @@ export function parseSurfacePhaseProgress(
 		updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : new Date().toISOString(),
 		message: typeof record.message === 'string' && record.message.trim() ? record.message.trim() : undefined,
 		error: typeof record.error === 'string' && record.error.trim() ? record.error.trim() : undefined,
+		inflightWorkstreamKeys: inflightWorkstreamKeys?.length ? inflightWorkstreamKeys : undefined,
 	};
 }
 
@@ -74,6 +81,7 @@ export function serializeSurfacePhaseProgress(doc: SurfacePhaseProgressDocument)
 		updatedAt: doc.updatedAt,
 		...(doc.message ? { message: doc.message } : {}),
 		...(doc.error ? { error: doc.error } : {}),
+		...(doc.inflightWorkstreamKeys?.length ? { inflightWorkstreamKeys: [...doc.inflightWorkstreamKeys] } : {}),
 	}, null, '\t')}\n`;
 }
 
@@ -82,6 +90,7 @@ export function createRunningPhaseProgress(options: {
 	readonly stepId: string;
 	readonly stepLabel: string;
 	readonly message?: string;
+	readonly inflightWorkstreamKeys?: readonly string[];
 }): SurfacePhaseProgressDocument {
 	return {
 		surfaceId: options.surfaceId,
@@ -90,6 +99,9 @@ export function createRunningPhaseProgress(options: {
 		status: 'running',
 		updatedAt: new Date().toISOString(),
 		message: options.message,
+		inflightWorkstreamKeys: options.inflightWorkstreamKeys?.length
+			? [...options.inflightWorkstreamKeys]
+			: undefined,
 	};
 }
 

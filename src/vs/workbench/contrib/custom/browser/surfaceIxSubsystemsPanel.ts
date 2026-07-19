@@ -25,7 +25,10 @@ export class SurfaceIxSubsystemsPanel extends Disposable {
 	private readonly statusEl: HTMLElement;
 	private readonly refreshButton: HTMLButtonElement;
 	private readonly treeEl: HTMLElement;
-	private readonly cache = new Map<string, readonly IxSubsystemRegion[]>();
+	private readonly cache = new Map<string, {
+		readonly regions: readonly IxSubsystemRegion[];
+		readonly discoveredCount: number;
+	}>();
 	private lastOptions: SurfaceIxSubsystemsPanelLoadOptions | undefined;
 	private loadGeneration = 0;
 
@@ -82,7 +85,8 @@ export class SurfaceIxSubsystemsPanel extends Disposable {
 
 		if (!force && this.cache.has(surface.id)) {
 			this.setLoading(false);
-			this.renderRegions(this.cache.get(surface.id)!, surfacePath);
+			const cached = this.cache.get(surface.id)!;
+			this.renderRegions(cached.regions, surfacePath, cached.discoveredCount);
 			return;
 		}
 
@@ -102,9 +106,9 @@ export class SurfaceIxSubsystemsPanel extends Disposable {
 			}
 			const regions = await discoverIxSubsystemRegions(this.ixIntegrationService, workspaceFolder);
 			const scoped = scopeIxRegionsToSurface(regions, surface, surfacePath);
-			this.cache.set(surface.id, scoped);
+			this.cache.set(surface.id, { regions: scoped, discoveredCount: regions.length });
 			if (generation === this.loadGeneration) {
-				this.renderRegions(scoped, surfacePath);
+				this.renderRegions(scoped, surfacePath, regions.length);
 			}
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -140,14 +144,24 @@ export class SurfaceIxSubsystemsPanel extends Disposable {
 		this.treeEl.replaceChildren($('div.custom-mode-surface-ix-subsystems-empty', undefined, message));
 	}
 
-	private renderRegions(regions: readonly IxSubsystemRegion[], surfacePath: string): void {
+	private renderRegions(
+		regions: readonly IxSubsystemRegion[],
+		surfacePath: string,
+		discoveredCount: number | undefined,
+	): void {
 		if (!regions.length) {
 			this.statusEl.textContent = localize('surfaceIxSubsystems.noneFound', '0 subsystems under {0}', surfacePath);
-			this.treeEl.replaceChildren($('div.custom-mode-surface-ix-subsystems-empty', undefined,
-				localize(
+			const emptyMessage = discoveredCount && discoveredCount > 0
+				? localize(
+					'surfaceIxSubsystems.emptyScopedWithDiscoveries',
+					'Ix found {0} subsystem(s) in the workspace, but none matched this surface. Declare subsystem ids/labels in `.agent/ix-surface-map.json` (or surface.ixSubsystems), then refresh.',
+					String(discoveredCount),
+				)
+				: localize(
 					'surfaceIxSubsystems.emptyScoped',
-					'No Ix subsystems matched this surface yet. Map the surface path or refresh after scaffold.',
-				)));
+					'Ix returned no subsystems for this workspace yet. Run `ix map --all-items .`, then refresh.',
+				);
+			this.treeEl.replaceChildren($('div.custom-mode-surface-ix-subsystems-empty', undefined, emptyMessage));
 			return;
 		}
 

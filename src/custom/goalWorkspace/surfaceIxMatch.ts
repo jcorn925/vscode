@@ -33,7 +33,9 @@ export function uniqueStrings(values: readonly string[]): string[] {
 	return result;
 }
 
-export function surfaceMatchTokens(surface: WorkspaceSurface): readonly string[] {
+export function surfaceMatchTokens(
+	surface: Pick<WorkspaceSurface, 'id' | 'name' | 'path' | 'capabilities' | 'entities'>,
+): readonly string[] {
 	return uniqueStrings([
 		surface.id,
 		surface.name,

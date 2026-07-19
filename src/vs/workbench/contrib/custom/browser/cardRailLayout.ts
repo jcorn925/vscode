@@ -48,6 +48,8 @@ export interface CardRailItem {
 	readonly assocGroup?: string;
 	/** Human-actionable next Plan step pending — shows a pulsing attention dot. */
 	readonly pendingAction?: boolean;
+	/** 0–100 completion for surface title cards (compact bar + percent). */
+	readonly progressPercent?: number;
 }
 
 export interface CardRailLayoutOptions {
@@ -321,6 +323,18 @@ export const CARD_RAIL_STYLESHEET = `
 	color: inherit;
 	opacity: 0.85;
 }
+/* Name-only cards (no subtitle): render key as the primary label, not an uppercase eyebrow. */
+.custom-mode-card-rail-card:not(:has(.custom-mode-card-rail-card-value)) .custom-mode-card-rail-card-key {
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.25;
+	letter-spacing: normal;
+	text-transform: none;
+	color: inherit;
+}
+.custom-mode-card-rail-card.active:not(:has(.custom-mode-card-rail-card-value)) .custom-mode-card-rail-card-key {
+	opacity: 1;
+}
 .custom-mode-card-rail-card-value {
 	font-size: 12px;
 	font-weight: 600;
@@ -332,6 +346,70 @@ export const CARD_RAIL_STYLESHEET = `
 }
 .custom-mode-card-rail-card-value:empty {
 	display: none;
+}
+.custom-mode-card-rail-card-progress {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	margin-top: 5px;
+}
+.custom-mode-card-rail-card-progress-track {
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 4px;
+	border-radius: 999px;
+	background: color-mix(in srgb, currentColor 16%, transparent);
+	overflow: hidden;
+}
+.custom-mode-card-rail-card-progress-bar {
+	height: 100%;
+	border-radius: 999px;
+	background: var(--vscode-progressBar-background, var(--vscode-textLink-foreground, #3794ff));
+	width: 0%;
+	transition: width 160ms ease;
+}
+.custom-mode-card-rail-card.active .custom-mode-card-rail-card-progress-bar {
+	background: color-mix(in srgb, currentColor 88%, transparent);
+}
+.custom-mode-card-rail-card-progress-bar.is-complete {
+	background: var(--vscode-testing-iconPassed, #73c991);
+}
+.custom-mode-card-rail-card.active .custom-mode-card-rail-card-progress-bar.is-complete {
+	background: color-mix(in srgb, currentColor 92%, transparent);
+}
+.custom-mode-card-rail-card-progress-pct {
+	flex: 0 0 auto;
+	min-width: 2.75em;
+	text-align: right;
+	font-size: 11px;
+	font-weight: 650;
+	font-variant-numeric: tabular-nums;
+	letter-spacing: 0.01em;
+	line-height: 1;
+	color: var(--vscode-descriptionForeground);
+}
+.custom-mode-card-rail-card.active .custom-mode-card-rail-card-progress-pct {
+	color: inherit;
+	opacity: 0.92;
+}
+.custom-mode-card-rail-card-progress-pct.is-complete {
+	color: var(--vscode-testing-iconPassed, #73c991);
+	font-weight: 700;
+}
+.custom-mode-card-rail-card.active .custom-mode-card-rail-card-progress-pct.is-complete {
+	color: inherit;
+	opacity: 1;
+}
+/* Keep surface name as primary label even when a progress row is present. */
+.custom-mode-card-rail-card:has(.custom-mode-card-rail-card-progress):not(:has(.custom-mode-card-rail-card-value)) .custom-mode-card-rail-card-key {
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.25;
+	letter-spacing: normal;
+	text-transform: none;
+	color: inherit;
 }
 .custom-mode-card-rail-content {
 	display: flex;
@@ -353,11 +431,12 @@ export const CARD_RAIL_STYLESHEET = `
 	margin: 12px 0 0;
 	padding: 0 2px;
 	font: 700 10px/1.3 var(--vscode-font-family);
-	letter-spacing: 0.04em;
-	text-transform: uppercase;
+	letter-spacing: 0.02em;
 	color: var(--vscode-descriptionForeground);
 	pointer-events: none;
 	user-select: none;
+	overflow-wrap: anywhere;
+	word-break: break-word;
 }
 .custom-mode-card-rail-assoc {
 	grid-column: 1 / -1;
@@ -431,6 +510,7 @@ export function cardRailItemsEqual(a: readonly CardRailItem[], b: readonly CardR
 			|| (left.groupLabel ?? '') !== (right.groupLabel ?? '')
 			|| (left.assocGroup ?? '') !== (right.assocGroup ?? '')
 			|| !!left.pendingAction !== !!right.pendingAction
+			|| (left.progressPercent ?? -1) !== (right.progressPercent ?? -1)
 		) {
 			return false;
 		}
@@ -572,6 +652,9 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 		const appendCard = (card: CardRailItem, host: HTMLElement): void => {
 			const active = activeIds.has(card.id);
 			const value = card.value.trim();
+			const progressPercent = typeof card.progressPercent === 'number' && Number.isFinite(card.progressPercent)
+				? Math.max(0, Math.min(100, Math.round(card.progressPercent)))
+				: undefined;
 			const button = $('button.custom-mode-card-rail-card', {
 				type: 'button',
 				role: 'tab',
@@ -582,6 +665,20 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 				$('span.custom-mode-card-rail-card-key', undefined, card.key),
 				...(value ? [$('span.custom-mode-card-rail-card-value', undefined, value)] : []),
 			) as HTMLButtonElement;
+			if (progressPercent !== undefined) {
+				const complete = progressPercent >= 100;
+				const bar = $('span.custom-mode-card-rail-card-progress-bar') as HTMLElement;
+				bar.style.width = `${progressPercent}%`;
+				bar.classList.toggle('is-complete', complete);
+				const pct = $('span.custom-mode-card-rail-card-progress-pct', undefined, `${progressPercent}%`);
+				pct.classList.toggle('is-complete', complete);
+				button.appendChild($('span.custom-mode-card-rail-card-progress', {
+					'aria-hidden': 'true',
+				},
+					$('span.custom-mode-card-rail-card-progress-track', undefined, bar),
+					pct,
+				));
+			}
 			button.classList.toggle('active', active);
 			if (card.pendingAction) {
 				button.classList.add('has-pending-action');
@@ -603,7 +700,10 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 			if (card.groupLabel) {
 				assocHost = undefined;
 				assocGroupId = undefined;
-				rail.appendChild($('div.custom-mode-card-rail-group-label', { 'aria-hidden': 'true' }, card.groupLabel));
+				rail.appendChild($('div.custom-mode-card-rail-group-label', {
+					'aria-hidden': 'true',
+					title: card.groupLabel,
+				}, card.groupLabel));
 			} else if (card.groupStart) {
 				assocHost = undefined;
 				assocGroupId = undefined;

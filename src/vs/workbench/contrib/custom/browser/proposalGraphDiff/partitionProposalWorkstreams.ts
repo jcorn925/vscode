@@ -40,11 +40,20 @@ export interface ProposalWorkstream {
 }
 
 export interface ProposalWorkstreamPartition {
+	/**
+	 * Parallelizable proposal-graph subsystems (structural CCs with no shared
+	 * `node_prefixes` coupling). These are the product “workstreams.”
+	 */
 	readonly workstreams: readonly ProposalWorkstream[];
+	/**
+	 * Coupled clusters that share `node_prefixes` with another component —
+	 * serialize (or assign one owner) before parallelizing.
+	 */
+	readonly serializeGroups: readonly ProposalWorkstream[];
 	readonly ignoredPredicates: readonly string[];
 	readonly structuralEdgeCount: number;
 	readonly softEdgeCount: number;
-	/** True when ≥2 streams are parallelSafe (worth spawning agents). */
+	/** True when ≥2 parallel workstreams exist (worth spawning agents). */
 	readonly canParallelize: boolean;
 }
 
@@ -142,8 +151,8 @@ function prefixesTouched(nodes: readonly string[], prefixes: readonly string[]):
 }
 
 /**
- * Partition a graph proposal into undirected connected components suitable for
- * parallel agent workstreams. Soft predicates (REGISTERS/DESCRIBES/…) and
+ * Partition a graph proposal into parallelizable subsystems (workstreams) and
+ * coupled serialize groups. Soft predicates (REGISTERS/DESCRIBES/…) and
  * speculative edges are ignored so documentation links do not collapse clusters.
  */
 export function partitionProposalWorkstreams(
@@ -162,7 +171,6 @@ export function partitionProposalWorkstreams(
 		parent.set(n, n);
 	}
 
-	const allEdges: ProposalWorkstreamEdge[] = [];
 	const structuralEdges: ProposalWorkstreamEdge[] = [];
 	let softEdgeCount = 0;
 
@@ -171,7 +179,6 @@ export function partitionProposalWorkstreams(
 		if (!edge) {
 			continue;
 		}
-		allEdges.push(edge);
 		const soft = ignorePredicates.has(edge.predicate);
 		const speculative = ignoreSpeculative && edge.confidence === 'speculative';
 		if (soft || speculative) {
@@ -211,7 +218,7 @@ export function partitionProposalWorkstreams(
 		}
 	});
 
-	const workstreams: ProposalWorkstream[] = componentEntries.map((list, index) => {
+	const components: ProposalWorkstream[] = componentEntries.map((list, index) => {
 		const nodeSet = new Set(list);
 		const edges = structuralEdges.filter(e => nodeSet.has(e.src) && nodeSet.has(e.dst));
 		const sharedPrefixes = touchedByComponent[index]!.filter(prefix => (prefixOwners.get(prefix)?.length ?? 0) > 1);
@@ -225,12 +232,14 @@ export function partitionProposalWorkstreams(
 		};
 	});
 
-	const parallelSafeCount = workstreams.filter(w => w.parallelSafe).length;
+	const workstreams = components.filter(w => w.parallelSafe);
+	const serializeGroups = components.filter(w => !w.parallelSafe);
 	return {
 		workstreams,
+		serializeGroups,
 		ignoredPredicates: [...ignorePredicates].sort(),
 		structuralEdgeCount: structuralEdges.length,
 		softEdgeCount,
-		canParallelize: parallelSafeCount >= 2,
+		canParallelize: workstreams.length >= 2,
 	};
 }

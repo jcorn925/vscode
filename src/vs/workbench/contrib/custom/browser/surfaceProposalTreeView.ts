@@ -13,17 +13,27 @@ import { webviewGenericCspSource } from '../../webview/common/webview.js';
 import type { GraphProposalDocument, ProposalDiffGraph } from './proposalGraphDiff/proposalGraphDiffTypes.js';
 import type { ProposalWorkstreamPartition } from './proposalGraphDiff/partitionProposalWorkstreams.js';
 import type { SurfaceProposalProgress } from './surfaceProposalProgress.js';
+import {
+	orderSurfaceProposalTreeCards,
+	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+	type SurfaceProposalTreeCardItem,
+	type SurfaceProposalTreeGraphRegion,
+} from './surfaceProposalTreeCards.js';
+
+export type {
+	SurfaceProposalTreeCardItem,
+	SurfaceProposalTreeGraphRegion,
+} from './surfaceProposalTreeCards.js';
+export {
+	orderSurfaceProposalTreeCards,
+	staticSurfaceProposalTreeCards,
+	surfaceGraphRegionsCardValue,
+	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+} from './surfaceProposalTreeCards.js';
 
 export interface SurfaceProposalTreePreviewInfo {
 	readonly localUrl?: string;
 	readonly message: string;
-}
-
-export interface SurfaceProposalTreeGraphRegion {
-	readonly name: string;
-	readonly entryPath?: string;
-	readonly memberFiles?: readonly string[];
-	readonly fileCount?: number;
 }
 
 export interface SurfaceProposalTreeDocumentOptions {
@@ -41,32 +51,17 @@ export interface SurfaceProposalTreeDocumentOptions {
 	readonly referenceCandidates?: SurfaceReferenceCandidates;
 	readonly storageKey?: string;
 	readonly proposalMissingMessage?: string;
+	/**
+	 * When true, hide the Workstreams "Run parallel workstreams" button — Steps Next
+	 * already owns generate-phase fan-out for the current phase.
+	 */
+	readonly hideRunWorkstreamsButton?: boolean;
 }
 
 export interface SurfaceProposalTreeToggleRepoRequest {
 	readonly owner: string;
 	readonly repo: string;
 	readonly selected: boolean;
-}
-
-/** One section card for the host-owned shared card rail (see cardRailLayout.ts). */
-export interface SurfaceProposalTreeCardItem {
-	readonly id: string;
-	readonly key: string;
-	readonly value: string;
-}
-
-/** Placeholder value used when a surface section has no content yet. */
-export const SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE = '—';
-
-/**
- * Section cards keep declaration order. Dynamic rail reordering is owned by Mode Shell
- * (surfaces by most recent associated plan-step activity) — Rules/Plan are not pinned.
- */
-export function orderSurfaceProposalTreeCards(
-	cards: readonly SurfaceProposalTreeCardItem[],
-): SurfaceProposalTreeCardItem[] {
-	return [...cards];
 }
 
 export class SurfaceProposalTreeView extends Disposable {
@@ -81,6 +76,12 @@ export class SurfaceProposalTreeView extends Disposable {
 
 	private readonly _onDidChangeCards = this._register(new Emitter<readonly SurfaceProposalTreeCardItem[]>());
 	readonly onDidChangeCards: Event<readonly SurfaceProposalTreeCardItem[]> = this._onDidChangeCards.event;
+
+	private readonly _onDidRequestSection = this._register(new Emitter<string>());
+	readonly onDidRequestSection: Event<string> = this._onDidRequestSection.event;
+
+	private readonly _onDidRequestRunWorkstreams = this._register(new Emitter<void>());
+	readonly onDidRequestRunWorkstreams: Event<void> = this._onDidRequestRunWorkstreams.event;
 
 	constructor(webviewService: IWebviewService, onReady: () => void) {
 		super();
@@ -126,6 +127,14 @@ export class SurfaceProposalTreeView extends Disposable {
 					}
 				}
 				this._onDidChangeCards.fire(orderSurfaceProposalTreeCards(cards));
+				return;
+			}
+			if (message?.type === 'surfaceProposalTree.requestSection' && typeof message.id === 'string') {
+				this._onDidRequestSection.fire(message.id);
+				return;
+			}
+			if (message?.type === 'surfaceProposalTree.runWorkstreams') {
+				this._onDidRequestRunWorkstreams.fire();
 			}
 		}));
 		this.setHtml();
@@ -172,16 +181,166 @@ export class SurfaceProposalTreeView extends Disposable {
 			max-width: none;
 			margin: 0;
 		}
-		.graph-regions { display: grid; gap: 10px; padding: 12px 14px; }
+		.graph-panel { padding: 12px 14px; display: grid; gap: 10px; }
+		.graph-view-tabs {
+			display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px 0;
+		}
+		.graph-view-tab {
+			appearance: none; border: 1px solid var(--vscode-panel-border);
+			border-radius: 6px; padding: 5px 10px;
+			background: var(--vscode-sideBar-background); color: var(--vscode-foreground);
+			font: 600 11px/1.3 var(--vscode-font-family); cursor: pointer;
+		}
+		.graph-view-tab:hover { border-color: var(--vscode-focusBorder); }
+		.graph-view-tab.active {
+			background: var(--vscode-button-background);
+			border-color: var(--vscode-button-background);
+			color: var(--vscode-button-foreground);
+		}
+		.graph-view-pane.hidden { display: none; }
+		.graph-view-pane .tree,
+		.graph-view-pane .edges { padding: 0 14px 14px; }
+		.graph-canvas {
+			border: 1px solid var(--vscode-panel-border);
+			border-radius: 8px;
+			background: var(--vscode-sideBar-background);
+			overflow: auto;
+			max-height: min(72vh, 640px);
+			/* Limit style/layout invalidation while hovering. */
+			contain: layout paint;
+			/* Keep one-finger scroll; pinch handled in JS. */
+			touch-action: pan-x pan-y;
+			overscroll-behavior: contain;
+		}
+		.graph-canvas svg {
+			display: block;
+			/* Size is driven by zoom helper (inline width/height). */
+			max-height: none;
+			transform-origin: 0 0;
+		}
+		.graph-canvas-hint {
+			margin: 0 0 6px;
+			color: var(--vscode-descriptionForeground);
+			font-size: 11px;
+		}
+		.graph-edge {
+			stroke: color-mix(in srgb, var(--vscode-focusBorder) 40%, var(--vscode-panel-border));
+			stroke-width: 1.1;
+			fill: none;
+			opacity: 0.55;
+			pointer-events: none;
+		}
+		.graph-col-label {
+			fill: var(--vscode-descriptionForeground);
+			font: 700 10px/1.2 var(--vscode-font-family);
+			letter-spacing: 0.04em;
+			text-transform: uppercase;
+			pointer-events: none;
+		}
+		.graph-node.linked { cursor: pointer; }
+		.graph-node-shell {
+			fill: var(--vscode-editorWidget-background);
+			stroke: var(--vscode-widget-border, var(--vscode-panel-border));
+			stroke-width: 1;
+		}
+		.graph-node-shell.linked {
+			stroke: color-mix(in srgb, var(--vscode-focusBorder) 70%, var(--vscode-widget-border));
+			stroke-width: 1.15;
+		}
+		.graph-node-shell.isolate { opacity: 0.72; }
+		.graph-node-title {
+			fill: var(--vscode-foreground);
+			font: 600 11px/1.2 var(--vscode-editor-font-family, var(--vscode-font-family));
+			pointer-events: none;
+		}
+		/*
+		 * Ego-focus: CSS dims everything; JS only marks the tiny hot set (no per-node dim toggles,
+		 * no SVG reordering, no transitions — those were the lag).
+		 */
+		.graph-canvas svg.graph-rel-focus .graph-node { opacity: 0.12; }
+		.graph-canvas svg.graph-rel-focus .graph-edge { opacity: 0.05; }
+		.graph-canvas svg.graph-rel-focus .graph-col-label { opacity: 0.16; }
+		.graph-canvas svg.graph-rel-focus .graph-node.is-hot { opacity: 1; }
+		.graph-canvas svg.graph-rel-focus .graph-edge.is-hot {
+			opacity: 1;
+			stroke: var(--vscode-focusBorder);
+			stroke-width: 2.25;
+		}
+		.graph-canvas svg.graph-rel-focus .graph-col-label.is-hot { opacity: 1; }
+		.graph-canvas svg.graph-rel-focus .graph-node.is-hot.neighbor .graph-node-shell {
+			stroke: var(--vscode-focusBorder);
+			stroke-width: 1.5;
+		}
+		.graph-canvas svg.graph-rel-focus .graph-node.is-hot.focus .graph-node-shell {
+			fill: color-mix(in srgb, var(--vscode-focusBorder) 22%, var(--vscode-editorWidget-background));
+			stroke: var(--vscode-focusBorder);
+			stroke-width: 2;
+		}
+		.graph-ego-card {
+			display: none;
+			border: 1px solid var(--vscode-focusBorder);
+			border-radius: 8px;
+			background: var(--vscode-editorWidget-background);
+			padding: 10px 12px;
+			gap: 6px;
+		}
+		.graph-canvas.graph-ego-active .graph-ego-card { display: grid; }
+		.graph-ego-title {
+			font-weight: 700;
+			font-size: 12px;
+			color: var(--vscode-foreground);
+			word-break: break-all;
+		}
+		.graph-ego-meta {
+			color: var(--vscode-descriptionForeground);
+			font-size: 11px;
+		}
+		.graph-ego-list {
+			display: grid;
+			gap: 4px;
+			margin: 0;
+			padding: 0;
+			list-style: none;
+		}
+		.graph-ego-list li {
+			display: grid;
+			grid-template-columns: auto minmax(48px, max-content) minmax(0, 1fr);
+			gap: 8px;
+			align-items: baseline;
+			font: 11px/1.35 var(--vscode-editor-font-family, var(--vscode-font-family));
+			color: var(--vscode-foreground);
+		}
+		.graph-ego-list .dir {
+			color: var(--vscode-descriptionForeground);
+			font: 700 9px/1.2 var(--vscode-font-family);
+			letter-spacing: 0.04em;
+			text-transform: uppercase;
+		}
+		.graph-ego-list .pred {
+			color: var(--vscode-focusBorder);
+			font: 700 10px/1.2 var(--vscode-font-family);
+			letter-spacing: 0.03em;
+			text-transform: uppercase;
+		}
+		.graph-ego-list .other {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+		.graph-legend {
+			color: var(--vscode-descriptionForeground);
+			font-size: 12px;
+		}
+		.graph-regions { display: grid; gap: 8px; }
 		.graph-region {
 			border: 1px solid var(--vscode-panel-border); border-radius: 6px;
-			background: var(--vscode-sideBar-background); padding: 10px 12px;
+			background: var(--vscode-editor-background); padding: 8px 10px;
 		}
-		.graph-region-title { font-weight: 700; }
-		.graph-region-meta { margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+		.graph-region-title { font-weight: 700; font-size: 12px; }
+		.graph-region-meta { margin-top: 2px; color: var(--vscode-descriptionForeground); font-size: 11px; }
 		.graph-region-files {
-			margin: 8px 0 0; padding-left: 18px;
-			font: 12px/1.4 var(--vscode-editor-font-family);
+			margin: 6px 0 0; padding-left: 18px;
+			font: 11px/1.4 var(--vscode-editor-font-family);
 		}
 		.preview-body { padding: 12px 14px; }
 		.preview-url {
@@ -296,12 +455,28 @@ export class SurfaceProposalTreeView extends Disposable {
 			border-top: 1px solid var(--vscode-tree-indentGuidesStroke);
 		}
 		.tree > ul > li::before { display: none; }
-		.folder-row, .file-row { display: flex; align-items: center; min-height: 24px; gap: 7px; }
-		.folder-row { color: var(--vscode-foreground); font-weight: 600; }
-		.folder-row::before { content: '▾'; width: 12px; color: var(--vscode-descriptionForeground); font-size: 10px; }
-		.file-row::before { content: '◇'; width: 12px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+		.folder-row, .file-row { display: flex; align-items: baseline; min-height: 24px; gap: 7px; }
+		.folder-row { color: var(--vscode-foreground); font-weight: 600; align-items: center; }
+		.folder-row::before { content: '▾'; width: 12px; color: var(--vscode-descriptionForeground); font-size: 10px; flex: 0 0 auto; }
+		.file-row::before { content: '◇'; width: 12px; color: var(--vscode-descriptionForeground); font-size: 11px; flex: 0 0 auto; }
 		.file-path { color: var(--vscode-descriptionForeground); }
-		.file-name { color: var(--vscode-symbolIcon-fileForeground, var(--vscode-foreground)); font-weight: 600; }
+		.file-name { color: var(--vscode-symbolIcon-fileForeground, var(--vscode-foreground)); font-weight: 600; flex: 0 1 auto; }
+		.file-comment {
+			color: var(--vscode-descriptionForeground);
+			font: 400 11px/1.35 var(--vscode-font-family);
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+		.file-comment::before { content: '# '; opacity: 0.7; }
+		.files-arch-summary {
+			margin: 0;
+			padding: 10px 12px 0;
+			color: var(--vscode-descriptionForeground);
+			font-size: 12px;
+			white-space: pre-wrap;
+		}
 		.edges { display: grid; }
 		.edge {
 			display: grid; grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
@@ -327,7 +502,7 @@ export class SurfaceProposalTreeView extends Disposable {
 			background: var(--vscode-sideBar-background); padding: 10px 12px;
 		}
 		.workstream-header {
-			display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
+			display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;
 		}
 		.workstream-id {
 			font: 700 10px/1.4 var(--vscode-font-family); letter-spacing: .04em;
@@ -347,10 +522,17 @@ export class SurfaceProposalTreeView extends Disposable {
 			background: color-mix(in srgb, var(--vscode-editorWarning-foreground, var(--vscode-charts-orange)) 18%, transparent);
 		}
 		.workstream-meta {
-			color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 6px;
+			color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 4px;
+		}
+		.workstream-files {
+			margin-top: 4px;
+		}
+		.workstream-files > summary {
+			cursor: pointer; user-select: none;
+			color: var(--vscode-descriptionForeground); font-size: 11px;
 		}
 		.workstream-nodes {
-			margin: 0; padding-left: 18px; font-family: var(--vscode-editor-font-family); font-size: 12px;
+			margin: 6px 0 0; padding-left: 18px; font-family: var(--vscode-editor-font-family); font-size: 12px;
 		}
 		.workstream-nodes li { margin: 2px 0; }
 		.workstream-note {
@@ -361,7 +543,36 @@ export class SurfaceProposalTreeView extends Disposable {
 			border: 1px solid var(--vscode-panel-border);
 			background: var(--vscode-textCodeBlock-background);
 			color: var(--vscode-descriptionForeground); font-size: 12px;
+			display: grid; gap: 8px;
 		}
+		.parallel-banner-note {
+			margin: 0; font-size: 11px; opacity: 0.85;
+		}
+		.parallel-banner-actions { display: flex; justify-content: flex-end; }
+		.parallel-run-btn {
+			appearance: none; border: 1px solid var(--vscode-button-border, transparent);
+			border-radius: 6px; padding: 6px 12px;
+			background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+			font: 600 12px/1.3 var(--vscode-font-family); cursor: pointer;
+		}
+		.parallel-run-btn:disabled {
+			opacity: 0.5; cursor: default;
+		}
+		.parallel-run-btn:not(:disabled):hover {
+			background: var(--vscode-button-hoverBackground);
+		}
+		.serialize-block {
+			margin: 0 12px 12px; border: 1px solid var(--vscode-panel-border);
+			border-radius: 6px; background: var(--vscode-sideBar-background);
+		}
+		.serialize-block > summary {
+			cursor: pointer; user-select: none; padding: 10px 12px;
+			font-weight: 600; font-size: 12px;
+		}
+		.serialize-block[open] > summary {
+			border-bottom: 1px solid var(--vscode-panel-border);
+		}
+		.serialize-block .workstreams { padding-top: 10px; }
 		.architecture, .phase-body { padding: 12px 14px; }
 		.architecture-summary {
 			margin: 0 0 12px; color: var(--vscode-foreground); white-space: pre-wrap;
@@ -424,6 +635,69 @@ export class SurfaceProposalTreeView extends Disposable {
 					raw = raw.replace(/\\s\\/\\s+/g, '\\n');
 				}
 				return raw.replace(/\\n{3,}/g, '\\n\\n').trimEnd();
+			}
+
+			/**
+			 * Pull path # comment annotations out of an architecture tree so the Files
+			 * tab can show them inline (Architecture card is gone).
+			 */
+			function parseArchitectureFileComments(tree) {
+				const byPath = new Map();
+				const byBase = new Map();
+				if (!tree) {
+					return { byPath, byBase };
+				}
+				const raw = normalizeArchitectureTree(tree);
+				for (const line of raw.split('\\n')) {
+					const hash = line.indexOf('#');
+					if (hash < 0) {
+						continue;
+					}
+					const comment = line.slice(hash + 1).trim();
+					if (!comment) {
+						continue;
+					}
+					const left = line.slice(0, hash)
+						.replace(/[│├└─┌┐┘┤┬┴┼|+\\\\]/g, ' ')
+						.replace(/\\s+/g, ' ')
+						.trim();
+					const pathMatch = left.match(/(?:[\\w.@+-]+\\/)*[\\w.@+-]+\\.[A-Za-z0-9]+$/);
+					if (!pathMatch) {
+						continue;
+					}
+					const path = pathMatch[0].replace(/\\\\/g, '/');
+					const pathKey = path.toLowerCase();
+					byPath.set(pathKey, comment);
+					const base = path.split('/').pop();
+					if (base && !byBase.has(base.toLowerCase())) {
+						byBase.set(base.toLowerCase(), comment);
+					}
+				}
+				return { byPath, byBase };
+			}
+
+			function lookupArchitectureComment(filePath, comments) {
+				if (!comments) {
+					return '';
+				}
+				const normalized = normalizeGraphPath(filePath).toLowerCase();
+				if (!normalized) {
+					return '';
+				}
+				if (comments.byPath.has(normalized)) {
+					return comments.byPath.get(normalized);
+				}
+				// Match on path suffix (architecture often omits apps/<surface>/).
+				for (const [path, comment] of comments.byPath) {
+					if (normalized.endsWith('/' + path) || normalized.endsWith(path)) {
+						return comment;
+					}
+					if (path.endsWith('/' + normalized) || path.endsWith(normalized)) {
+						return comment;
+					}
+				}
+				const base = normalized.split('/').pop();
+				return (base && comments.byBase.get(base)) || '';
 			}
 
 			function el(tag, className, value) {
@@ -529,15 +803,45 @@ export class SurfaceProposalTreeView extends Disposable {
 			}
 
 			let selectedSectionId = null;
+			/** sectionId → 'graph' | 'files' | 'relationships' */
+			const graphTabBySection = Object.create(null);
+
+			function setGraphTab(sectionId, tabId) {
+				const sectionEl = content.querySelector('details.section[data-section="' + sectionId + '"]');
+				if (!sectionEl) {
+					return;
+				}
+				graphTabBySection[sectionId] = tabId;
+				for (const tab of sectionEl.querySelectorAll('.graph-view-tab')) {
+					tab.classList.toggle('active', tab.getAttribute('data-tab') === tabId);
+				}
+				for (const pane of sectionEl.querySelectorAll('.graph-view-pane')) {
+					pane.classList.toggle('hidden', pane.getAttribute('data-tab') !== tabId);
+				}
+			}
 
 			function focusSection(id, options) {
 				const flash = !options || options.flash !== false;
-				selectedSectionId = id;
-				const sectionEl = content.querySelector('details.section[data-section="' + id + '"]');
+				// Legacy Files / Relationships / Architecture cards redirect into Proposed Graph tabs.
+				let sectionId = id;
+				let tabId = options && options.tab;
+				if (id === 'files' || id === 'relationships' || id === 'architecture') {
+					sectionId = 'proposed';
+					tabId = id === 'relationships' ? 'relationships' : 'files';
+				} else if (id === 'proposed' && !tabId) {
+					tabId = 'graph';
+				} else if (id === 'graph' && !tabId) {
+					tabId = graphTabBySection.graph || 'graph';
+				}
+				selectedSectionId = sectionId;
+				const sectionEl = content.querySelector('details.section[data-section="' + sectionId + '"]');
 				if (!sectionEl) {
 					return;
 				}
 				sectionEl.open = true;
+				if (tabId && sectionEl.querySelector('.graph-view-tabs')) {
+					setGraphTab(sectionId, tabId);
+				}
 				if (flash) {
 					sectionEl.classList.remove('flash');
 					// Retrigger flash animation if already present.
@@ -552,27 +856,42 @@ export class SurfaceProposalTreeView extends Disposable {
 			function makeFolderTree(paths) {
 				const root = { folders: new Map(), files: [] };
 				for (const raw of paths) {
-					const parts = clean(raw).split('/').filter(Boolean);
+					const fullPath = clean(raw);
+					const parts = fullPath.split('/').filter(Boolean);
 					let cursor = root;
 					for (let i = 0; i < parts.length - 1; i++) {
 						if (!cursor.folders.has(parts[i])) cursor.folders.set(parts[i], { folders: new Map(), files: [] });
 						cursor = cursor.folders.get(parts[i]);
 					}
-					if (parts.length) cursor.files.push(parts[parts.length - 1]);
+					if (parts.length) {
+						cursor.files.push({ name: parts[parts.length - 1], path: fullPath });
+					}
 				}
 				return root;
 			}
 
-			function renderFolder(node, name) {
+			function renderFileRow(file, comments) {
+				const row = el('div', 'file-row');
+				row.append(el('span', 'file-name', file.name || file));
+				const comment = lookupArchitectureComment(file.path || file.name || file, comments);
+				if (comment) {
+					const note = el('span', 'file-comment', comment);
+					note.title = comment;
+					row.append(note);
+				}
+				return row;
+			}
+
+			function renderFolder(node, name, comments) {
 				const li = el('li');
 				if (name) li.append(el('div', 'folder-row', name));
 				const list = el('ul');
 				for (const [folderName, folder] of [...node.folders].sort(([a], [b]) => a.localeCompare(b))) {
-					list.append(renderFolder(folder, folderName));
+					list.append(renderFolder(folder, folderName, comments));
 				}
-				for (const file of [...node.files].sort()) {
+				for (const file of [...node.files].sort((a, b) => (a.name || '').localeCompare(b.name || ''))) {
 					const fileLi = el('li');
-					fileLi.append(el('div', 'file-row file-name', file));
+					fileLi.append(renderFileRow(file, comments));
 					list.append(fileLi);
 				}
 				li.append(list);
@@ -594,6 +913,795 @@ export class SurfaceProposalTreeView extends Disposable {
 				return { id, key: label, value: text(value) };
 			}
 
+			function normalizeGraphPath(path) {
+				return String(path || '').trim().replace(/\\\\/g, '/').replace(/^\\.\\//, '').replace(/\\/+$/g, '');
+			}
+
+			function truncateLabel(value, max) {
+				const s = String(value || '').trim();
+				if (s.length <= max) return s;
+				return s.slice(0, Math.max(1, max - 1)) + '…';
+			}
+
+			function proposalNodeId(canonicalId) {
+				return String(canonicalId || '').replace(/[^A-Za-z0-9:_./+-]+/g, '_');
+			}
+
+			function proposalFilePath(canonicalId) {
+				const raw = String(canonicalId || '');
+				const kindSep = raw.indexOf(':');
+				const rest = kindSep > 0 ? raw.slice(kindSep + 1) : raw;
+				const symbolSep = rest.indexOf('::');
+				return normalizeGraphPath(symbolSep > 0 ? rest.slice(0, symbolSep) : rest);
+			}
+
+			function proposalFileLabel(canonicalId) {
+				const path = proposalFilePath(canonicalId);
+				const base = path.split('/').pop() || String(canonicalId || '');
+				return truncateLabel(base, 28);
+			}
+
+			function proposalEdgeEnds(edge) {
+				const src = String(edge.src || edge.from || '').trim();
+				const dst = String(edge.dst || edge.to || '').trim();
+				const predicate = String(edge.predicate || edge.type || edge.label || '').trim().toUpperCase();
+				if (!src || !dst) {
+					return undefined;
+				}
+				return { src, dst, predicate: predicate || 'REL' };
+			}
+
+			/** Proposed Code Graph — Files + Relationships from the draft/final proposal. */
+			function buildProposedDrawableGraph(proposal, diffGraph) {
+				const fileIds = Array.isArray(proposal?.add_nodes) ? proposal.add_nodes.filter(Boolean) : [];
+				const relEdges = Array.isArray(proposal?.add_edges)
+					? proposal.add_edges.map(proposalEdgeEnds).filter(Boolean)
+					: [];
+
+				if (fileIds.length || relEdges.length) {
+					const nodesById = new Map();
+					const ensureFileNode = (canonicalId) => {
+						const id = proposalNodeId(canonicalId);
+						if (!nodesById.has(id)) {
+							const path = proposalFilePath(canonicalId);
+							nodesById.set(id, {
+								id,
+								label: proposalFileLabel(canonicalId),
+								meta: truncateLabel(path.split('/').slice(0, -1).join('/') || path, 34),
+								path,
+								root: false,
+							});
+						}
+						return id;
+					};
+					for (const fileId of fileIds) {
+						ensureFileNode(fileId);
+					}
+					const edges = [];
+					for (let index = 0; index < relEdges.length; index++) {
+						const edge = relEdges[index];
+						const from = ensureFileNode(edge.src);
+						const to = ensureFileNode(edge.dst);
+						edges.push({
+							id: 'rel:' + index + ':' + from + ':' + to,
+							from,
+							to,
+							label: truncateLabel(edge.predicate, 14),
+						});
+					}
+					const nodes = [...nodesById.values()];
+					if (nodes[0]) {
+						nodes[0].root = true;
+					}
+					return {
+						nodes,
+						edges,
+						cardValue: nodes.length + '·' + edges.length,
+						legend: nodes.length + ' files · ' + edges.length + ' relationships · grouped by folder',
+					};
+				}
+
+				if (diffGraph && Array.isArray(diffGraph.nodes) && diffGraph.nodes.length) {
+					const nodes = diffGraph.nodes.map((node, index) => ({
+						id: String(node.id || index),
+						label: truncateLabel(node.label || node.id || ('n' + index), 28),
+						meta: truncateLabel(node.status || node.kind || '', 24),
+						path: proposalFilePath(node.canonicalId || node.label || node.id || ''),
+						root: index === 0,
+					}));
+					const nodeIds = new Set(nodes.map(n => n.id));
+					const edges = (diffGraph.edges || [])
+						.filter(edge => nodeIds.has(String(edge.from)) && nodeIds.has(String(edge.to)))
+						.map((edge, index) => ({
+							id: String(edge.id || ('e' + index)),
+							from: String(edge.from),
+							to: String(edge.to),
+							label: truncateLabel(edge.label || edge.predicate || '', 14),
+						}));
+					return {
+						nodes,
+						edges,
+						cardValue: nodes.length + '·' + edges.length,
+						legend: nodes.length + ' files · ' + edges.length + ' relationships · grouped by folder',
+					};
+				}
+
+				return { nodes: [], edges: [], cardValue: '—', legend: '' };
+			}
+
+			/**
+			 * Real Graph — same shape as Proposed (files + relationships), not Ix subsystem blobs.
+			 * Prefer compare-matched files/edges; else Ix memberFiles + proposal edges that land on them.
+			 */
+			function buildCodeDrawableGraph(regions, proposal, diffGraph) {
+				const fromFiles = (fileIds, relEdges, legendSuffix) => {
+					const nodesById = new Map();
+					const ensureFileNode = (canonicalId) => {
+						const id = proposalNodeId(canonicalId);
+						if (!nodesById.has(id)) {
+							const path = proposalFilePath(canonicalId);
+							nodesById.set(id, {
+								id,
+								label: proposalFileLabel(canonicalId),
+								meta: truncateLabel(path.split('/').slice(0, -1).join('/') || path, 34),
+								path,
+								root: false,
+							});
+						}
+						return id;
+					};
+					for (const fileId of fileIds) {
+						ensureFileNode(fileId);
+					}
+					const edges = [];
+					for (let index = 0; index < relEdges.length; index++) {
+						const edge = relEdges[index];
+						const fromId = proposalNodeId(edge.src);
+						const toId = proposalNodeId(edge.dst);
+						if (!nodesById.has(fromId) || !nodesById.has(toId)) {
+							continue;
+						}
+						edges.push({
+							id: 'real:' + index + ':' + fromId + ':' + toId,
+							from: fromId,
+							to: toId,
+							label: truncateLabel(edge.predicate, 14),
+						});
+					}
+					const nodes = [...nodesById.values()];
+					if (nodes[0]) {
+						nodes[0].root = true;
+					}
+					if (!nodes.length) {
+						return undefined;
+					}
+					return {
+						nodes,
+						edges,
+						cardValue: nodes.length + '·' + edges.length,
+						legend: nodes.length + ' files · ' + edges.length + ' relationships · ' + legendSuffix,
+					};
+				};
+
+				// 1) Compare snapshot: only files/edges that exist in the live clone.
+				if (diffGraph && Array.isArray(diffGraph.nodes)) {
+					const matchedNodes = diffGraph.nodes.filter(n => !n.status || n.status === 'matched');
+					if (matchedNodes.length) {
+						const matchedIds = new Set(matchedNodes.map(n => String(n.id)));
+						const fileIds = matchedNodes.map(n => n.canonicalId || n.label || n.id);
+						const relEdges = (diffGraph.edges || [])
+							.filter(e => (!e.status || e.status === 'matched')
+								&& matchedIds.has(String(e.from))
+								&& matchedIds.has(String(e.to)))
+							.map(e => ({
+								src: e.from,
+								dst: e.to,
+								predicate: e.label || e.predicate || 'IMPORTS',
+							}));
+						// Map edge ends through node ids → canonical paths when possible.
+						const idToCanonical = new Map(
+							matchedNodes.map(n => [String(n.id), n.canonicalId || n.label || n.id]),
+						);
+						const canonicalEdges = relEdges.map(e => ({
+							src: idToCanonical.get(String(e.src)) || e.src,
+							dst: idToCanonical.get(String(e.dst)) || e.dst,
+							predicate: e.predicate,
+						}));
+						const built = fromFiles(fileIds, canonicalEdges, 'grouped by folder · matched in clone');
+						if (built) {
+							return built;
+						}
+					}
+				}
+
+				// 2) Ix member files (same visual unit as Proposed), edges from proposal when both ends exist.
+				const memberFiles = [];
+				for (const region of regions || []) {
+					for (const file of region.memberFiles || []) {
+						if (file) {
+							memberFiles.push(file);
+						}
+					}
+					if (region.entryPath && /\.[a-z0-9]+$/i.test(region.entryPath)) {
+						memberFiles.push(region.entryPath);
+					}
+				}
+				if (memberFiles.length) {
+					const relEdges = Array.isArray(proposal?.add_edges)
+						? proposal.add_edges.map(proposalEdgeEnds).filter(Boolean)
+						: [];
+					const built = fromFiles(memberFiles, relEdges, 'grouped by folder · from Ix members');
+					if (built) {
+						return built;
+					}
+				}
+
+				return { nodes: [], edges: [], cardValue: '—', legend: '' };
+			}
+
+			function buildFilesPane(fileIds, archOptions) {
+				const wrap = el('div', 'files-pane');
+				const summary = archOptions && archOptions.summary ? String(archOptions.summary).trim() : '';
+				const comments = parseArchitectureFileComments(archOptions && archOptions.tree);
+				if (summary) {
+					wrap.append(el('p', 'files-arch-summary', summary));
+				}
+				const tree = el('div', 'tree');
+				const rootList = el('ul');
+				const folderRoot = makeFolderTree(fileIds);
+				for (const [name, folder] of [...folderRoot.folders].sort(([a], [b]) => a.localeCompare(b))) {
+					rootList.append(renderFolder(folder, name, comments));
+				}
+				for (const file of [...folderRoot.files].sort((a, b) => (a.name || '').localeCompare(b.name || ''))) {
+					const li = el('li');
+					li.append(renderFileRow(file, comments));
+					rootList.append(li);
+				}
+				tree.append(rootList);
+				wrap.append(tree);
+				return wrap;
+			}
+
+			function buildRelationshipsPane(edgeDocs) {
+				const edgeList = el('div', 'edges');
+				for (const edge of edgeDocs) {
+					const row = el('div', 'edge');
+					const from = clean(edge.src || edge.from || edge.fromPath || '');
+					const to = clean(edge.dst || edge.to || edge.toPath || '');
+					const relation = edge.predicate || edge.type || edge.label || 'links';
+					const fromEl = el('span', 'endpoint', from);
+					const toEl = el('span', 'endpoint', to);
+					fromEl.title = from;
+					toEl.title = to;
+					row.append(fromEl, el('span', 'relation', relation), toEl);
+					edgeList.append(row);
+				}
+				return edgeList;
+			}
+
+			/**
+			 * Graph section with selectable Graph | Files | Relationships tabs
+			 * (Proposed Graph and Real Graph share this chrome).
+			 * Files tab includes architecture # comments when provided.
+			 */
+			function appendGraphSection(sections, id, title, drawable, emptyMessage, listOptions) {
+				const files = listOptions && listOptions.files ? listOptions.files : [];
+				const relationships = listOptions && listOptions.relationships ? listOptions.relationships : [];
+				const filesValue = (listOptions && listOptions.filesValue) || String(files.length || '—');
+				const relationshipsValue = (listOptions && listOptions.relationshipsValue)
+					|| String(relationships.length || '—');
+				const architecture = listOptions && listOptions.architecture;
+				const hasLists = files.length > 0 || relationships.length > 0;
+				const graphSection = section(id, title, drawable.cardValue || '—', false);
+
+				if (hasLists) {
+					const tabs = el('div', 'graph-view-tabs');
+					const tabDefs = [
+						{ id: 'graph', label: 'Graph', value: drawable.cardValue || '—' },
+						{ id: 'files', label: 'Files', value: filesValue },
+						{ id: 'relationships', label: 'Relationships', value: relationshipsValue },
+					];
+					const initialTab = graphTabBySection[id] || 'graph';
+					for (const def of tabDefs) {
+						const btn = el('button', 'graph-view-tab' + (def.id === initialTab ? ' active' : ''), def.label + ' · ' + def.value);
+						btn.type = 'button';
+						btn.setAttribute('data-tab', def.id);
+						btn.addEventListener('click', () => {
+							// Local tab switch only. Do not requestSection — the host would
+							// call focusSection(id) without a tab and reset Proposed Graph to Graph.
+							setGraphTab(id, def.id);
+						});
+						tabs.append(btn);
+					}
+					graphSection.append(tabs);
+
+					const graphPane = el('div', 'graph-view-pane' + (initialTab === 'graph' ? '' : ' hidden'));
+					graphPane.setAttribute('data-tab', 'graph');
+					if (drawable.nodes.length) {
+						const panel = el('div', 'graph-panel');
+						panel.append(el('div', 'graph-canvas-hint', 'Pinch or Ctrl+scroll to zoom · scroll to pan'));
+						panel.append(renderGraphSvg(drawable));
+						panel.append(el('div', 'graph-legend', drawable.legend
+							|| (drawable.nodes.length + ' nodes · ' + drawable.edges.length + ' links')));
+						graphPane.append(panel);
+					} else {
+						graphPane.append(el('div', 'empty', emptyMessage));
+					}
+					graphSection.append(graphPane);
+
+					const filesPane = el('div', 'graph-view-pane' + (initialTab === 'files' ? '' : ' hidden'));
+					filesPane.setAttribute('data-tab', 'files');
+					if (files.length) {
+						filesPane.append(buildFilesPane(files, architecture));
+					} else {
+						filesPane.append(el('div', 'empty', 'No files in this graph yet.'));
+					}
+					graphSection.append(filesPane);
+
+					const relPane = el('div', 'graph-view-pane' + (initialTab === 'relationships' ? '' : ' hidden'));
+					relPane.setAttribute('data-tab', 'relationships');
+					if (relationships.length) {
+						relPane.append(buildRelationshipsPane(relationships));
+					} else {
+						relPane.append(el('div', 'empty', 'No relationships in this graph yet.'));
+					}
+					graphSection.append(relPane);
+				} else if (drawable.nodes.length) {
+					const panel = el('div', 'graph-panel');
+					panel.append(el('div', 'graph-canvas-hint', 'Pinch or Ctrl+scroll to zoom · scroll to pan'));
+					panel.append(renderGraphSvg(drawable));
+					panel.append(el('div', 'graph-legend', drawable.legend
+						|| (drawable.nodes.length + ' nodes · ' + drawable.edges.length + ' links')));
+					graphSection.append(panel);
+				} else {
+					graphSection.append(el('div', 'empty', emptyMessage));
+				}
+				sections.push(graphSection);
+			}
+
+			function folderKeyForNode(node) {
+				const path = normalizeGraphPath(node.path || '');
+				const parts = path.split('/').filter(Boolean);
+				if (parts.length <= 1) {
+					return '(root)';
+				}
+				// Prefer a short, stable folder label (last 1–2 segments before the file).
+				const folderParts = parts.slice(0, -1);
+				if (folderParts.length >= 2) {
+					return folderParts.slice(-2).join('/');
+				}
+				return folderParts[folderParts.length - 1] || '(root)';
+			}
+
+			/** Deterministic folder-column layout — no overlapping nodes. */
+			function layoutGraphNodes(nodes, edges) {
+				const linkedIds = new Set();
+				for (const edge of edges || []) {
+					linkedIds.add(edge.from);
+					linkedIds.add(edge.to);
+				}
+				const enriched = nodes.map(node => ({
+					...node,
+					folder: folderKeyForNode(node),
+					linked: linkedIds.has(node.id),
+				}));
+
+				// Columns: folders with relationships first (by edge count), then isolates alpha.
+				const edgeCountByFolder = new Map();
+				for (const node of enriched) {
+					if (!node.linked) continue;
+					edgeCountByFolder.set(node.folder, (edgeCountByFolder.get(node.folder) || 0) + 1);
+				}
+				const folders = [...new Set(enriched.map(n => n.folder))].sort((a, b) => {
+					const ac = edgeCountByFolder.get(a) || 0;
+					const bc = edgeCountByFolder.get(b) || 0;
+					return bc - ac || a.localeCompare(b);
+				});
+
+				const colWidth = 168;
+				const rowHeight = 34;
+				const top = 36;
+				const left = 24;
+				const positions = {};
+				const columnMeta = [];
+				let maxRows = 1;
+
+				folders.forEach((folder, colIndex) => {
+					const members = enriched
+						.filter(n => n.folder === folder)
+						.sort((a, b) => Number(b.linked) - Number(a.linked) || a.label.localeCompare(b.label));
+					maxRows = Math.max(maxRows, members.length);
+					const x = left + colIndex * colWidth + colWidth / 2;
+					columnMeta.push({ folder, x, count: members.length });
+					members.forEach((node, rowIndex) => {
+						positions[node.id] = {
+							x,
+							y: top + rowIndex * rowHeight + rowHeight / 2,
+							linked: node.linked,
+							folder: node.folder,
+							boxW: colWidth - 20,
+							boxH: 26,
+						};
+					});
+				});
+
+				const width = Math.max(480, left * 2 + folders.length * colWidth);
+				const height = Math.max(280, top + maxRows * rowHeight + 28);
+				return { width, height, positions, columnMeta, linkedIds };
+			}
+
+			/** Precompute 1-hop ego maps once per render — hover must stay O(hot set). */
+			function buildEgoIndex(nodes, edges, positions) {
+				const nodeById = new Map((nodes || []).map(n => [n.id, n]));
+				const byNode = new Map();
+				for (const node of nodes || []) {
+					byNode.set(node.id, { neighbors: new Set([node.id]), incident: [], folders: new Set() });
+				}
+				for (const edge of edges || []) {
+					if (!byNode.has(edge.from) || !byNode.has(edge.to)) {
+						continue;
+					}
+					const fromEgo = byNode.get(edge.from);
+					const toEgo = byNode.get(edge.to);
+					fromEgo.neighbors.add(edge.to);
+					toEgo.neighbors.add(edge.from);
+					fromEgo.incident.push(edge);
+					toEgo.incident.push(edge);
+				}
+				for (const [id, ego] of byNode) {
+					for (const neighborId of ego.neighbors) {
+						const folder = positions[neighborId] && positions[neighborId].folder;
+						if (folder) {
+							ego.folders.add(folder);
+						}
+					}
+					const node = nodeById.get(id);
+					ego.path = (node && (node.path || node.meta || node.label)) || id;
+				}
+				return { byNode, nodeById };
+			}
+
+			/**
+			 * Pinch / ctrl+wheel zoom on the graph canvas. Scrollbars keep pan.
+			 * Trackpad pinch arrives as wheel+ctrl on Chromium/Firefox/Safari.
+			 */
+			function enableGraphCanvasZoom(wrap, svg, baseWidth, baseHeight) {
+				const minScale = 0.35;
+				const maxScale = 4;
+				let scale = 1;
+				let pinchStartDist = 0;
+				let pinchStartScale = 1;
+
+				const applyScale = (nextScale, focalX, focalY) => {
+					const prev = scale;
+					scale = Math.min(maxScale, Math.max(minScale, nextScale));
+					if (Math.abs(scale - prev) < 0.0001) {
+						return;
+					}
+					const contentX = (focalX + wrap.scrollLeft) / prev;
+					const contentY = (focalY + wrap.scrollTop) / prev;
+					const w = baseWidth * scale;
+					const h = baseHeight * scale;
+					svg.style.width = w + 'px';
+					svg.style.height = h + 'px';
+					svg.setAttribute('width', String(w));
+					svg.setAttribute('height', String(h));
+					wrap.scrollLeft = Math.max(0, contentX * scale - focalX);
+					wrap.scrollTop = Math.max(0, contentY * scale - focalY);
+				};
+
+				const fitInitial = () => {
+					const avail = wrap.clientWidth || baseWidth;
+					const fit = Math.min(1, (avail - 2) / baseWidth);
+					scale = Math.max(minScale, fit);
+					const w = baseWidth * scale;
+					const h = baseHeight * scale;
+					svg.style.width = w + 'px';
+					svg.style.height = h + 'px';
+					svg.style.maxHeight = 'none';
+					svg.setAttribute('width', String(w));
+					svg.setAttribute('height', String(h));
+				};
+
+				wrap.addEventListener('wheel', (event) => {
+					// Pinch-zoom on trackpads; plain wheel still scrolls the canvas.
+					if (!(event.ctrlKey || event.metaKey)) {
+						return;
+					}
+					event.preventDefault();
+					const rect = wrap.getBoundingClientRect();
+					const focalX = event.clientX - rect.left;
+					const focalY = event.clientY - rect.top;
+					const factor = Math.exp(-event.deltaY * 0.01);
+					applyScale(scale * factor, focalX, focalY);
+				}, { passive: false });
+
+				wrap.addEventListener('touchstart', (event) => {
+					if (event.touches.length !== 2) {
+						return;
+					}
+					pinchStartDist = Math.hypot(
+						event.touches[0].clientX - event.touches[1].clientX,
+						event.touches[0].clientY - event.touches[1].clientY,
+					);
+					pinchStartScale = scale;
+				}, { passive: true });
+
+				wrap.addEventListener('touchmove', (event) => {
+					if (event.touches.length !== 2 || !pinchStartDist) {
+						return;
+					}
+					event.preventDefault();
+					const dist = Math.hypot(
+						event.touches[0].clientX - event.touches[1].clientX,
+						event.touches[0].clientY - event.touches[1].clientY,
+					);
+					const rect = wrap.getBoundingClientRect();
+					const midX = ((event.touches[0].clientX + event.touches[1].clientX) / 2) - rect.left;
+					const midY = ((event.touches[0].clientY + event.touches[1].clientY) / 2) - rect.top;
+					applyScale(pinchStartScale * (dist / pinchStartDist), midX, midY);
+				}, { passive: false });
+
+				wrap.addEventListener('touchend', (event) => {
+					if (event.touches.length < 2) {
+						pinchStartDist = 0;
+					}
+				}, { passive: true });
+
+				// Safari desktop pinch gestures.
+				wrap.addEventListener('gesturestart', (event) => {
+					event.preventDefault();
+					pinchStartScale = scale;
+				});
+				wrap.addEventListener('gesturechange', (event) => {
+					event.preventDefault();
+					const rect = wrap.getBoundingClientRect();
+					applyScale(pinchStartScale * (event.scale || 1), rect.width / 2, rect.height / 2);
+				});
+
+				fitInitial();
+				// Re-fit once layout has a real clientWidth (first paint can be 0).
+				requestAnimationFrame(fitInitial);
+			}
+
+			function renderGraphSvg(drawable) {
+				const wrap = el('div', 'graph-canvas');
+				if (!drawable.nodes.length) {
+					wrap.append(el('div', 'empty', 'No graph nodes to draw.'));
+					return wrap;
+				}
+				const layout = layoutGraphNodes(drawable.nodes, drawable.edges);
+				const { width, height, positions, columnMeta, linkedIds } = layout;
+				const egoIndex = buildEgoIndex(drawable.nodes, drawable.edges, positions);
+				const markerId = 'graph-arrow-' + Math.random().toString(36).slice(2, 9);
+				const svgNS = 'http://www.w3.org/2000/svg';
+				const svg = document.createElementNS(svgNS, 'svg');
+				svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+				svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
+				svg.setAttribute('role', 'img');
+				svg.setAttribute('aria-label', 'Code graph — files and relationships. Pinch or ctrl-scroll to zoom.');
+
+				const defs = document.createElementNS(svgNS, 'defs');
+				const marker = document.createElementNS(svgNS, 'marker');
+				marker.setAttribute('id', markerId);
+				marker.setAttribute('viewBox', '0 0 10 10');
+				marker.setAttribute('refX', '8');
+				marker.setAttribute('refY', '5');
+				marker.setAttribute('markerWidth', '5');
+				marker.setAttribute('markerHeight', '5');
+				marker.setAttribute('orient', 'auto-start-reverse');
+				const tip = document.createElementNS(svgNS, 'path');
+				tip.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+				tip.setAttribute('fill', 'var(--vscode-focusBorder)');
+				marker.appendChild(tip);
+				defs.appendChild(marker);
+				svg.appendChild(defs);
+
+				const colLabelByFolder = new Map();
+				for (const col of columnMeta) {
+					const label = document.createElementNS(svgNS, 'text');
+					label.setAttribute('class', 'graph-col-label');
+					label.setAttribute('x', String(col.x));
+					label.setAttribute('y', '18');
+					label.setAttribute('text-anchor', 'middle');
+					label.dataset.folder = col.folder;
+					label.textContent = truncateLabel(col.folder, 22);
+					svg.appendChild(label);
+					colLabelByFolder.set(col.folder, label);
+				}
+
+				const edgeElsByEndpoint = new Map();
+				const rememberEdge = (nodeId, edgeEl) => {
+					if (!edgeElsByEndpoint.has(nodeId)) {
+						edgeElsByEndpoint.set(nodeId, []);
+					}
+					edgeElsByEndpoint.get(nodeId).push(edgeEl);
+				};
+				// Edges behind nodes; no on-curve labels (they were clutter + extra paint).
+				drawable.edges.forEach((edge, edgeIndex) => {
+					const from = positions[edge.from];
+					const to = positions[edge.to];
+					if (!from || !to) return;
+					const path = document.createElementNS(svgNS, 'path');
+					path.setAttribute('class', 'graph-edge');
+					const dx = to.x - from.x;
+					const midX = from.x + dx * 0.5;
+					const bend = (10 + (edgeIndex % 5) * 6) * ((edgeIndex % 2 === 0) ? 1 : -1);
+					path.setAttribute(
+						'd',
+						'M ' + from.x + ' ' + from.y
+						+ ' C ' + midX + ' ' + (from.y + bend)
+						+ ', ' + midX + ' ' + (to.y - bend)
+						+ ', ' + to.x + ' ' + to.y,
+					);
+					path.setAttribute('marker-end', 'url(#' + markerId + ')');
+					svg.appendChild(path);
+					const edgeEl = { path, from: edge.from, to: edge.to, label: edge.label || 'REL' };
+					rememberEdge(edge.from, edgeEl);
+					rememberEdge(edge.to, edgeEl);
+				});
+
+				const egoCard = el('div', 'graph-ego-card');
+				const egoTitle = el('div', 'graph-ego-title');
+				const egoMeta = el('div', 'graph-ego-meta');
+				const egoList = el('ul', 'graph-ego-list');
+				egoCard.append(egoTitle, egoMeta, egoList);
+
+				const nodeElById = new Map();
+				let focusId = null;
+				let hotNodes = [];
+				let hotEdges = [];
+				let hotCols = [];
+
+				const clearHot = () => {
+					for (const nodeEl of hotNodes) {
+						nodeEl.classList.remove('is-hot', 'focus', 'neighbor');
+					}
+					for (const edgeEl of hotEdges) {
+						edgeEl.path.classList.remove('is-hot');
+					}
+					for (const colLabel of hotCols) {
+						colLabel.classList.remove('is-hot');
+					}
+					hotNodes = [];
+					hotEdges = [];
+					hotCols = [];
+				};
+
+				const clearEgoFocus = () => {
+					if (!focusId) {
+						return;
+					}
+					focusId = null;
+					wrap.classList.remove('graph-ego-active');
+					svg.classList.remove('graph-rel-focus');
+					clearHot();
+					egoList.replaceChildren();
+				};
+
+				const applyEgoFocus = (nodeId) => {
+					if (focusId === nodeId) {
+						return;
+					}
+					const ego = egoIndex.byNode.get(nodeId);
+					if (!ego) {
+						return;
+					}
+					clearHot();
+					focusId = nodeId;
+					svg.classList.add('graph-rel-focus');
+					wrap.classList.add('graph-ego-active');
+
+					for (const id of ego.neighbors) {
+						const nodeEl = nodeElById.get(id);
+						if (!nodeEl) {
+							continue;
+						}
+						nodeEl.classList.add('is-hot', id === nodeId ? 'focus' : 'neighbor');
+						hotNodes.push(nodeEl);
+					}
+					const seenEdges = new Set();
+					for (const edgeEl of edgeElsByEndpoint.get(nodeId) || []) {
+						if (seenEdges.has(edgeEl)) {
+							continue;
+						}
+						seenEdges.add(edgeEl);
+						edgeEl.path.classList.add('is-hot');
+						hotEdges.push(edgeEl);
+					}
+					for (const folder of ego.folders) {
+						const colLabel = colLabelByFolder.get(folder);
+						if (!colLabel) {
+							continue;
+						}
+						colLabel.classList.add('is-hot');
+						hotCols.push(colLabel);
+					}
+
+					egoTitle.textContent = ego.path;
+					const count = ego.incident.length;
+					egoMeta.textContent = count
+						? (count + ' direct relationship' + (count === 1 ? '' : 's'))
+						: 'No direct relationships';
+					// One text write beats N createElement calls on the hot path.
+					egoList.replaceChildren();
+					const frag = document.createDocumentFragment();
+					for (const edge of ego.incident) {
+						const outbound = edge.from === nodeId;
+						const otherId = outbound ? edge.to : edge.from;
+						const other = egoIndex.nodeById.get(otherId);
+						const otherLabel = other
+							? (other.path || other.label || otherId)
+							: otherId;
+						const li = document.createElement('li');
+						const dir = document.createElement('span');
+						dir.className = 'dir';
+						dir.textContent = outbound ? 'out' : 'in';
+						const pred = document.createElement('span');
+						pred.className = 'pred';
+						pred.textContent = edge.label || 'REL';
+						const otherEl = document.createElement('span');
+						otherEl.className = 'other';
+						otherEl.textContent = otherLabel;
+						li.append(dir, pred, otherEl);
+						li.title = otherLabel;
+						frag.appendChild(li);
+					}
+					egoList.appendChild(frag);
+				};
+
+				for (const node of drawable.nodes) {
+					const pos = positions[node.id];
+					if (!pos) continue;
+					const g = document.createElementNS(svgNS, 'g');
+					const linked = linkedIds.has(node.id);
+					g.setAttribute('class', 'graph-node' + (linked ? ' linked' : ' isolate'));
+					g.dataset.nodeId = node.id;
+					const title = truncateLabel(node.label || node.id, 20);
+
+					const rect = document.createElementNS(svgNS, 'rect');
+					rect.setAttribute('class', 'graph-node-shell' + (linked ? ' linked' : ' isolate'));
+					rect.setAttribute('x', String(pos.x - pos.boxW / 2));
+					rect.setAttribute('y', String(pos.y - pos.boxH / 2));
+					rect.setAttribute('rx', '6');
+					rect.setAttribute('ry', '6');
+					rect.setAttribute('width', String(pos.boxW));
+					rect.setAttribute('height', String(pos.boxH));
+					g.appendChild(rect);
+
+					const titleEl = document.createElementNS(svgNS, 'text');
+					titleEl.setAttribute('class', 'graph-node-title');
+					titleEl.setAttribute('x', String(pos.x));
+					titleEl.setAttribute('y', String(pos.y + 4));
+					titleEl.setAttribute('text-anchor', 'middle');
+					titleEl.textContent = title;
+					g.appendChild(titleEl);
+					svg.appendChild(g);
+					nodeElById.set(node.id, g);
+				}
+
+				// Hover only while the pointer is on a linked node — empty SVG / isolates clear focus.
+				const syncEgoFromPointer = event => {
+					const target = event.target;
+					const nodeEl = target instanceof Element
+						? target.closest('.graph-node.linked')
+						: null;
+					if (nodeEl && svg.contains(nodeEl) && nodeEl.dataset.nodeId) {
+						applyEgoFocus(nodeEl.dataset.nodeId);
+						return;
+					}
+					clearEgoFocus();
+				};
+				svg.addEventListener('pointermove', syncEgoFromPointer);
+				svg.addEventListener('pointerover', syncEgoFromPointer);
+				svg.addEventListener('pointerleave', clearEgoFocus);
+				wrap.addEventListener('pointerleave', clearEgoFocus);
+
+				wrap.append(svg, egoCard);
+				enableGraphCanvasZoom(wrap, svg, width, height);
+				return wrap;
+			}
+
 			function progressValue(matched, total, hasCompare) {
 				return hasCompare ? (matched + '/' + total) : String(total);
 			}
@@ -611,9 +1719,18 @@ export class SurfaceProposalTreeView extends Disposable {
 				const claudeMdMessage = options.claudeMdMessage;
 				const graphRegions = options.graphRegions || [];
 				const graphMessage = options.graphMessage;
+				const diffGraph = options.graph;
+				const proposedGraph = buildProposedDrawableGraph(proposal, diffGraph);
+				// Preview graphs mark everything matched — only use diff when a real compare exists.
+				const codeGraph = buildCodeDrawableGraph(
+					graphRegions,
+					proposal,
+					hasCompare ? diffGraph : undefined,
+				);
 				const previewInfo = options.previewInfo;
 				const referenceCandidates = options.referenceCandidates;
 				const proposalMissingMessage = options.proposalMissingMessage;
+				const hideRunWorkstreamsButton = !!options.hideRunWorkstreamsButton;
 				// File watchers republish often — keep the user's place instead of snapping to top.
 				const previousSections = content.querySelector('.sections');
 				const previousScrollTop = previousSections ? previousSections.scrollTop : 0;
@@ -632,12 +1749,21 @@ export class SurfaceProposalTreeView extends Disposable {
 				}
 				sections.push(rulesSection);
 
-				cards.push(metaCard('graph', 'Graph', graphRegions.length ? String(graphRegions.length) : '—'));
+				// Creation-time proposal viz + live Code Graph — same card chrome / SVG style.
+				// Files / Relationships live as tabs inside each graph (not separate rail cards).
+				const proposedNodesEarly = proposal?.add_nodes || [];
+				const proposedEdgesEarly = proposal?.add_edges || [];
+				// Proposed Graph tabs list the full proposal — badge totals match Graph · N·M / footer.
+				// Compare match ratios (matched/total) stay on Workstreams / Real Graph progress.
+				const proposedFilesValueEarly = proposedNodesEarly.length ? String(proposedNodesEarly.length) : '—';
+				const proposedRelsValueEarly = proposedEdgesEarly.length ? String(proposedEdgesEarly.length) : '—';
+				cards.push(metaCard('proposed', 'Proposed Graph', proposedGraph.cardValue || '—'));
+				cards.push(metaCard('graph', 'Real Graph', codeGraph.cardValue || '—'));
 				cards.push(metaCard('preview', 'Preview', previewInfo?.localUrl ? 'URL' : '—'));
 
 				if (referenceCandidates?.repos?.length) {
 					const selectedCount = referenceCandidates.repos.filter(r => r.selected).length;
-					cards.push(metaCard('context', 'Context', selectedCount + '/' + referenceCandidates.repos.length));
+					cards.push(metaCard('context', 'Repo Context', selectedCount + '/' + referenceCandidates.repos.length));
 					const awaiting = referenceCandidates.status === 'awaiting_selection';
 					const contextSection = section('context', 'Research context repos', referenceCandidates.repos.length, true);
 					const body = el('div', 'refs-body');
@@ -710,30 +1836,41 @@ export class SurfaceProposalTreeView extends Disposable {
 					sections.push(planSection);
 				}
 
-				const graphSection = section('graph', 'Generated code graph', graphRegions.length || '—', false);
-				if (graphRegions.length) {
-					const list = el('div', 'graph-regions');
-					for (const region of graphRegions) {
-						const node = el('div', 'graph-region');
-						node.append(el('div', 'graph-region-title', region.name));
-						const meta = [];
-						if (region.fileCount != null) meta.push(region.fileCount + ' files');
-						if (region.entryPath) meta.push(region.entryPath);
-						if (meta.length) node.append(el('div', 'graph-region-meta', meta.join(' · ')));
-						const members = region.memberFiles || [];
-						if (members.length) {
-							const ul = el('ul', 'graph-region-files');
-							for (const file of members.slice(0, 24)) ul.append(el('li', '', file));
-							if (members.length > 24) ul.append(el('li', '', '… +' + (members.length - 24) + ' more'));
-							node.append(ul);
-						}
-						list.append(node);
-					}
-					graphSection.append(list);
-				} else {
-					graphSection.append(el('div', 'empty', graphMessage || 'No generated code graph for this surface yet.'));
-				}
-				sections.push(graphSection);
+				appendGraphSection(
+					sections,
+					'proposed',
+					'Proposed Graph',
+					proposedGraph,
+					proposalMissingMessage
+						|| 'No proposed code graph yet. Claude drafts files + relationships into the proposal during surface creation.',
+					{
+						files: proposedNodesEarly,
+						relationships: proposedEdgesEarly,
+						filesValue: proposedFilesValueEarly,
+						relationshipsValue: proposedRelsValueEarly,
+						architecture: proposal?.architecture,
+					},
+				);
+				const realFileIds = (codeGraph.nodes || []).map(n => n.path || n.id).filter(Boolean);
+				const realEdgeDocs = (codeGraph.edges || []).map(edge => ({
+					from: (codeGraph.nodes || []).find(n => n.id === edge.from)?.path || edge.from,
+					to: (codeGraph.nodes || []).find(n => n.id === edge.to)?.path || edge.to,
+					label: edge.label || 'links',
+				}));
+				appendGraphSection(
+					sections,
+					'graph',
+					'Real Graph',
+					codeGraph,
+					graphMessage
+						|| 'No real graph yet. Matched clone files (or Ix member files) + relationships will appear here — same layout as Proposed Graph.',
+					{
+						files: realFileIds,
+						relationships: realEdgeDocs,
+						filesValue: realFileIds.length ? String(realFileIds.length) : '—',
+						relationshipsValue: realEdgeDocs.length ? String(realEdgeDocs.length) : '—',
+					},
+				);
 
 				const previewSection = section('preview', 'Live app preview', previewInfo?.localUrl ? 'url' : '—', false);
 				const previewBody = el('div', 'preview-body');
@@ -745,29 +1882,50 @@ export class SurfaceProposalTreeView extends Disposable {
 				sections.push(previewSection);
 
 				if (proposal) {
-					if (partition?.workstreams?.length) {
+					const parallelStreams = partition?.workstreams ?? [];
+					const serializeGroups = partition?.serializeGroups ?? [];
+					if (parallelStreams.length || serializeGroups.length) {
 						const wsCardValue = progress
 							? progressValue(progress.workstreamsComplete, progress.workstreamsTotal, hasCompare)
-							: String(partition.workstreams.length);
+							: String(parallelStreams.length);
 						cards.push(metaCard('workstreams', 'Workstreams', wsCardValue));
 						const wsSection = section('workstreams', 'Parallel workstreams', wsCardValue, true);
 						const banner = el('div', 'parallel-banner');
-						const safeCount = partition.workstreams.filter(w => w.parallelSafe).length;
-						banner.textContent = partition.canParallelize
-							? (safeCount + ' disconnected streams can run as parallel agents (structural edges only; REGISTERS/DESCRIBES ignored).')
-							: partition.workstreams.length === 1
-								? 'Single connected cluster — run as one agent stream.'
-								: 'Multiple streams share node_prefixes — serialize shared packages or assign one owner first.';
+						if (partition?.canParallelize) {
+							banner.append(el('div', '', parallelStreams.length + ' subsystems can run as parallel Claude instances.'));
+							banner.append(el('div', 'parallel-banner-note', hideRunWorkstreamsButton
+								? 'Steps Next on the current generate phase spawns these automatically. Structural clusters only; soft links ignored.'
+								: 'Structural clusters only; soft links (REGISTERS/DESCRIBES) ignored. Coupled clusters serialize first.'));
+						} else if (parallelStreams.length === 1 && !serializeGroups.length) {
+							banner.append(el('div', '', 'Single subsystem — run as one agent stream.'));
+						} else if (!parallelStreams.length && serializeGroups.length) {
+							banner.append(el('div', '', 'No parallel subsystems yet — shared prefixes couple these clusters. Serialize first or assign one owner.'));
+						} else {
+							banner.append(el('div', '', 'Only one parallel subsystem; remaining clusters share prefixes and must serialize.'));
+						}
+						if (!hideRunWorkstreamsButton) {
+							const actions = el('div', 'parallel-banner-actions');
+							const runBtn = el('button', 'parallel-run-btn', 'Run parallel workstreams');
+							runBtn.type = 'button';
+							runBtn.disabled = !partition?.canParallelize;
+							runBtn.title = partition?.canParallelize
+								? 'Spawn one Claude Code session per parallel-safe workstream'
+								: 'Need ≥2 parallel-safe workstreams (no shared node_prefixes)';
+							runBtn.addEventListener('click', () => {
+								vscode.postMessage({ type: 'surfaceProposalTree.runWorkstreams' });
+							});
+							actions.append(runBtn);
+							banner.append(actions);
+						}
 						wsSection.append(banner);
-						const list = el('div', 'workstreams');
-						for (const stream of partition.workstreams) {
+
+						const renderStreamCard = (stream, opts) => {
 							const card = el('div', 'workstream');
 							const header = el('div', 'workstream-header');
 							header.append(
 								el('span', 'workstream-id', stream.id),
 								el('span', 'workstream-label', stream.label),
-								el('span', 'badge ' + (stream.parallelSafe ? 'badge-parallel' : 'badge-coupled'),
-									stream.parallelSafe ? 'parallel-safe' : 'coupled')
+								el('span', 'badge ' + (opts.badgeClass || 'badge-parallel'), opts.badgeLabel || 'parallel')
 							);
 							card.append(header);
 							const streamProgress = workstreamProgressById.get(stream.id);
@@ -776,36 +1934,49 @@ export class SurfaceProposalTreeView extends Disposable {
 								: (stream.nodes.length + ' files');
 							card.append(el('div', 'workstream-meta',
 								filesLabel + ' · ' + stream.edges.length + ' structural edges'));
+							const files = el('details', 'workstream-files');
+							files.append(el('summary', '', 'Show ' + stream.nodes.length + ' files'));
 							const nodeList = el('ul', 'workstream-nodes');
 							for (const node of stream.nodes) {
 								nodeList.append(el('li', '', clean(node)));
 							}
-							card.append(nodeList);
+							files.append(nodeList);
+							card.append(files);
 							if (stream.sharedPrefixes?.length) {
 								card.append(el('p', 'workstream-note',
 									'Shared prefixes: ' + stream.sharedPrefixes.join(', ')));
 							}
-							list.append(card);
-						}
-						wsSection.append(list);
-						sections.push(wsSection);
-					}
+							return card;
+						};
 
-					const architecture = proposal.architecture;
-					if (architecture && (architecture.summary || architecture.tree)) {
-						cards.push(metaCard('architecture', 'Architecture', architecture.tree ? 'tree' : 'notes'));
-						const archSection = section('architecture', 'Architecture', architecture.tree ? 'tree' : 'notes');
-						const archBody = el('div', 'architecture');
-						if (architecture.summary) {
-							archBody.append(el('p', 'architecture-summary', architecture.summary));
+						if (parallelStreams.length) {
+							const list = el('div', 'workstreams');
+							for (const stream of parallelStreams) {
+								list.append(renderStreamCard(stream, {
+									badgeClass: 'badge-parallel',
+									badgeLabel: 'parallel',
+								}));
+							}
+							wsSection.append(list);
 						}
-						if (architecture.tree) {
-							const pre = el('pre', 'architecture-tree');
-							pre.textContent = normalizeArchitectureTree(architecture.tree);
-							archBody.append(pre);
+
+						if (serializeGroups.length) {
+							const serializeBlock = el('details', 'serialize-block');
+							serializeBlock.append(el('summary', '',
+								'Serialize first · ' + serializeGroups.length + ' coupled cluster'
+								+ (serializeGroups.length === 1 ? '' : 's')));
+							const serializeList = el('div', 'workstreams');
+							for (const stream of serializeGroups) {
+								serializeList.append(renderStreamCard(stream, {
+									badgeClass: 'badge-coupled',
+									badgeLabel: 'serialize',
+								}));
+							}
+							serializeBlock.append(serializeList);
+							wsSection.append(serializeBlock);
 						}
-						archSection.append(archBody);
-						sections.push(archSection);
+
+						sections.push(wsSection);
 					}
 
 					const phases = proposal.phases || [];
@@ -823,53 +1994,6 @@ export class SurfaceProposalTreeView extends Disposable {
 							phasesSection.append(phaseEl);
 						}
 						sections.push(phasesSection);
-					}
-
-					const nodes = proposal.add_nodes || [];
-					if (nodes.length) {
-						const filesValue = progress
-							? progressValue(progress.filesMatched, progress.filesTotal, hasCompare)
-							: String(nodes.length);
-						cards.push(metaCard('files', 'Files', filesValue));
-						const filesSection = section('files', 'Files to add', filesValue);
-						const tree = el('div', 'tree');
-						const rootList = el('ul');
-						const folderRoot = makeFolderTree(nodes);
-						for (const [name, folder] of [...folderRoot.folders].sort(([a], [b]) => a.localeCompare(b))) {
-							rootList.append(renderFolder(folder, name));
-						}
-						for (const file of [...folderRoot.files].sort()) {
-							const li = el('li');
-							li.append(el('div', 'file-row file-name', file));
-							rootList.append(li);
-						}
-						tree.append(rootList);
-						filesSection.append(tree);
-						sections.push(filesSection);
-					}
-
-					const edges = proposal.add_edges || [];
-					if (edges.length) {
-						const relationshipsValue = progress
-							? progressValue(progress.relationshipsMatched, progress.relationshipsTotal, hasCompare)
-							: String(edges.length);
-						cards.push(metaCard('relationships', 'Relationships', relationshipsValue));
-						const edgesSection = section('relationships', 'Relationships', relationshipsValue);
-						const edgeList = el('div', 'edges');
-						for (const edge of edges) {
-							const row = el('div', 'edge');
-							const from = clean(edge.src || edge.from);
-							const to = clean(edge.dst || edge.to);
-							const relation = edge.predicate || edge.type || 'links';
-							const fromEl = el('span', 'endpoint', from);
-							const toEl = el('span', 'endpoint', to);
-							fromEl.title = from;
-							toEl.title = to;
-							row.append(fromEl, el('span', 'relation', relation), toEl);
-							edgeList.append(row);
-						}
-						edgesSection.append(edgeList);
-						sections.push(edgesSection);
 					}
 
 					const removals = (proposal.remove_nodes?.length || 0) + (proposal.remove_edges?.length || 0);

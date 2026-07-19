@@ -22,7 +22,7 @@ suite('partitionProposalWorkstreams', () => {
 		assert.strictEqual(commonPathPrefix(['file:a.py']), 'a.py');
 	});
 
-	test('splits disconnected clusters and keeps CONFIGURES together', () => {
+	test('splits disconnected clusters into parallel workstreams', () => {
 		const proposal: GraphProposalDocument = {
 			add_nodes: [
 				'file:apps/bot/app/page.tsx',
@@ -37,6 +37,7 @@ suite('partitionProposalWorkstreams', () => {
 		};
 		const part = partitionProposalWorkstreams(proposal);
 		assert.strictEqual(part.workstreams.length, 2);
+		assert.strictEqual(part.serializeGroups.length, 0);
 		assert.strictEqual(part.canParallelize, true);
 		assert.ok(part.workstreams.every(w => w.parallelSafe));
 		assert.deepStrictEqual(
@@ -59,11 +60,12 @@ suite('partitionProposalWorkstreams', () => {
 		};
 		const part = partitionProposalWorkstreams(proposal);
 		assert.strictEqual(part.workstreams.length, 3);
+		assert.strictEqual(part.serializeGroups.length, 0);
 		assert.strictEqual(part.softEdgeCount, 2);
 		assert.strictEqual(part.structuralEdgeCount, 0);
 	});
 
-	test('marks streams that share node_prefixes as not parallel-safe together', () => {
+	test('shared node_prefixes land in serializeGroups, not workstreams', () => {
 		const proposal: GraphProposalDocument = {
 			add_nodes: [
 				'file:apps/a/page.tsx',
@@ -78,19 +80,21 @@ suite('partitionProposalWorkstreams', () => {
 			node_prefixes: ['packages/domain'],
 		};
 		const part = partitionProposalWorkstreams(proposal);
-		assert.strictEqual(part.workstreams.length, 2);
-		assert.ok(part.workstreams.every(w => !w.parallelSafe));
-		assert.ok(part.workstreams.every(w => w.sharedPrefixes.includes('packages/domain')));
+		assert.strictEqual(part.workstreams.length, 0);
+		assert.strictEqual(part.serializeGroups.length, 2);
+		assert.ok(part.serializeGroups.every(w => !w.parallelSafe));
+		assert.ok(part.serializeGroups.every(w => w.sharedPrefixes.includes('packages/domain')));
 		assert.strictEqual(part.canParallelize, false);
 	});
 
-	test('nodes with no edges become singleton workstreams', () => {
+	test('nodes with no edges become singleton parallel workstreams', () => {
 		const proposal: GraphProposalDocument = {
 			add_nodes: ['file:a.py', 'file:b.py', 'file:c.py'],
 			add_edges: [],
 		};
 		const part = partitionProposalWorkstreams(proposal);
 		assert.strictEqual(part.workstreams.length, 3);
+		assert.strictEqual(part.serializeGroups.length, 0);
 		assert.strictEqual(part.canParallelize, true);
 	});
 });

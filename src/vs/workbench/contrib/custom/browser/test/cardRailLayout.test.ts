@@ -105,6 +105,33 @@ suite('cardRailLayout', () => {
 		layout.dispose();
 	});
 
+	test('progressPercent renders a compact bar and percent label', () => {
+		const layout = createCardRailLayout({
+			activeId: 'surface:a',
+			cards: [
+				{ id: 'surface:a', key: 'Cadre Admin', value: '', progressPercent: 42 },
+				{ id: 'surface:b', key: 'Cadre Bot', value: '', progressPercent: 100 },
+			],
+			onSelect: () => { },
+		});
+		const mid = layout.rail.querySelector('button[data-card-id="surface:a"]') as HTMLElement;
+		const done = layout.rail.querySelector('button[data-card-id="surface:b"]') as HTMLElement;
+		const midBar = mid.querySelector('.custom-mode-card-rail-card-progress-bar') as HTMLElement;
+		const doneBar = done.querySelector('.custom-mode-card-rail-card-progress-bar') as HTMLElement;
+		assert.ok(mid.querySelector('.custom-mode-card-rail-card-progress'));
+		assert.strictEqual(mid.querySelector('.custom-mode-card-rail-card-progress-pct')?.textContent, '42%');
+		assert.strictEqual(midBar.style.width, '42%');
+		assert.ok(!midBar.classList.contains('is-complete'));
+		assert.strictEqual(done.querySelector('.custom-mode-card-rail-card-progress-pct')?.textContent, '100%');
+		assert.strictEqual(doneBar.style.width, '100%');
+		assert.ok(doneBar.classList.contains('is-complete'));
+		assert.ok(!cardRailItemsEqual(
+			[{ id: 'surface:a', key: 'Cadre Admin', value: '', progressPercent: 42 }],
+			[{ id: 'surface:a', key: 'Cadre Admin', value: '', progressPercent: 43 }],
+		));
+		layout.dispose();
+	});
+
 	test('groupLabel renders a section title above the group', () => {
 		const layout = createCardRailLayout({
 			activeId: 'describe',

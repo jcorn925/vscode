@@ -950,26 +950,55 @@ function parseIxDiscoveredSubsystems(raw: unknown): readonly IxDiscoveredSubsyst
 }
 
 function parseIxSurfaceOverlays(raw: unknown): readonly IxSurfaceOverlay[] {
-	if (!Array.isArray(raw)) {
+	if (Array.isArray(raw)) {
+		const result: IxSurfaceOverlay[] = [];
+		for (const item of raw) {
+			const overlay = parseIxSurfaceOverlayEntry(item);
+			if (overlay) {
+				result.push(overlay);
+			}
+		}
+		return result;
+	}
+	// Scaffold historically wrote surfaces as { [surfaceId]: { ixSubsystems, … } }.
+	if (!isRecord(raw)) {
 		return [];
 	}
 	const result: IxSurfaceOverlay[] = [];
-	for (const item of raw) {
-		if (!isRecord(item)) {
+	for (const [surfaceIdKey, item] of Object.entries(raw)) {
+		const surfaceId = optionalStringValue(surfaceIdKey);
+		if (!surfaceId || !isRecord(item)) {
 			continue;
 		}
-		const surfaceId = optionalStringValue(item.surfaceId);
-		if (!surfaceId) {
-			continue;
-		}
-		result.push({
-			surfaceId,
-			subsystemIds: stringArrayValue(item.subsystemIds),
-			subsystemLabels: stringArrayValue(item.subsystemLabels),
-			matchReason: optionalStringValue(item.matchReason)
+		const overlay = parseIxSurfaceOverlayEntry({
+			...item,
+			surfaceId: optionalStringValue(item.surfaceId) ?? surfaceId,
 		});
+		if (overlay) {
+			result.push(overlay);
+		}
 	}
 	return result;
+}
+
+function parseIxSurfaceOverlayEntry(raw: unknown): IxSurfaceOverlay | undefined {
+	if (!isRecord(raw)) {
+		return undefined;
+	}
+	const surfaceId = optionalStringValue(raw.surfaceId);
+	if (!surfaceId) {
+		return undefined;
+	}
+	const subsystemLabels = uniqueStrings([
+		...stringArrayValue(raw.subsystemLabels),
+		...stringArrayValue(raw.ixSubsystems),
+	]);
+	return {
+		surfaceId,
+		subsystemIds: stringArrayValue(raw.subsystemIds),
+		subsystemLabels,
+		matchReason: optionalStringValue(raw.matchReason),
+	};
 }
 
 async function readAgentContextFile(fileService: IFileService, root: URI, relativePath: string, id: string, kind: WorkspaceContextFileKind): Promise<WorkspaceContextFile | undefined> {
