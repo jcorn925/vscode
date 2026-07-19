@@ -1,0 +1,18 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Result
+{
+  "claudeStatus": "",
+  "toast": [
+    "Sent next step to Claude: Phase 1 — Scaffold + shell"
+  ],
+  "bodyHasPhase": true
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => ((() => {\n  const status = document.querySelector(".custom-mode-ui-claude-terminal-status")?.textContent || "";\n  const kick = document.querySelector("[aria-label=\\"Claude kickoff status\\"]")?.textContent || status;\n  return {\n    claudeStatus: (kick || status).slice(0,300),\n    toast: Array.from(document.querySelectorAll(".notification-toast-container .notification-list-item-message, .monaco-dialog-box")).map(el => el.textContent?.slice(0,160)).slice(0,3),\n    bodyHasPhase: /Phase 1|Scaffold/i.test(document.body.innerText),\n  };\n})())');
+```

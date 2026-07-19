@@ -1,0 +1,19 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Result
+{
+  "hasTracker": false,
+  "hasPhaseCta": true,
+  "phaseCta": "Phase 1 — Scaffold + shell",
+  "hasContinueNext": false,
+  "hasRunAll": false,
+  "hasStartApp": false
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => ((() => {\n  const text = document.body.innerText;\n  const phaseBtn = Array.from(document.querySelectorAll("button")).find(b => /Phase 1|Run next phase|Lock & build|Confirm repos/i.test(b.textContent||""));\n  return {\n    hasTracker: /Plan workflow steps|Phase 1/i.test(text),\n    hasPhaseCta: !!phaseBtn,\n    phaseCta: phaseBtn?.textContent?.trim(),\n    hasContinueNext: /Continue Next/i.test(text),\n    hasRunAll: /Run All/i.test(text),\n    hasStartApp: /Start App/i.test(text),\n  };\n})())');
+```

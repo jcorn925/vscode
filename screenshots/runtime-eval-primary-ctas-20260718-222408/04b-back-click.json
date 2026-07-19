@@ -1,0 +1,15 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Result
+{
+  "ok": true,
+  "text": "Console"
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => ((() => {\n  const btn = document.querySelector("button.custom-mode-ui-project-name:not(.custom-mode-ui-code-tab)");\n  if (!btn) return { ok:false };\n  btn.click();\n  return { ok:true, text: btn.textContent };\n})())');
+```

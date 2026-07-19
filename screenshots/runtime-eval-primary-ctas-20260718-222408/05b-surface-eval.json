@@ -1,0 +1,23 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Result
+{
+  "modeCode": false,
+  "hasTracker": true,
+  "interesting": [
+    "Start App",
+    "Phase 1 — Scaffold + shell"
+  ],
+  "hasContinueNext": false,
+  "hasRunAll": false,
+  "hasStartApp": true,
+  "hasPhaseCta": true
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => ((() => {\n  const text = document.body.innerText;\n  const buttons = Array.from(document.querySelectorAll("button")).map(b => (b.textContent||"").trim()).filter(Boolean);\n  const interesting = buttons.filter(t => /Phase|Lock|Confirm|Continue|Run All|Start App|Retry|Skip|Pause|Resume/i.test(t));\n  return {\n    modeCode: !!document.querySelector(".monaco-workbench.custom-mode-code"),\n    hasTracker: !!document.querySelector("[aria-label=\\"Plan workflow steps\\"], [aria-label=\\"Plan status tracker\\"]"),\n    interesting,\n    hasContinueNext: interesting.some(t => /Continue Next/i.test(t)),\n    hasRunAll: interesting.some(t => /Run All/i.test(t)),\n    hasStartApp: interesting.some(t => /Start App/i.test(t)),\n    hasPhaseCta: interesting.some(t => /Phase 1|Run next phase/i.test(t)),\n  };\n})())');
+```

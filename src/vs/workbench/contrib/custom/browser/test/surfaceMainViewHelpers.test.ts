@@ -24,38 +24,22 @@ suite('surfaceMainViewHelpers', () => {
 		}), true);
 	});
 
-	test('resolveDefaultSurfaceMainView prefers Plan for active work', () => {
-		const activeTree = createTree('active');
-		assert.strictEqual(resolveDefaultSurfaceMainView(activeTree, true), 'plan');
-		assert.strictEqual(resolveDefaultSurfaceMainView(activeTree, false), 'plan');
-	});
-
-	test('resolveDefaultSurfaceMainView opens preview when complete and reachable', () => {
-		const completeTree = createTree('complete');
-		assert.strictEqual(resolveDefaultSurfaceMainView(completeTree, true), 'preview');
-		assert.strictEqual(resolveDefaultSurfaceMainView(completeTree, false), 'plan');
-	});
-
-	test('SurfaceMainView accepts the Ix subsystems tab without making it a default', () => {
-		const ixView: SurfaceMainView = 'ixSubsystems';
-		assert.strictEqual(ixView, 'ixSubsystems');
-		assert.notStrictEqual(resolveDefaultSurfaceMainView(createTree('active'), true), ixView);
-	});
-
-	test('resolveDefaultSurfaceMainView prefers Plan when only a plan exists', () => {
+	test('resolveDefaultSurfaceMainView always returns plan', () => {
+		assert.strictEqual(resolveDefaultSurfaceMainView(createTree('active'), true), 'plan');
+		assert.strictEqual(resolveDefaultSurfaceMainView(createTree('complete'), true), 'plan');
 		assert.strictEqual(resolveDefaultSurfaceMainView(undefined, false, true), 'plan');
-		const planView: SurfaceMainView = 'plan';
-		assert.strictEqual(planView, 'plan');
 	});
 
-	test('normalizeSurfaceMainView maps legacy taskTree to plan', () => {
+	test('normalizeSurfaceMainView maps all legacy views to plan', () => {
 		assert.strictEqual(normalizeSurfaceMainView('taskTree'), 'plan');
+		assert.strictEqual(normalizeSurfaceMainView('claudeMd'), 'plan');
+		assert.strictEqual(normalizeSurfaceMainView('preview'), 'plan');
+		assert.strictEqual(normalizeSurfaceMainView('ixSubsystems'), 'plan');
 		assert.strictEqual(normalizeSurfaceMainView('plan'), 'plan');
-		assert.strictEqual(normalizeSurfaceMainView('preview'), 'preview');
 		assert.strictEqual(normalizeSurfaceMainView('nope'), undefined);
 	});
 
-	test('SurfaceMainView accepts the CLAUDE.md tab', () => {
+	test('SurfaceMainView type still accepts legacy names', () => {
 		const claudeView: SurfaceMainView = 'claudeMd';
 		assert.strictEqual(claudeView, 'claudeMd');
 	});

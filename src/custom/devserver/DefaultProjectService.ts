@@ -21,6 +21,11 @@ import { ITerminalService } from '../../vs/workbench/contrib/terminal/browser/te
 import { IHostService } from '../../vs/workbench/services/host/browser/host.js';
 import { IWorkbenchEnvironmentService } from '../../vs/workbench/services/environment/common/environmentService.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../vs/platform/workspace/common/workspace.js';
+import {
+	DEFAULT_FALLBACK_GOAL_WORKSPACE_MANIFEST,
+	DEFAULT_WORKSPACE_PLAN_MARKDOWN,
+	DEFAULT_WORKSPACE_SUGGESTED_SURFACES_JSON,
+} from '../goalWorkspace/defaultWorkspacePlan.js';
 
 export interface IDefaultProjectService {
 	readonly _serviceBrand: undefined;
@@ -35,23 +40,6 @@ export const IDefaultProjectService = createDecorator<IDefaultProjectService>('d
 
 const STORAGE_FAILED_REPO_URL = 'custom.defaultProject/failedRepoUrl';
 const FALLBACK_GOAL_WORKSPACE_FOLDER = 'Console';
-const FALLBACK_GOAL_WORKSPACE_MANIFEST = `{
-\t"goal": {
-\t\t"id": "personal-training-business",
-\t\t"name": "Online Personal Training Business",
-\t\t"description": "Acquire clients and run coaching operations across workspace surfaces.",
-\t\t"northStarMetric": "active_paid_clients"
-\t},
-\t"surfaces": [],
-\t"shared": {
-\t\t"domain": "packages/domain",
-\t\t"events": "packages/events",
-\t\t"ui": "packages/ui",
-\t\t"auth": "packages/auth",
-\t\t"workflows": "workflows"
-\t}
-}
-`;
 
 export class DefaultProjectService extends Disposable implements IDefaultProjectService {
 	readonly _serviceBrand: undefined;
@@ -146,7 +134,18 @@ export class DefaultProjectService extends Disposable implements IDefaultProject
 		await this.fileService.createFolder(folderUri);
 		const manifestUri = joinPath(folderUri, 'workspace.goal.json');
 		if (!(await this.fileService.exists(manifestUri))) {
-			await this.fileService.writeFile(manifestUri, VSBuffer.fromString(FALLBACK_GOAL_WORKSPACE_MANIFEST));
+			await this.fileService.writeFile(manifestUri, VSBuffer.fromString(DEFAULT_FALLBACK_GOAL_WORKSPACE_MANIFEST));
+		}
+		// Seed the hardcoded Cadre workspace plan so Console starts past kickoff.
+		const agentDir = joinPath(folderUri, '.agent');
+		await this.fileService.createFolder(agentDir);
+		const planUri = joinPath(agentDir, 'workspace.plan.md');
+		if (!(await this.fileService.exists(planUri))) {
+			await this.fileService.writeFile(planUri, VSBuffer.fromString(DEFAULT_WORKSPACE_PLAN_MARKDOWN));
+		}
+		const suggestedUri = joinPath(agentDir, 'workspace.surfaces.suggested.json');
+		if (!(await this.fileService.exists(suggestedUri))) {
+			await this.fileService.writeFile(suggestedUri, VSBuffer.fromString(DEFAULT_WORKSPACE_SUGGESTED_SURFACES_JSON));
 		}
 	}
 

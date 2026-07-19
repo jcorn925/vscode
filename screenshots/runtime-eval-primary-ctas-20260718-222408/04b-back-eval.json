@@ -1,0 +1,16 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Result
+{
+  "modeCode": false,
+  "topCollapsed": true,
+  "hasPlanOrRail": true
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => ((() => ({\n  modeCode: !!document.querySelector(".monaco-workbench.custom-mode-code"),\n  topCollapsed: !!document.querySelector(".monaco-workbench.custom-mode-top-collapsed"),\n  hasPlanOrRail: /Start workspace planning|Business name|Cadre Bot/i.test(document.body.innerText),\n}))())');
+```

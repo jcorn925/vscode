@@ -1,0 +1,22 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Result
+{
+  "clicked": true,
+  "name": "Cadre AI Support Chatbot",
+  "count": 3
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => ((() => {\n  const card = document.querySelector("button.custom-mode-ui-workspace-suggested-card");\n  if (!card) return { clicked:false, count: document.querySelectorAll("button.custom-mode-ui-workspace-suggested-card").length };\n  const name = card.querySelector(".custom-mode-ui-workspace-suggested-card-name")?.textContent;\n  card.click();\n  return { clicked:true, name, count: document.querySelectorAll("button.custom-mode-ui-workspace-suggested-card").length };\n})())');
+```
+### Page
+- Page URL: vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench-dev.html
+- Page Title: console-ws
+- Console: 61 errors, 124 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-07-19T05-24-08-892Z.log#L9711

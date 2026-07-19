@@ -1,0 +1,15 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Result
+{
+  "hasTracker": true,
+  "titleish": "CODE Editor PLAN workspace.plan RULES CLAUDE.md BRAND logo · colors NEW SURFACE DESCRIBE New app IMPORT Repo SURFACES SURFACE Cadre Bot SURFACE Cadre AI Support Chatbot RULES CLAUDE.md PLAN plan.md GRAPH — PREVIEW — DONE Confirm surface DONE Describe what to build CURRENT Claude surveying reference "
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => ((() => ({\n  hasTracker: !!document.querySelector("[aria-label=\\"Plan workflow steps\\"]"),\n  titleish: document.body.innerText.replace(/\\s+/g," ").slice(0,300),\n}))())');
+```

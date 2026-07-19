@@ -13,6 +13,8 @@ export interface SurfaceReferenceRepo {
 	readonly repo: string;
 	readonly url: string;
 	readonly description?: string;
+	/** Why this repo was chosen vs plan.md Research / surface intent. */
+	readonly reason?: string;
 	readonly stars?: number;
 	readonly suggested: boolean;
 	readonly selected: boolean;
@@ -81,6 +83,7 @@ export function serializeSurfaceReferenceCandidates(doc: SurfaceReferenceCandida
 			repo: repo.repo,
 			url: repo.url,
 			description: repo.description,
+			reason: repo.reason,
 			stars: repo.stars,
 			suggested: repo.suggested,
 			selected: repo.selected,
@@ -120,6 +123,68 @@ export function selectedReferenceRepos(doc: SurfaceReferenceCandidates): readonl
 	return doc.repos.filter(repo => repo.selected);
 }
 
+/**
+ * Prefer structured `reason`, then `description`, then a matching Research-section
+ * line from plan.md that mentions this repo.
+ */
+export function resolveReferenceRepoReason(
+	repo: Pick<SurfaceReferenceRepo, 'owner' | 'repo' | 'reason' | 'description'>,
+	planMarkdown?: string,
+): string | undefined {
+	const structured = repo.reason?.trim() || repo.description?.trim();
+	if (structured) {
+		return structured;
+	}
+	return extractPlanResearchNoteForRepo(planMarkdown, repo.owner, repo.repo);
+}
+
+/** Pull a Research-section bullet/line that cites this GitHub repo. */
+export function extractPlanResearchNoteForRepo(
+	planMarkdown: string | undefined,
+	owner: string,
+	repo: string,
+): string | undefined {
+	if (!planMarkdown?.trim()) {
+		return undefined;
+	}
+	const label = `${owner}/${repo}`.toLowerCase();
+	const repoOnly = repo.toLowerCase();
+	const researchBody = extractPlanSectionBody(planMarkdown, /research/i);
+	const haystack = researchBody || planMarkdown;
+	const lines = haystack.split(/\r?\n/);
+	for (const raw of lines) {
+		const line = raw.replace(/^\s*[-*]\s+/, '').replace(/^\s*\d+\.\s+/, '').trim();
+		if (!line) {
+			continue;
+		}
+		const lower = line.toLowerCase();
+		if (lower.includes(label) || (lower.includes('github.com/') && lower.includes(repoOnly))) {
+			return line;
+		}
+	}
+	return undefined;
+}
+
+function extractPlanSectionBody(markdown: string, headingMatch: RegExp): string | undefined {
+	const lines = markdown.split(/\r?\n/);
+	let capturing = false;
+	const body: string[] = [];
+	for (const line of lines) {
+		const heading = /^(#{1,3})\s+(.+?)\s*$/.exec(line);
+		if (heading) {
+			if (capturing) {
+				break;
+			}
+			capturing = headingMatch.test(heading[2]!);
+			continue;
+		}
+		if (capturing) {
+			body.push(line);
+		}
+	}
+	return body.length ? body.join('\n') : undefined;
+}
+
 function normalizeStatus(value: unknown): SurfaceReferenceCandidatesStatus | undefined {
 	return value === 'awaiting_selection' || value === 'confirmed' || value === 'done'
 		? value
@@ -141,11 +206,17 @@ function normalizeRepo(value: unknown): SurfaceReferenceRepo | undefined {
 		: `https://github.com/${owner}/${repo}`;
 	const suggested = record.suggested === true;
 	const selected = typeof record.selected === 'boolean' ? record.selected : suggested;
+	const reason = typeof record.reason === 'string' && record.reason.trim()
+		? record.reason.trim()
+		: (typeof record.relevance === 'string' && record.relevance.trim()
+			? record.relevance.trim()
+			: (typeof record.why === 'string' && record.why.trim() ? record.why.trim() : undefined));
 	return {
 		owner,
 		repo,
 		url,
 		description: typeof record.description === 'string' ? record.description : undefined,
+		reason,
 		stars: typeof record.stars === 'number' && Number.isFinite(record.stars) ? record.stars : undefined,
 		suggested,
 		selected,

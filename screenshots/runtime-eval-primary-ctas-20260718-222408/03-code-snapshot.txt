@@ -1,0 +1,167 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Page
+- Page URL: vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench-dev.html
+- Page Title: console-ws
+- Console: 61 errors, 124 warnings
+### Snapshot
+```yaml
+- application [ref=e2]:
+  - text:                                                                 Describe what to build           
+  - iframe [ref=e4]:
+    - document [active] [ref=f3e1]:
+      - iframe [ref=f3e2]
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e14]:
+          - tablist "Workspace home views" [ref=e15]:
+            - tab "Code Editor" [ref=e331] [cursor=pointer]:
+              - generic [ref=e332]: Code
+              - generic [ref=e333]: Editor
+            - tab "Plan workspace.plan" [selected] [ref=e334] [cursor=pointer]:
+              - generic [ref=e335]: Plan
+              - generic [ref=e336]: workspace.plan
+            - tab "Rules CLAUDE.md" [ref=e337] [cursor=pointer]:
+              - generic [ref=e338]: Rules
+              - generic [ref=e339]: CLAUDE.md
+            - tab "Brand logo · colors" [ref=e340] [cursor=pointer]:
+              - generic [ref=e341]: Brand
+              - generic [ref=e342]: logo · colors
+            - generic: New Surface
+            - tab "Describe New app" [ref=e343] [cursor=pointer]:
+              - generic [ref=e344]: Describe
+              - generic [ref=e345]: New app
+            - tab "Import Repo" [ref=e346] [cursor=pointer]:
+              - generic [ref=e347]: Import
+              - generic [ref=e348]: Repo
+            - generic: Surfaces
+            - tab "Surface Cadre Bot" [ref=e349] [cursor=pointer]:
+              - generic [ref=e350]: Surface
+              - generic [ref=e351]: Cadre Bot
+            - tab "Surface Cadre AI Support Chatbot" [ref=e352] [cursor=pointer]:
+              - generic [ref=e353]: Surface
+              - generic [ref=e354]: Cadre AI Support Chatbot
+          - generic [ref=e52]:
+            - generic [ref=e355]:
+              - generic [ref=e356] [cursor=pointer]:
+                - generic [ref=e357]: Business name
+                - textbox "Business name" [ref=e358]:
+                  - /placeholder: e.g. Summit Coaching Co.
+                  - text: jason's personal business
+              - generic [ref=e359]:
+                - generic [ref=e360]: Drop a planning PDF or brief. Claude will propose separate surfaces with details — Create Surface below stays available for one-off apps.
+                - textbox "Workspace planning intent" [ref=e361]:
+                  - /placeholder: "Optional: what should this workspace become? Or just drop a planning PDF…"
+                - generic [ref=e363]:
+                  - button " PDF / file" [ref=e364] [cursor=pointer]:
+                    - generic [ref=e365]: 
+                    - text: PDF / file
+                  - button "Start workspace planning" [ref=e366] [cursor=pointer]
+                - list "Workspace planning progress" [ref=e368]:
+                  - listitem "Kick off workspace planning" [ref=e369]:
+                    - generic [ref=e370]: Done
+                    - generic [ref=e371]: Kick off workspace planning
+                  - listitem "Claude drafting workspace plan" [ref=e372]:
+                    - generic [ref=e373]: Done
+                    - generic [ref=e374]: Claude drafting workspace plan
+                  - listitem "Claude proposing surfaces" [ref=e375]:
+                    - generic [ref=e376]: Done
+                    - generic [ref=e377]: Claude proposing surfaces
+                  - listitem "Review suggested surfaces" [ref=e378]:
+                    - generic [ref=e379]: Current
+                    - generic [ref=e380]: Review suggested surfaces
+                - generic [ref=e381]: Workspace plan ready — review suggested surfaces below.
+              - generic [ref=e382]:
+                - generic [ref=e383]:
+                  - generic [ref=e384]: Suggested surfaces
+                  - button "Create selected surfaces" [ref=e385] [cursor=pointer]
+                - generic [ref=e386]:
+                  - 'button "Cadre AI Support Chatbot Suggested Deployed customer support chatbot that answers common Cadre AI inquiries from a curated knowledge base, points users to booking and the client portal, and escalates questions it can''t answer. Grounded chat over curated Cadre AI knowledge base (services, industries, pricing/getting started, AI Maturity Index, LLM selection & data security) Booking flow: direct users to schedule a call with an AI strategist Client portal access guidance and redirect Out-of-scope detection with escalation/redirect to a human Streaming chat UI with conversation history Public deployment with server-side LLM API key handling Lightweight scenario checks covering the brief''s six sample interactions user:Prospective Cadre AI clients" [pressed] [ref=e387] [cursor=pointer]':
+                    - generic [ref=e388]:
+                      - generic [ref=e389]: Cadre AI Support Chatbot
+                      - generic [ref=e390]: Suggested
+                    - generic [ref=e391]: Deployed customer support chatbot that answers common Cadre AI inquiries from a curated knowledge base, points users to booking and the client portal, and escalates questions it can't answer.
+                    - generic [ref=e392]:
+                      - generic [ref=e393]: Grounded chat over curated Cadre AI knowledge base (services, industries, pricing/getting started, AI Maturity Index, LLM selection & data security)
+                      - generic [ref=e394]: "Booking flow: direct users to schedule a call with an AI strategist"
+                      - generic [ref=e395]: Client portal access guidance and redirect
+                      - generic [ref=e396]: Out-of-scope detection with escalation/redirect to a human
+                      - generic [ref=e397]: Streaming chat UI with conversation history
+                      - generic [ref=e398]: Public deployment with server-side LLM API key handling
+                      - generic [ref=e399]: Lightweight scenario checks covering the brief's six sample interactions
+                      - generic [ref=e400]: user:Prospective Cadre AI clients
+                  - 'button "Cadre Inbound Admin Console Internal dashboard for the inbound team: review conversation logs, work the escalation queue, and edit the bot''s knowledge base. Conversation transcript browsing and search Escalation queue with status tracking Knowledge-base content editing and publishing Basic deflection/volume analytics user:Cadre inbound team user:Cadre engagement leads" [ref=e401] [cursor=pointer]':
+                    - generic [ref=e403]: Cadre Inbound Admin Console
+                    - generic [ref=e404]: "Internal dashboard for the inbound team: review conversation logs, work the escalation queue, and edit the bot's knowledge base."
+                    - generic [ref=e405]:
+                      - generic [ref=e406]: Conversation transcript browsing and search
+                      - generic [ref=e407]: Escalation queue with status tracking
+                      - generic [ref=e408]: Knowledge-base content editing and publishing
+                      - generic [ref=e409]: Basic deflection/volume analytics
+                      - generic [ref=e410]: user:Cadre inbound team
+                      - generic [ref=e411]: user:Cadre engagement leads
+                  - button "Chatbot Evaluation Harness Standalone scenario-test runner that replays the brief's sample inquiries (and regressions) against the chat API and scores grounding and escalation behavior. Scripted scenario suite for the six sample interactions Grounding/escalation assertions on bot responses Regression runs against deployed or local chat API user:Jason (builder/candidate) user:Cadre engineering reviewers" [ref=e412] [cursor=pointer]:
+                    - generic [ref=e414]: Chatbot Evaluation Harness
+                    - generic [ref=e415]: Standalone scenario-test runner that replays the brief's sample inquiries (and regressions) against the chat API and scores grounding and escalation behavior.
+                    - generic [ref=e416]:
+                      - generic [ref=e417]: Scripted scenario suite for the six sample interactions
+                      - generic [ref=e418]: Grounding/escalation assertions on bot responses
+                      - generic [ref=e419]: Regression runs against deployed or local chat API
+                      - generic [ref=e420]: user:Jason (builder/candidate)
+                      - generic [ref=e421]: user:Cadre engineering reviewers
+            - text:      
+        - generic [ref=e94]:
+          - generic [ref=e96]:
+            - generic [ref=e97]: AI chat
+            - generic [ref=e98]:
+              - button "New conversation for Console" [ref=e99] [cursor=pointer]:
+                - generic [ref=e100]: 
+              - button "Close" [ref=e101] [cursor=pointer]: ✕
+          - generic [ref=e103]:
+            - generic [ref=e105]:
+              - generic [ref=e107]: 
+              - generic [ref=e108]: Build with Agent
+              - paragraph [ref=e111]: AI responses may be inaccurate
+            - text: 
+            - generic [ref=e112]:
+              - generic:  
+              - generic [ref=e114]:
+                - code [ref=e117]:
+                  - generic [ref=e118]:
+                    - textbox "The editor is not accessible at this time. To enable screen reader optimized mode, use Shift+Option+F1" [ref=e119]
+                    - textbox [ref=e120]
+                    - generic [ref=e425]: Describe what to build
+                - generic [ref=e127]:
+                  - toolbar [ref=e130]:
+                    - button "Add Context... (⌘/)" [ref=e214] [cursor=pointer]: 
+                    - button "Set Agent (⌘.) - Open Agent Picker" [ref=e217] [cursor=pointer]:
+                      - generic [ref=e218]: 
+                    - group "Models, gpt-4o-mini" [ref=e219]:
+                      - button "gpt-4o-mini" [ref=e220] [cursor=pointer]:
+                        - generic [ref=e221]: gpt-4o-mini
+                    - button "Configure Tools..." [ref=e222] [cursor=pointer]: 
+                  - toolbar [ref=e142]:
+                    - button "Send [⌥] Send to New Chat (⇧⌘Enter)" [disabled] [ref=e223]: 
+              - toolbar [ref=e147]:
+                - button "Set Session Target - Local" [ref=e150] [cursor=pointer]:
+                  - generic [ref=e151]: 
+                  - generic [ref=e152]: Local
+                - button "Permission picker, Default Approvals" [ref=e155] [cursor=pointer]:
+                  - generic [ref=e156]: 
+                  - generic [ref=e157]: Default Approvals
+      - separator "Resize Claude terminal" [ref=e159]
+      - generic [ref=e160]:
+        - generic [ref=e161]:
+          - generic [ref=e162]: Claude
+          - generic "Claude kickoff status"
+        - generic [ref=e164]: Claude will appear here when you create a New Surface.
+    - text:        
+  - generic [ref=e165]:
+    - alert [ref=e166]: "Warning: Docker Desktop is required for Ix (`ix docker start`) and Docker MCP tools. Install Docker Desktop, start it, then reload this window."
+    - alert
+```

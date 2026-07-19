@@ -22,20 +22,18 @@ export function shouldShowSurfaceMainViewToggle(options: {
 	return true;
 }
 
+/** All surface content lives in the Plan column — no separate view switching. */
 export function resolveDefaultSurfaceMainView(
-	tree: AgentTaskTree | undefined,
-	previewReachable: boolean,
+	_tree?: AgentTaskTree,
+	_previewReachable = false,
 	_hasPlan = false,
 ): SurfaceMainView {
-	if (tree?.status === 'complete' && previewReachable) {
-		return 'preview';
-	}
 	return 'plan';
 }
 
-/** Maps legacy stored `taskTree` (Proposed Code Graph) onto Plan. */
+/** Maps legacy stored views onto Plan. */
 export function normalizeSurfaceMainView(value: string | undefined): SurfaceMainView | undefined {
-	if (value === 'taskTree') {
+	if (value === 'taskTree' || value === 'claudeMd' || value === 'preview' || value === 'ixSubsystems') {
 		return 'plan';
 	}
 	if (isSurfaceMainView(value)) {

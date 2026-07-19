@@ -1,0 +1,37 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Result
+{
+  "href": "vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench-dev.html",
+  "title": "console-ws",
+  "ready": "complete",
+  "bodyLen": 967,
+  "wb": {
+    "x": 0,
+    "y": 0,
+    "width": 1440,
+    "height": 900,
+    "top": 0,
+    "right": 1440,
+    "bottom": 900,
+    "left": 0
+  },
+  "hasRail": true,
+  "hasPlanTracker": true,
+  "hasClaude": true,
+  "modeCode": false
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => ((() => {\n  const wb = document.querySelector(".monaco-workbench");\n  const shell = document.querySelector(".custom-mode-shell, .monaco-workbench.custom-mode-shell-enabled");\n  return {\n    href: location.href,\n    title: document.title,\n    ready: document.readyState,\n    bodyLen: (document.body?.innerText || "").length,\n    wb: wb?.getBoundingClientRect()?.toJSON?.(),\n    hasRail: !!document.querySelector("[aria-label=\\"Workspace home views\\"]"),\n    hasPlanTracker: !!document.querySelector("[aria-label=\\"Plan status tracker\\"], [aria-label=\\"Plan workflow steps\\"]"),\n    hasClaude: !!document.querySelector(".custom-mode-ui-claude-terminal"),\n    modeCode: document.body?.className?.includes("custom-mode-code") || !!document.querySelector(".custom-mode-code"),\n  };\n})())');
+```
+### Page
+- Page URL: vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench-dev.html
+- Page Title: console-ws
+- Console: 61 errors, 124 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-07-19T05-24-08-892Z.log#L6073-L9709

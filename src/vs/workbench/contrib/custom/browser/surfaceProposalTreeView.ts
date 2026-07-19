@@ -4,25 +4,92 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { mainWindow } from '../../../../base/browser/window.js';
+import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
+import type { SurfaceReferenceCandidates } from '../../../../../custom/goalWorkspace/surfaceReferenceCandidates.js';
 import { IWebviewElement, IWebviewService, WebviewContentPurpose } from '../../webview/browser/webview.js';
 import { webviewGenericCspSource } from '../../webview/common/webview.js';
 import type { GraphProposalDocument, ProposalDiffGraph } from './proposalGraphDiff/proposalGraphDiffTypes.js';
 import type { ProposalWorkstreamPartition } from './proposalGraphDiff/partitionProposalWorkstreams.js';
+import type { SurfaceProposalProgress } from './surfaceProposalProgress.js';
+
+export interface SurfaceProposalTreePreviewInfo {
+	readonly localUrl?: string;
+	readonly message: string;
+}
+
+export interface SurfaceProposalTreeGraphRegion {
+	readonly name: string;
+	readonly entryPath?: string;
+	readonly memberFiles?: readonly string[];
+	readonly fileCount?: number;
+}
 
 export interface SurfaceProposalTreeDocumentOptions {
 	readonly proposal?: GraphProposalDocument;
 	readonly graph?: ProposalDiffGraph;
 	readonly partition?: ProposalWorkstreamPartition;
+	/** Compare-derived completion for Files / Relationships / Workstreams cards. */
+	readonly progress?: SurfaceProposalProgress;
 	readonly planMarkdown?: string;
+	readonly claudeMdMarkdown?: string;
+	readonly claudeMdMessage?: string;
+	readonly graphRegions?: readonly SurfaceProposalTreeGraphRegion[];
+	readonly graphMessage?: string;
+	readonly previewInfo?: SurfaceProposalTreePreviewInfo;
+	readonly referenceCandidates?: SurfaceReferenceCandidates;
 	readonly storageKey?: string;
 	readonly proposalMissingMessage?: string;
+}
+
+export interface SurfaceProposalTreeToggleRepoRequest {
+	readonly owner: string;
+	readonly repo: string;
+	readonly selected: boolean;
+}
+
+/** One section card for the host-owned shared card rail (see cardRailLayout.ts). */
+export interface SurfaceProposalTreeCardItem {
+	readonly id: string;
+	readonly key: string;
+	readonly value: string;
+}
+
+/** Placeholder value used when a surface section has no content yet. */
+export const SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE = '—';
+
+/**
+ * Keep ready surface cards first; push incomplete ones (Graph/Preview/Plan with "—") to the end.
+ * Relative order within each group is preserved.
+ */
+export function orderSurfaceProposalTreeCards(
+	cards: readonly SurfaceProposalTreeCardItem[],
+): SurfaceProposalTreeCardItem[] {
+	const ready: SurfaceProposalTreeCardItem[] = [];
+	const incomplete: SurfaceProposalTreeCardItem[] = [];
+	for (const card of cards) {
+		if (card.value === SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE) {
+			incomplete.push(card);
+		} else {
+			ready.push(card);
+		}
+	}
+	return incomplete.length === 0 ? [...cards] : [...ready, ...incomplete];
 }
 
 export class SurfaceProposalTreeView extends Disposable {
 	private readonly webview: IWebviewElement;
 	private lastDocument: SurfaceProposalTreeDocumentOptions | undefined;
+
+	private readonly _onDidToggleRepo = this._register(new Emitter<SurfaceProposalTreeToggleRepoRequest>());
+	readonly onDidToggleRepo: Event<SurfaceProposalTreeToggleRepoRequest> = this._onDidToggleRepo.event;
+
+	private readonly _onDidConfirmRepos = this._register(new Emitter<void>());
+	readonly onDidConfirmRepos: Event<void> = this._onDidConfirmRepos.event;
+
+	private readonly _onDidChangeCards = this._register(new Emitter<readonly SurfaceProposalTreeCardItem[]>());
+	readonly onDidChangeCards: Event<readonly SurfaceProposalTreeCardItem[]> = this._onDidChangeCards.event;
 
 	constructor(webviewService: IWebviewService, onReady: () => void) {
 		super();
@@ -36,8 +103,38 @@ export class SurfaceProposalTreeView extends Disposable {
 			extension: undefined,
 		}));
 		this._register(this.webview.onMessage(event => {
-			if (event.message?.type === 'surfaceProposalTree.ready') {
+			const message = event.message;
+			if (message?.type === 'surfaceProposalTree.ready') {
 				onReady();
+				return;
+			}
+			if (message?.type === 'surfaceProposalTree.toggleRepo'
+				&& typeof message.owner === 'string'
+				&& typeof message.repo === 'string'
+				&& typeof message.selected === 'boolean') {
+				this._onDidToggleRepo.fire({
+					owner: message.owner,
+					repo: message.repo,
+					selected: message.selected,
+				});
+				return;
+			}
+			if (message?.type === 'surfaceProposalTree.confirmRepos') {
+				this._onDidConfirmRepos.fire();
+				return;
+			}
+			if (message?.type === 'surfaceProposalTree.cards' && Array.isArray(message.cards)) {
+				const cards: SurfaceProposalTreeCardItem[] = [];
+				for (const card of message.cards) {
+					if (typeof card?.id === 'string' && typeof card.key === 'string') {
+						cards.push({
+							id: card.id,
+							key: card.key,
+							value: String(card.value ?? SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE),
+						});
+					}
+				}
+				this._onDidChangeCards.fire(orderSurfaceProposalTreeCards(cards));
 			}
 		}));
 		this.setHtml();
@@ -58,6 +155,11 @@ export class SurfaceProposalTreeView extends Disposable {
 		}
 	}
 
+	/** Scroll the given section into view — driven by the host-owned card rail. */
+	selectSection(id: string): void {
+		void this.webview.postMessage({ type: 'surfaceProposalTree.selectSection', id });
+	}
+
 	private setHtml(): void {
 		const nonce = String(Math.random()).slice(2);
 		this.webview.setHtml(`<!doctype html>
@@ -69,35 +171,47 @@ export class SurfaceProposalTreeView extends Disposable {
 	<style>
 		:root { color-scheme: light dark; }
 		* { box-sizing: border-box; }
-		html, body { margin: 0; min-height: 100%; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
-		body { padding: 18px 20px 28px; font: 13px/1.5 var(--vscode-font-family); }
-		#content { max-width: 1180px; margin: 0 auto; }
-		.meta {
-			display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-			gap: 8px; margin-bottom: 4px;
+		html, body { margin: 0; height: 100%; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
+		body { padding: 0; font: 13px/1.5 var(--vscode-font-family); overflow: hidden; }
+		/* Section cards live in the host-owned shared card rail (cardRailLayout.ts); this webview is content only. */
+		#content {
+			display: flex;
+			flex-direction: column;
+			height: 100%;
+			max-width: none;
+			margin: 0;
 		}
-		.meta-item {
-			display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
-			padding: 10px 12px; border: 1px solid var(--vscode-panel-border);
-			border-radius: 7px; background: var(--vscode-sideBar-background);
-			cursor: pointer; text-align: left; color: inherit; font: inherit; width: 100%;
-			opacity: 1; transition: opacity .12s ease, border-color .12s ease, background .12s ease;
+		.graph-regions { display: grid; gap: 10px; padding: 12px 14px; }
+		.graph-region {
+			border: 1px solid var(--vscode-panel-border); border-radius: 6px;
+			background: var(--vscode-sideBar-background); padding: 10px 12px;
 		}
-		.meta-item:hover { border-color: var(--vscode-focusBorder); }
-		.meta-item[aria-pressed="false"] {
-			opacity: .45; background: transparent;
+		.graph-region-title { font-weight: 700; }
+		.graph-region-meta { margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+		.graph-region-files {
+			margin: 8px 0 0; padding-left: 18px;
+			font: 12px/1.4 var(--vscode-editor-font-family);
 		}
-		.meta-key {
-			font: 700 10px/1.3 var(--vscode-font-family); letter-spacing: .04em;
-			text-transform: uppercase; color: var(--vscode-descriptionForeground);
+		.preview-body { padding: 12px 14px; }
+		.preview-url {
+			margin: 0 0 8px; font-family: var(--vscode-editor-font-family);
+			color: var(--vscode-textLink-foreground); word-break: break-all;
 		}
-		.meta-value {
-			font-weight: 600; color: var(--vscode-foreground);
-			overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+		.preview-message { margin: 0; color: var(--vscode-descriptionForeground); }
+		.sections {
+			min-width: 0;
+			min-height: 0;
+			flex: 1 1 auto;
+			overflow: auto;
+			padding-right: 4px;
 		}
 		.section {
 			margin-top: 12px; border: 1px solid var(--vscode-panel-border);
 			border-radius: 7px; overflow: hidden; background: var(--vscode-editor-background);
+			scroll-margin-top: 16px;
+		}
+		.section.flash {
+			box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
 		}
 		.section.hidden { display: none; }
 		.section > summary {
@@ -135,6 +249,53 @@ export class SurfaceProposalTreeView extends Disposable {
 			font: 12px/1.45 var(--vscode-editor-font-family); white-space: pre-wrap;
 		}
 		.plan-body pre code { background: transparent; padding: 0; }
+		.refs-body {
+			display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;
+		}
+		.refs-hint {
+			margin: 0; color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.4;
+		}
+		.refs-chips { display: flex; flex-direction: column; gap: 8px; }
+		.refs-chip {
+			display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+			padding: 10px 12px; border-radius: 8px;
+			border: 1px solid var(--vscode-panel-border);
+			background: var(--vscode-sideBar-background);
+			color: var(--vscode-foreground); font: inherit; cursor: default;
+			text-align: left; width: 100%;
+		}
+		.refs-chip.interactive { cursor: pointer; }
+		.refs-chip.interactive:hover { border-color: var(--vscode-focusBorder); }
+		.refs-chip.selected {
+			border-color: var(--vscode-focusBorder);
+			background: color-mix(in srgb, var(--vscode-focusBorder) 16%, transparent);
+		}
+		.refs-chip:disabled { opacity: .95; cursor: default; }
+		.refs-chip-top {
+			display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+		}
+		.refs-chip-name { font-weight: 600; font-size: 12px; }
+		.refs-chip-badge {
+			font: 700 9px/1.3 var(--vscode-font-family); letter-spacing: .04em;
+			text-transform: uppercase; color: var(--vscode-descriptionForeground);
+		}
+		.refs-chip-meta { font-size: 11px; color: var(--vscode-descriptionForeground); }
+		.refs-chip-reason {
+			margin: 0; font-size: 12px; line-height: 1.45;
+			color: var(--vscode-descriptionForeground);
+		}
+		.refs-chip-reason strong {
+			color: var(--vscode-foreground); font-weight: 600;
+		}
+		.refs-actions { display: flex; justify-content: flex-end; }
+		.refs-confirm {
+			appearance: none; border: 1px solid var(--vscode-button-border, transparent);
+			border-radius: 6px; padding: 7px 12px;
+			background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+			font: 600 12px/1.3 var(--vscode-font-family); cursor: pointer;
+		}
+		.refs-confirm:disabled { opacity: .5; cursor: default; }
+		.refs-confirm:not(:disabled):hover { background: var(--vscode-button-hoverBackground); }
 		.tree { padding: 10px 12px 14px; overflow: auto; font-family: var(--vscode-editor-font-family); }
 		.tree ul { margin: 0; padding-left: 19px; list-style: none; border-left: 1px solid var(--vscode-tree-indentGuidesStroke); }
 		.tree > ul { padding-left: 0; border-left: 0; }
@@ -239,7 +400,7 @@ export class SurfaceProposalTreeView extends Disposable {
 		}
 		.empty { padding: 30px; color: var(--vscode-descriptionForeground); text-align: center; }
 		@media (max-width: 700px) {
-			body { padding: 12px; }
+			body { padding: 8px; }
 			.edge { grid-template-columns: 1fr; gap: 4px; }
 			.relation { justify-self: start; }
 		}
@@ -253,8 +414,6 @@ export class SurfaceProposalTreeView extends Disposable {
 			const content = document.getElementById('content');
 			const text = value => value == null ? '—' : String(value);
 			const clean = value => text(value).replace(/^file:/, '');
-			let visibilityKey = 'surfaceProposalTree.visibility';
-			let sectionVisibility = {};
 
 			/** architecture.tree is often a string[] of lines; String(array) joins with commas and flattens the tree. */
 			function normalizeArchitectureTree(tree) {
@@ -378,46 +537,18 @@ export class SurfaceProposalTreeView extends Disposable {
 				return body;
 			}
 
-			function loadVisibility(ids) {
-				let stored = {};
-				try {
-					stored = JSON.parse(sessionStorage.getItem(visibilityKey) || '{}') || {};
-				} catch {
-					stored = {};
+			function focusSection(id) {
+				const sectionEl = content.querySelector('details.section[data-section="' + id + '"]');
+				if (!sectionEl) {
+					return;
 				}
-				const next = {};
-				for (const id of ids) {
-					next[id] = stored[id] !== false;
-				}
-				sectionVisibility = next;
-				return next;
-			}
-
-			function saveVisibility() {
-				try {
-					sessionStorage.setItem(visibilityKey, JSON.stringify(sectionVisibility));
-				} catch {
-					// ignore quota / private mode
-				}
-			}
-
-			function applyVisibility() {
-				for (const [id, visible] of Object.entries(sectionVisibility)) {
-					const section = content.querySelector('[data-section="' + id + '"]');
-					if (section) {
-						section.classList.toggle('hidden', !visible);
-					}
-					const card = content.querySelector('.meta-item[data-section="' + id + '"]');
-					if (card) {
-						card.setAttribute('aria-pressed', visible ? 'true' : 'false');
-					}
-				}
-			}
-
-			function toggleCard(id) {
-				sectionVisibility[id] = !sectionVisibility[id];
-				saveVisibility();
-				applyVisibility();
+				sectionEl.open = true;
+				sectionEl.classList.remove('flash');
+				// Retrigger flash animation if already present.
+				void sectionEl.offsetWidth;
+				sectionEl.classList.add('flash');
+				window.setTimeout(() => sectionEl.classList.remove('flash'), 900);
+				sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
 			}
 
 			function makeFolderTree(paths) {
@@ -460,39 +591,171 @@ export class SurfaceProposalTreeView extends Disposable {
 				return details;
 			}
 
+			/** Section cards render in the host card rail — this only records the data to post up. */
 			function metaCard(id, label, value) {
-				const item = el('button', 'meta-item');
-				item.type = 'button';
-				item.dataset.section = id;
-				item.setAttribute('aria-pressed', 'true');
-				item.append(el('span', 'meta-key', label), el('span', 'meta-value', value));
-				item.title = text(value);
-				item.addEventListener('click', () => toggleCard(id));
-				return item;
+				return { id, key: label, value: text(value) };
+			}
+
+			function progressValue(matched, total, hasCompare) {
+				return hasCompare ? (matched + '/' + total) : String(total);
 			}
 
 			function render(options) {
 				const proposal = options.proposal;
 				const partition = options.partition;
+				const progress = options.progress;
+				const hasCompare = !!(progress && progress.hasCompare);
+				const workstreamProgressById = new Map(
+					(progress && progress.byWorkstream ? progress.byWorkstream : []).map(item => [item.id, item])
+				);
 				const planMarkdown = options.planMarkdown;
+				const claudeMdMarkdown = options.claudeMdMarkdown;
+				const claudeMdMessage = options.claudeMdMessage;
+				const graphRegions = options.graphRegions || [];
+				const graphMessage = options.graphMessage;
+				const previewInfo = options.previewInfo;
+				const referenceCandidates = options.referenceCandidates;
 				const proposalMissingMessage = options.proposalMissingMessage;
-				visibilityKey = options.storageKey || 'surfaceProposalTree.visibility';
 				content.replaceChildren();
 
 				const cards = [];
 				const sections = [];
 
+				// One column of section toggles — no separate view switching.
+				cards.push(metaCard('rules', 'Rules', 'CLAUDE.md'));
+				const rulesSection = section('rules', 'CLAUDE.md', claudeMdMarkdown ? 'md' : '—', true);
+				if (claudeMdMarkdown && claudeMdMarkdown.trim()) {
+					rulesSection.append(renderPlanMarkdown(claudeMdMarkdown));
+				} else {
+					rulesSection.append(el('div', 'empty', claudeMdMessage || 'CLAUDE.md not found.'));
+				}
+				sections.push(rulesSection);
+
 				if (planMarkdown && planMarkdown.trim()) {
 					cards.push(metaCard('plan', 'Plan', 'plan.md'));
+				} else {
+					cards.push(metaCard('plan', 'Plan', '—'));
+				}
+
+				cards.push(metaCard('graph', 'Graph', graphRegions.length ? String(graphRegions.length) : '—'));
+				cards.push(metaCard('preview', 'Preview', previewInfo?.localUrl ? 'URL' : '—'));
+
+				if (referenceCandidates?.repos?.length) {
+					const selectedCount = referenceCandidates.repos.filter(r => r.selected).length;
+					cards.push(metaCard('context', 'Context', selectedCount + '/' + referenceCandidates.repos.length));
+					const awaiting = referenceCandidates.status === 'awaiting_selection';
+					const contextSection = section('context', 'Research context repos', referenceCandidates.repos.length, true);
+					const body = el('div', 'refs-body');
+					body.append(el('p', 'refs-hint', awaiting
+						? 'Suggested repos are selected. Toggle any repo, then continue. Reasons cite plan.md Research.'
+						: 'Claude will use the selected repos below — each reason ties back to plan.md Research.'));
+					const chips = el('div', 'refs-chips');
+					for (const repo of referenceCandidates.repos) {
+						const label = (repo.owner || '') + '/' + (repo.repo || '');
+						const reason = (repo.reason || repo.description || '').trim();
+						const chip = el('button', 'refs-chip' + (repo.selected ? ' selected' : '') + (awaiting ? ' interactive' : ''));
+						chip.type = 'button';
+						chip.disabled = !awaiting;
+						chip.setAttribute('aria-pressed', repo.selected ? 'true' : 'false');
+						chip.title = reason || repo.url || label;
+						const top = el('div', 'refs-chip-top');
+						top.append(el('span', 'refs-chip-name', label));
+						if (repo.suggested) {
+							top.append(el('span', 'refs-chip-badge', 'Suggested'));
+						}
+						if (typeof repo.stars === 'number') {
+							const stars = repo.stars >= 1000
+								? ((repo.stars / 1000) >= 10 ? Math.round(repo.stars / 1000) : Math.round(repo.stars / 100) / 10) + 'k★'
+								: Math.round(repo.stars) + '★';
+							top.append(el('span', 'refs-chip-meta', stars));
+						}
+						chip.append(top);
+						const reasonEl = el('p', 'refs-chip-reason');
+						if (reason) {
+							reasonEl.append(el('strong', '', 'Why: '), document.createTextNode(reason));
+						} else {
+							reasonEl.textContent = 'No plan.md Research rationale recorded for this repo yet.';
+						}
+						chip.append(reasonEl);
+						if (awaiting) {
+							chip.addEventListener('click', () => {
+								vscode.postMessage({
+									type: 'surfaceProposalTree.toggleRepo',
+									owner: repo.owner,
+									repo: repo.repo,
+									selected: !repo.selected,
+								});
+							});
+						}
+						chips.append(chip);
+					}
+					body.append(chips);
+					if (awaiting) {
+						const actions = el('div', 'refs-actions');
+						const confirm = el('button', 'refs-confirm', 'Use selected as context');
+						confirm.type = 'button';
+						confirm.disabled = selectedCount === 0;
+						confirm.addEventListener('click', () => {
+							vscode.postMessage({ type: 'surfaceProposalTree.confirmRepos' });
+						});
+						actions.append(confirm);
+						body.append(actions);
+					}
+					contextSection.append(body);
+					sections.push(contextSection);
+				}
+
+				if (planMarkdown && planMarkdown.trim()) {
 					const planSection = section('plan', 'Plan', 'md', true);
 					planSection.append(renderPlanMarkdown(planMarkdown));
 					sections.push(planSection);
+				} else {
+					const planSection = section('plan', 'Plan', '—', true);
+					planSection.append(el('div', 'empty', 'No plan.md yet.'));
+					sections.push(planSection);
 				}
+
+				const graphSection = section('graph', 'Generated code graph', graphRegions.length || '—', false);
+				if (graphRegions.length) {
+					const list = el('div', 'graph-regions');
+					for (const region of graphRegions) {
+						const node = el('div', 'graph-region');
+						node.append(el('div', 'graph-region-title', region.name));
+						const meta = [];
+						if (region.fileCount != null) meta.push(region.fileCount + ' files');
+						if (region.entryPath) meta.push(region.entryPath);
+						if (meta.length) node.append(el('div', 'graph-region-meta', meta.join(' · ')));
+						const members = region.memberFiles || [];
+						if (members.length) {
+							const ul = el('ul', 'graph-region-files');
+							for (const file of members.slice(0, 24)) ul.append(el('li', '', file));
+							if (members.length > 24) ul.append(el('li', '', '… +' + (members.length - 24) + ' more'));
+							node.append(ul);
+						}
+						list.append(node);
+					}
+					graphSection.append(list);
+				} else {
+					graphSection.append(el('div', 'empty', graphMessage || 'No generated code graph for this surface yet.'));
+				}
+				sections.push(graphSection);
+
+				const previewSection = section('preview', 'Live app preview', previewInfo?.localUrl ? 'url' : '—', false);
+				const previewBody = el('div', 'preview-body');
+				if (previewInfo?.localUrl) {
+					previewBody.append(el('p', 'preview-url', previewInfo.localUrl));
+				}
+				previewBody.append(el('p', 'preview-message', previewInfo?.message || 'Preview not configured.'));
+				previewSection.append(previewBody);
+				sections.push(previewSection);
 
 				if (proposal) {
 					if (partition?.workstreams?.length) {
-						cards.push(metaCard('workstreams', 'Workstreams', partition.workstreams.length));
-						const wsSection = section('workstreams', 'Parallel workstreams', partition.workstreams.length, true);
+						const wsCardValue = progress
+							? progressValue(progress.workstreamsComplete, progress.workstreamsTotal, hasCompare)
+							: String(partition.workstreams.length);
+						cards.push(metaCard('workstreams', 'Workstreams', wsCardValue));
+						const wsSection = section('workstreams', 'Parallel workstreams', wsCardValue, true);
 						const banner = el('div', 'parallel-banner');
 						const safeCount = partition.workstreams.filter(w => w.parallelSafe).length;
 						banner.textContent = partition.canParallelize
@@ -512,8 +775,12 @@ export class SurfaceProposalTreeView extends Disposable {
 									stream.parallelSafe ? 'parallel-safe' : 'coupled')
 							);
 							card.append(header);
+							const streamProgress = workstreamProgressById.get(stream.id);
+							const filesLabel = streamProgress && hasCompare
+								? (streamProgress.matchedNodes + '/' + streamProgress.totalNodes + ' files')
+								: (stream.nodes.length + ' files');
 							card.append(el('div', 'workstream-meta',
-								stream.nodes.length + ' files · ' + stream.edges.length + ' structural edges'));
+								filesLabel + ' · ' + stream.edges.length + ' structural edges'));
 							const nodeList = el('ul', 'workstream-nodes');
 							for (const node of stream.nodes) {
 								nodeList.append(el('li', '', clean(node)));
@@ -565,8 +832,11 @@ export class SurfaceProposalTreeView extends Disposable {
 
 					const nodes = proposal.add_nodes || [];
 					if (nodes.length) {
-						cards.push(metaCard('files', 'Files', nodes.length));
-						const filesSection = section('files', 'Files to add', nodes.length);
+						const filesValue = progress
+							? progressValue(progress.filesMatched, progress.filesTotal, hasCompare)
+							: String(nodes.length);
+						cards.push(metaCard('files', 'Files', filesValue));
+						const filesSection = section('files', 'Files to add', filesValue);
 						const tree = el('div', 'tree');
 						const rootList = el('ul');
 						const folderRoot = makeFolderTree(nodes);
@@ -585,8 +855,11 @@ export class SurfaceProposalTreeView extends Disposable {
 
 					const edges = proposal.add_edges || [];
 					if (edges.length) {
-						cards.push(metaCard('relationships', 'Relationships', edges.length));
-						const edgesSection = section('relationships', 'Relationships', edges.length);
+						const relationshipsValue = progress
+							? progressValue(progress.relationshipsMatched, progress.relationshipsTotal, hasCompare)
+							: String(edges.length);
+						cards.push(metaCard('relationships', 'Relationships', relationshipsValue));
+						const edgesSection = section('relationships', 'Relationships', relationshipsValue);
 						const edgeList = el('div', 'edges');
 						for (const edge of edges) {
 							const row = el('div', 'edge');
@@ -628,28 +901,38 @@ export class SurfaceProposalTreeView extends Disposable {
 					sections.push(el('div', 'empty', proposalMissingMessage));
 				}
 
-				if (!cards.length && !sections.length) {
+				// Incomplete cards (value "—") trail ready ones so Graph/Preview don't bury Context etc.
+				const orderedCards = (() => {
+					const ready = [];
+					const incomplete = [];
+					for (const card of cards) {
+						if (card.value === '—') incomplete.push(card);
+						else ready.push(card);
+					}
+					return incomplete.length ? ready.concat(incomplete) : cards;
+				})();
+				vscode.postMessage({ type: 'surfaceProposalTree.cards', cards: orderedCards });
+
+				if (!sections.length) {
 					content.append(el('div', 'empty', 'No plan or proposal content yet.'));
 					return;
 				}
 
-				if (cards.length) {
-					const meta = el('div', 'meta');
-					for (const card of cards) meta.append(card);
-					content.append(meta);
-					loadVisibility(cards.map(c => c.dataset.section));
-				}
-
+				const sectionsCol = el('div', 'sections');
 				for (const sectionEl of sections) {
-					content.append(sectionEl);
+					sectionsCol.append(sectionEl);
 				}
-				applyVisibility();
+				content.append(sectionsCol);
 			}
 
 			window.addEventListener('message', event => {
 				const message = event.data;
 				if (message?.type === 'surfaceProposalTree.setDocument') {
 					render(message);
+					return;
+				}
+				if (message?.type === 'surfaceProposalTree.selectSection' && typeof message.id === 'string') {
+					focusSection(message.id);
 				}
 			});
 			vscode.postMessage({ type: 'surfaceProposalTree.ready' });

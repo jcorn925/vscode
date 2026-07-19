@@ -1,0 +1,179 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Page
+- Page URL: vscode-file://vscode-app/Users/jasoncornell/vscode/out/vs/code/electron-browser/workbench/workbench-dev.html
+- Page Title: console-ws
+- Console: 65 errors, 131 warnings
+### Snapshot
+```yaml
+- application [ref=e2]:
+  - text:                                                                 Describe what to build            
+  - iframe [ref=e4]:
+    - document [active] [ref=f3e1]:
+      - iframe [ref=f3e2]
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e14]:
+          - tablist "Workspace home views" [ref=e15]:
+            - tab "Code Editor" [ref=e16] [cursor=pointer]:
+              - generic [ref=e17]: Code
+              - generic [ref=e18]: Editor
+            - tab "Plan workspace.plan" [ref=e19] [cursor=pointer]:
+              - generic [ref=e20]: Plan
+              - generic [ref=e21]: workspace.plan
+            - tab "Rules CLAUDE.md" [ref=e22] [cursor=pointer]:
+              - generic [ref=e23]: Rules
+              - generic [ref=e24]: CLAUDE.md
+            - tab "Brand logo · colors" [ref=e25] [cursor=pointer]:
+              - generic [ref=e26]: Brand
+              - generic [ref=e27]: logo · colors
+            - generic: New Surface
+            - tab "Describe New app" [ref=e28] [cursor=pointer]:
+              - generic [ref=e29]: Describe
+              - generic [ref=e30]: New app
+            - tab "Import Repo" [ref=e31] [cursor=pointer]:
+              - generic [ref=e32]: Import
+              - generic [ref=e33]: Repo
+            - generic: Surfaces
+            - tab "Surface Cadre Bot" [selected] [ref=e34] [cursor=pointer]:
+              - generic [ref=e35]: Surface
+              - generic [ref=e36]: Cadre Bot
+            - tab "Surface Cadre AI Support Chatbot" [ref=e37] [cursor=pointer]:
+              - generic [ref=e38]: Surface
+              - generic [ref=e39]: Cadre AI Support Chatbot
+            - tab "Rules CLAUDE.md" [ref=e40] [cursor=pointer]:
+              - generic [ref=e41]: Rules
+              - generic [ref=e42]: CLAUDE.md
+            - tab "Plan —" [ref=e43] [cursor=pointer]:
+              - generic [ref=e44]: Plan
+              - generic [ref=e45]: —
+            - tab "Graph —" [ref=e46] [cursor=pointer]:
+              - generic [ref=e47]: Graph
+              - generic [ref=e48]: —
+            - tab "Preview —" [ref=e49] [cursor=pointer]:
+              - generic [ref=e50]: Preview
+              - generic [ref=e51]: —
+          - generic [ref=e52]:
+            - text:     
+            - generic [ref=e54]:
+              - region "Plan status tracker" [ref=e55]:
+                - button "Scroll to earlier steps" [ref=e56] [cursor=pointer]:
+                  - generic [ref=e57]: 
+                - list "Plan workflow steps" [ref=e58]:
+                  - listitem "Confirm surface · completed 2026-07-19T05:23:52.348Z" [ref=e59]:
+                    - generic [ref=e60]: Done
+                    - generic [ref=e61]: Confirm surface
+                  - listitem "Describe what to build · completed 2026-07-19T05:23:52.348Z" [ref=e62]:
+                    - generic [ref=e63]: Done
+                    - generic [ref=e64]: Describe what to build
+                  - listitem "Claude surveying reference repos · completed 2026-07-19T05:23:52.348Z" [ref=e65]:
+                    - generic [ref=e66]: Done
+                    - generic [ref=e67]: Claude surveying reference repos
+                  - listitem "Select research context repos · completed 2026-07-19T05:23:52.348Z" [ref=e68]:
+                    - generic [ref=e69]: Done
+                    - generic [ref=e70]: Select research context repos
+                  - listitem "Claude cloning, mapping, and drafting · completed 2026-07-19T05:23:52.348Z" [ref=e71]:
+                    - generic [ref=e72]: Done
+                    - generic [ref=e73]: Claude cloning, mapping, and drafting
+                  - listitem "Review plan and proposal · completed 2026-07-19T05:23:52.348Z" [ref=e74]:
+                    - generic [ref=e75]: Done
+                    - generic [ref=e76]: Review plan and proposal
+                  - listitem "Lock plan and start build · completed 2026-07-19T05:23:52.348Z" [ref=e77]:
+                    - generic [ref=e78]: Done
+                    - generic [ref=e79]: Lock plan and start build
+                  - listitem "Phase 1 — Scaffold + shell" [ref=e80]:
+                    - generic [ref=e81]: Current
+                    - generic [ref=e82]: Phase 1 — Scaffold + shell
+                  - listitem "Phase 2 — Chat core" [ref=e83]:
+                    - generic [ref=e84]: Upcoming
+                    - generic [ref=e85]: Phase 2 — Chat core
+                  - listitem "Phase 3 — Knowledge + escalation" [ref=e86]:
+                    - generic [ref=e87]: Upcoming
+                    - generic [ref=e88]: Phase 3 — Knowledge + escalation
+                - button "Scroll to later steps" [ref=e89] [cursor=pointer]:
+                  - generic [ref=e90]: 
+                - button "Phase 1 — Scaffold + shell" [ref=e91] [cursor=pointer]
+              - iframe [ref=e93]:
+                - document [active] [ref=f2e1]:
+                  - iframe [ref=f2e2]
+        - generic [ref=e94]:
+          - generic [ref=e96]:
+            - generic [ref=e97]: AI chat
+            - generic [ref=e98]:
+              - button "New conversation for Console" [ref=e99] [cursor=pointer]:
+                - generic [ref=e100]: 
+              - button "Close" [ref=e101] [cursor=pointer]: ✕
+          - generic [ref=e103]:
+            - generic [ref=e105]:
+              - generic [ref=e107]: 
+              - generic [ref=e108]: Build with Agent
+              - paragraph [ref=e111]: AI responses may be inaccurate
+            - text: 
+            - generic [ref=e112]:
+              - generic:  
+              - generic [ref=e114]:
+                - code [ref=e117]:
+                  - generic [ref=e118]:
+                    - textbox "The editor is not accessible at this time. To enable screen reader optimized mode, use Shift+Option+F1" [ref=e119]
+                    - textbox [ref=e120]
+                    - generic [ref=e209]: Describe what to build
+                - generic [ref=e127]:
+                  - toolbar [ref=e130]:
+                    - button "Add Context... (⌘/)" [ref=e131] [cursor=pointer]: 
+                    - button "Set Agent (⌘.) - Open Agent Picker" [ref=e134] [cursor=pointer]:
+                      - generic [ref=e135]: 
+                    - group "Models, unavailable while in Restricted mode" [ref=e136]:
+                      - button "Models" [ref=e137] [cursor=pointer]:
+                        - generic [ref=e138]: Models
+                    - button "Configure Tools..." [ref=e139] [cursor=pointer]: 
+                  - toolbar [ref=e142]:
+                    - button "Send [⌥] Send to New Chat (⇧⌘Enter)" [disabled] [ref=e143]: 
+              - toolbar [ref=e147]:
+                - button "Set Session Target - Local" [ref=e150] [cursor=pointer]:
+                  - generic [ref=e151]: 
+                  - generic [ref=e152]: Local
+                - button "Permission picker, Default Approvals" [ref=e155] [cursor=pointer]:
+                  - generic [ref=e156]: 
+                  - generic [ref=e157]: Default Approvals
+      - separator "Resize Claude terminal" [ref=e159]
+      - generic [ref=e160]:
+        - generic [ref=e161]:
+          - generic [ref=e162]: Claude
+          - generic "Claude kickoff status"
+        - generic [ref=e164]: Claude will appear here when you create a New Surface.
+    - text:        
+  - generic [ref=e165]:
+    - alert [ref=e166]: "Warning: Docker Desktop is required for Ix (`ix docker start`) and Docker MCP tools. Install Docker Desktop, start it, then reload this window."
+    - alert
+  - dialog "Info Do you trust the authors of the files in this folder?" [ref=e169]:
+    - generic [ref=e171]:
+      - button "Manage" [ref=e172] [cursor=pointer]
+      - button "Cancel" [ref=e173] [cursor=pointer]
+      - button "Trust Folder & Continue" [active] [ref=e174] [cursor=pointer]
+    - generic [ref=e175]:
+      - generic "Info" [ref=e176]: 
+      - generic [ref=e177]:
+        - generic [ref=e179]: Do you trust the authors of the files in this folder?
+        - generic [ref=e180]:
+          - paragraph [ref=e182]: Creating a terminal process requires executing code
+          - paragraph [ref=e184]:
+            - text: If you don't trust the authors of these files, we do not recommend continuing as the files may be malicious. See
+            - link "our docs" [ref=e185] [cursor=pointer]:
+              - /url: ""
+            - text: to learn more.
+    - toolbar [ref=e189]:
+      - button "Close Dialog" [ref=e190] [cursor=pointer]: 
+  - 'list "Warning: Docker Desktop is required for Ix (`ix docker start`) and Docker MCP tools. Install Docker Desktop, start it, then reload this window., notification" [ref=e195]':
+    - 'dialog "Warning: Docker Desktop is required for Ix (`ix docker start`) and Docker MCP tools. Install Docker Desktop, start it, then reload this window., notification, Inspect the response in the accessible view with Option+F2" [ref=e197] [cursor=pointer]':
+      - generic [ref=e199]:
+        - generic [ref=e200]: 
+        - generic [ref=e201]: "Docker Desktop is required for Ix (`ix docker start`) and Docker MCP tools. Install Docker Desktop, start it, then reload this window."
+        - text:  
+```
+### Events
+- New console entries: .playwright-cli/console-2026-07-19T05-24-08-892Z.log#L1453-L1544

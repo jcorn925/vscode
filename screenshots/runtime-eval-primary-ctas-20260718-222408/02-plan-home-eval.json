@@ -1,0 +1,18 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Result
+{
+  "hasStartPlanning": true,
+  "hasProgress": true,
+  "hasSuggested": true,
+  "hasBusinessName": true,
+  "snippet": "CODE Editor PLAN workspace.plan RULES CLAUDE.md BRAND logo · colors NEW SURFACE DESCRIBE New app IMPORT Repo SURFACES SURFACE Cadre Bot SURFACE Cadre AI Support Chatbot Business name Drop a planning PDF or brief. Claude will propose separate surfaces with details — Create Surface below stays available for one-off apps. PDF / file Start workspace planning DONE Kick off workspace planning DONE Claude drafting workspace plan DONE Claude proposing surfaces CURRENT Review suggested surfaces Workspace plan ready — review suggested surfaces below. Suggested surfaces Create selected surfaces Cadre AI Support Chatbot SUGGESTED Deployed customer support chatbot that answers common Cadre AI inquiries from a curated knowledge base, points users to booking and the client portal, and escalates questions it can't answer. Grounded chat over curated Cadre AI knowledge base (services, industries, pricing/"
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => ((() => {\n  const text = document.body.innerText;\n  return {\n    hasStartPlanning: /Start workspace planning/i.test(text),\n    hasProgress: /Claude drafting workspace plan|Kick off workspace planning|proposing surfaces|Review suggested|Workspace plan ready/i.test(text),\n    hasSuggested: /Suggested surfaces|Create selected surfaces/i.test(text),\n    hasBusinessName: /Business name/i.test(text),\n    snippet: text.replace(/\\s+/g," ").slice(0,900),\n  };\n})())');
+```

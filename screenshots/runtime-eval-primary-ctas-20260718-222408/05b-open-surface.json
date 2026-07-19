@@ -1,0 +1,16 @@
+npm warn Unknown project config "disturl". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "target". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "ms_build_id". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "runtime". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "build_from_source". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "timeout". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+### Result
+{
+  "modeCode": false,
+  "opened": true,
+  "label": "SurfaceCadre Bot"
+}
+### Ran Playwright code
+```js
+await page.evaluate('() => ((() => {\n  // if still code, force console button again\n  if (document.querySelector(".monaco-workbench.custom-mode-code")) {\n    document.querySelector("button.custom-mode-ui-project-name:not(.custom-mode-ui-code-tab)")?.click();\n  }\n  const tab = Array.from(document.querySelectorAll("[aria-label=\\"Workspace home views\\"] [role=tab]")).find(el => (el.textContent||"").includes("Cadre Bot") && !(el.textContent||"").includes("Support"));\n  tab?.click();\n  return { modeCode: !!document.querySelector(".monaco-workbench.custom-mode-code"), opened: !!tab, label: tab?.textContent };\n})())');
+```

@@ -61,8 +61,27 @@ brief / PDF, not a single named surface):
    optional alternates with \`suggested: false\` / \`selected: false\`).
 4. **Stop.** Do **not** create \`apps/\`, per-surface \`plan.md\`, or graph
    proposals yet. The Console UI shows suggestion cards; the human confirms
-   which surfaces to create. Per-surface Research (below) starts only after a
-   surface exists and the user opens its Plan flow.
+   which surfaces to create. Per-surface Research (below) starts only after the
+   Console confirms a surface and kicks you.
+5. **Console owns Steps — do not drive them from chat.** The Steps row advances
+   only when the Console writes durable files / workflow state. If the user
+   asks you to "confirm" a suggested surface in chat, tell them to click the
+   Console suggestion card (or Confirm selected). Do **not** set
+   \`workspace.surfaces.suggested.json\` \`status: "confirmed"\`, do **not**
+   upsert \`workspace.goal.json\` surfaces yourself for that confirm gate, and
+   do **not** invent \`.workflow.json\` step completions. Wait for the Console
+   kickoff prompt, then do Research / build work only.
+
+## Phase progress contract (generate)
+
+Console starts each generate phase by writing
+\`.agent/surfaces/<surface-id>.phase-progress.json\` with \`status: "running"\`
+and the phase \`stepId\`. After \`remap_and_wait\` + \`compare_proposal\` for
+that phase, update the same file to \`status: "completed"\` (same \`stepId\` /
+\`stepLabel\` / \`surfaceId\`). On failure set \`status: "failed"\` with a short
+\`error\`, then stop. Console marks \`.workflow.json\` completed only after it
+sees \`completed\`. Do not start the next phase until Console Next kicks it.
+Do not begin generate phases on Plan lock alone — wait for Next.
 
 ## Research recipe (planning only)
 
@@ -75,7 +94,9 @@ surface's Plan lock:
    \`status: "awaiting_selection"\` and a \`repos\` array. Mark the best 1–2
    with \`suggested: true\` and \`selected: true\`; include a few alternates
    with \`suggested: false\` / \`selected: false\`. Each repo needs
-   \`owner\`, \`repo\`, \`url\`, optional \`description\` / \`stars\`.
+   \`owner\`, \`repo\`, \`url\`, a short \`reason\` (1–2 sentences tying it to
+   this surface's plan.md Research / intent — not a generic GitHub blurb),
+   and optional \`description\` / \`stars\`.
 2. **Wait for human selection.** Stop and tell the user the Plan tab now shows
    the found-repos row. Poll the candidates file (sleep 2–3s) until
    \`status\` is \`"confirmed"\` (or the user messages which repos to use).
@@ -95,9 +116,9 @@ surface's Plan lock:
    + \`phases\`. Promote the result to
    \`.agent/task-trees/<surface-id>.graph-proposal.json\`.
 7. **Cite.** Plan § Research must name the GitHub repos surveyed (and which
-   the user selected) and say the proposal was drafted from their Ix graph
-   then adapted — do not claim "internal priors only" when GitHub research
-   was available.
+   the user selected), mirror each selected repo's \`reason\`, and say the
+   proposal was drafted from their Ix graph then adapted — do not claim
+   "internal priors only" when GitHub research was available.
 
 Generate phases start only after the final proposal exists. Never \`cp -R\`
 reference source into \`apps/\`.
@@ -126,6 +147,8 @@ Write/destructive commands stay gated.
 | \`.agent/surfaces/<surface-id>.plan.md\` | Intent, research, plan lock, risks — keep lean |
 | \`.agent/task-trees/*.graph-proposal.json\` | Architecture, phased checklist, file/edge targets |
 | \`.agent/surfaces/<id>.reference-candidates.json\` | Found GitHub priors; user selects which to clone/map |
+| \`.agent/surfaces/<id>.phase-progress.json\` | Claude↔Console phase handshake (\`running\` / \`completed\` / \`failed\`) |
+| \`.agent/surfaces/<id>.workflow.json\` | Console-owned Steps row (do not invent completions) |
 | \`.agent/references/*\` | Shallow clones for planning maps only |
 
 ### Plan vs Proposal split
@@ -154,7 +177,9 @@ A phase is done only when:
 1. The phase checklist in the proposal (\`phases\`) is addressed, and
 2. Proposal compare meets the phase pass bar (or gaps are listed as intentional
    deferrals in the plan § Risks), and
-3. You report: proposal node recall, missing proposed nodes, and what you deferred.
+3. You report: proposal node recall, missing proposed nodes, and what you deferred, and
+4. You write \`.agent/surfaces/<surface-id>.phase-progress.json\` with
+   \`status: "completed"\` for that phase's \`stepId\` so Console can advance Steps.
 `;
 
 /**
@@ -174,10 +199,11 @@ export function buildSurfacePlanKickoffPrompt(options: {
 		`I want to build: ${trimmed}`,
 		`Create ${planPath} for surface "${surfaceName}" (id: ${surfaceId}) from that intent.`,
 		`Keep the plan lean: §0 Plan lock, problem/intent, research (planning-only), risks/deferrals.`,
-		`In Research: survey comparable public GitHub repos (gh search/api), write .agent/surfaces/${surfaceId}.reference-candidates.json (status awaiting_selection; suggested repos selected:true), wait until the Plan UI confirms selection, then shallow-clone only selected repos into .agent/references/, remap_and_wait, draft_proposal_from_workspace (write ${proposalPath.replace('.json', '.draft.json')}), then adapt that draft to the Plan lock.`,
+		`In Research: survey comparable public GitHub repos (gh search/api), write .agent/surfaces/${surfaceId}.reference-candidates.json (status awaiting_selection; suggested repos selected:true; each repo needs a short reason tied to plan Research), wait until the Plan UI confirms selection, then shallow-clone only selected repos into .agent/references/, remap_and_wait, draft_proposal_from_workspace (write ${proposalPath.replace('.json', '.draft.json')}), then adapt that draft to the Plan lock.`,
 		`End the plan with a Proposed Code Graph section that links to ${proposalPath} — do not put architecture trees or phased checklists in the plan.`,
 		`Then write ${proposalPath} as the verification contract: architecture notes, phases (phased checklist with remap_and_wait/compare_proposal gates), file: nodes, and structural edges adapted from the reference draft; set plan_ref to "${planPath}".`,
 		`Do not scaffold application code yet — plan + proposal only. Do not copy reference source into apps/.`,
+		`Do not edit .workflow.json or invent Steps-row completions — the Console owns those gates.`,
 		`When those two artifacts exist, summarize what you wrote (including which repos informed the draft) and stop for human review.`,
 	].join(' ');
 }
@@ -205,6 +231,7 @@ export function buildWorkspacePlanKickoffPrompt(options: {
 		`Write .agent/workspace.surfaces.suggested.json with status "draft" and a surfaces array. Each surface needs id, name, purpose, primaryUsers, keyCapabilities, dependsOn, suggested, and selected. Mark recommended surfaces suggested:true and selected:true; include plausible alternates with suggested:false and selected:false.`,
 		`If attachments were provided, set sourceBrief to the primary brief path.`,
 		`Do NOT create apps/, per-surface plan.md files, graph proposals, or scaffold code. Stop when both workspace artifacts exist so the Console can show suggestion cards.`,
+		`Do not set suggested surfaces status to confirmed and do not upsert workspace.goal.json for confirm — the Console owns that Steps gate when the user clicks a card.`,
 	];
 	return parts.filter(Boolean).join(' ');
 }

@@ -64,7 +64,7 @@ suite('cadreSurfaceClaudeTemplate', () => {
 	});
 
 	test('CADRE_SURFACE_CLAUDE_MD keeps architecture and phases in the proposal', () => {
-		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Architecture notes and the phased checklist live **in the proposal**'));
+		assert.ok(/Architecture notes and the phased\s+checklist live \*\*in the proposal\*\*/.test(CADRE_SURFACE_CLAUDE_MD));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Plan vs Proposal split'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('do not paste architecture trees or phase'));
 	});
@@ -76,7 +76,22 @@ suite('cadreSurfaceClaudeTemplate', () => {
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Draft graph shape from a real comparable repo **first**'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('One surface id — no `-2` clones'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('reference-candidates.json'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('reason'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Wait for human selection'));
+	});
+
+	test('CADRE_SURFACE_CLAUDE_MD keeps Console as owner of Steps gates', () => {
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Console owns Steps'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('do **not** invent `.workflow.json` step completions'));
+		assert.ok(!CADRE_SURFACE_CLAUDE_MD.includes('card click or chat message'));
+	});
+
+	test('CADRE_SURFACE_CLAUDE_MD documents phase-progress.json handshake', () => {
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Phase progress contract'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('phase-progress.json'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('status: "completed"'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('status: "failed"'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Do not begin generate phases on Plan lock alone'));
 	});
 
 	test('CADRE_CLAUDE_SETTINGS_JSON allow-lists inspect script but not python3 -c', () => {

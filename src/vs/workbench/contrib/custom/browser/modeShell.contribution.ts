@@ -89,6 +89,12 @@ import { SetupGuidePanel } from './setupGuidePanel.js';
 import { IConsoleService, type WorkspaceSurface } from '../../../../../custom/goalWorkspace/ConsoleService.js';
 import { buildCadreClaudeMcpJson, buildSurfacePlanKickoffPrompt, buildWorkspacePlanKickoffPrompt, CADRE_CLAUDE_SETTINGS_JSON, CADRE_INSPECT_GOAL_WORKSPACE_PY, CADRE_SURFACE_CLAUDE_MD } from '../../../../../custom/goalWorkspace/cadreSurfaceClaudeTemplate.js';
 import {
+	DEFAULT_WORKSPACE_PLAN_BUSINESS_NAME,
+	DEFAULT_WORKSPACE_PLAN_INTENT,
+	DEFAULT_WORKSPACE_PLAN_MARKDOWN,
+	DEFAULT_WORKSPACE_SUGGESTED_SURFACES_JSON,
+} from '../../../../../custom/goalWorkspace/defaultWorkspacePlan.js';
+import {
 	parseWorkspaceSuggestedSurfaces,
 	selectedSuggestedSurfaces,
 	serializeWorkspaceSuggestedSurfaces,
@@ -100,6 +106,13 @@ import {
 	type WorkspaceSuggestedSurface,
 	type WorkspaceSuggestedSurfaces,
 } from '../../../../../custom/goalWorkspace/workspacePlanPaths.js';
+import {
+	isConsoleHomeSection,
+	resolveConsoleWorkflowStatus,
+	type ConsoleHomeSection,
+	type ConsoleWorkflowStepState,
+} from '../../../../../custom/goalWorkspace/consoleWorkflowStatus.js';
+import { resolveSurfacePendingPlanAction } from '../../../../../custom/goalWorkspace/surfacePlanPendingAction.js';
 import {
 	brandFolderResource,
 	deleteGoalWorkspaceSurface,
@@ -134,7 +147,6 @@ import { discoverIxSubsystemRegions } from '../../../../../custom/goalWorkspace/
 import { SurfaceFeatureChecklistPanel } from './surfaceFeatureChecklistPanel.js';
 import { registerModeShellChatTarget } from './modeShellChatTarget.js';
 import { CustomAiAgentTaskExecutor } from './agentTaskTreeChatExecutor.js';
-import { SurfaceIxSubsystemsPanel } from './surfaceIxSubsystemsPanel.js';
 import { IAgentTaskTreeService, resolveCurrentTaskTreeStep } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import type { AgentTaskTree } from '../../../../../custom/agentTaskTree/agentTaskTreeTypes.js';
@@ -144,6 +156,7 @@ import type { WorkflowSpec, WorkflowStep } from '../../../../../custom/goalWorks
 import { buildTaskPrompt } from './agentTaskTreeChatExecutor.js';
 import { SurfacePlanPanel } from './surfacePlanPanel.js';
 import { SurfaceClaudeMdPanel } from './surfaceClaudeMdPanel.js';
+import { CARD_RAIL_DEFAULT_WIDTH, CARD_RAIL_STYLESHEET, cardRailItemsEqual, clampCardRailWidth, createCardRailLayout, type CardRailItem, type CardRailLayout } from './cardRailLayout.js';
 
 const STORAGE_PROCESS_CHAT_DISMISSED = 'modeShell.processChatDismissed';
 const STORAGE_UI_CHAT_DISMISSED = 'modeShell.uiChatDismissed';
@@ -152,8 +165,10 @@ const STORAGE_SELECTED_GOAL_SURFACE = 'modeShell.selectedGoalSurface';
 const STORAGE_ACTIVE_UI_CHAT_SURFACE = 'modeShell.activeUiChatSurface';
 const STORAGE_UI_CHAT_DRAFT_PREFIX = 'modeShell.uiChatDraft.';
 const STORAGE_SURFACE_MAIN_VIEW_PREFIX = 'modeShell.surfaceMainView.';
-const STORAGE_SURFACE_CODE_VIEW_PREFIX = 'modeShell.surfaceCodeView.';
 const STORAGE_WORKSPACE_HOME_VIEW = 'modeShell.workspaceHomeView';
+const STORAGE_CONSOLE_SECTION = 'modeShell.consoleSection';
+const STORAGE_CONSOLE_EXPANDED = 'modeShell.consoleExpanded';
+const STORAGE_CARD_RAIL_WIDTH = 'modeShell.cardRailWidth';
 const STORAGE_SURFACE_FEATURE_CHECKLIST_HIDDEN = 'modeShell.surfaceFeatureChecklistHidden';
 const STORAGE_CLAUDE_TERMINAL_HEIGHT = 'modeShell.claudeTerminalHeight';
 const STORAGE_CLAUDE_TERMINAL_ACTIVE = 'modeShell.claudeTerminalActive';
@@ -162,10 +177,11 @@ const CLAUDE_TERMINAL_MIN_HEIGHT = 120;
 const CLAUDE_TERMINAL_DEFAULT_HEIGHT = 240;
 const ADD_SURFACE_ID = '__add_surface__';
 
-type WorkspaceHomeView = 'claudeMd' | 'workspacePlan';
+/** Section shown inside the Console host (Plan / Rules / Brand / Surfaces). */
+type WorkspaceHomeView = ConsoleHomeSection;
 
 function isWorkspaceHomeView(value: string | undefined): value is WorkspaceHomeView {
-	return value === 'claudeMd' || value === 'workspacePlan';
+	return isConsoleHomeSection(value);
 }
 
 export async function runSurfaceWorkflowFromModeShell(surfaceId?: string): Promise<boolean> {
@@ -243,6 +259,7 @@ class ModeShellContribution extends Disposable {
 	private readonly container: HTMLElement;
 	private readonly topModeButtons = new Map<Mode, HTMLButtonElement>();
 	private readonly modeTopBar: HTMLElement;
+	private readonly uiCodeTab: HTMLButtonElement;
 	private readonly uiProjectName: HTMLElement;
 	private readonly uiProjectNameLabel: HTMLElement;
 	private readonly modeSurface: HTMLElement;
@@ -294,13 +311,12 @@ class ModeShellContribution extends Disposable {
 	private readonly uiSurfaceSwitcher: HTMLElement;
 	private readonly uiSurfaceLaunchPanel: HTMLElement;
 	private readonly uiSurfaceMainViewToggle: HTMLElement;
+	private readonly uiSurfaceMainContent: HTMLElement;
 	private readonly uiSurfacePlanPanelRoot: HTMLElement;
 	private readonly uiSurfaceClaudeMdPanelRoot: HTMLElement;
 	private readonly uiSurfaceIxSubsystemsPanelRoot: HTMLElement;
 	private readonly uiSurfaceTaskTreeToggleButtons = new Map<SurfaceMainView, HTMLButtonElement>();
 	private surfacePlanPanel: SurfacePlanPanel | undefined;
-	private surfaceClaudeMdPanel: SurfaceClaudeMdPanel | undefined;
-	private surfaceIxSubsystemsPanel: SurfaceIxSubsystemsPanel | undefined;
 	private surfaceMainView: SurfaceMainView = 'plan';
 	private selectedSurfaceTaskTree: AgentTaskTree | undefined;
 	private readonly uiSurfaceSetupDashboard: HTMLElement;
@@ -320,14 +336,31 @@ class ModeShellContribution extends Disposable {
 	private uiSurfaceScaffoldTextarea!: HTMLTextAreaElement;
 	private uiSurfaceScaffoldScaffoldButton!: HTMLButtonElement;
 	private uiSurfaceScaffoldCancelButton!: HTMLButtonElement;
-	private uiWorkspaceHomeTabToggle!: HTMLElement;
-	private uiWorkspaceHomeClaudeMdButton!: HTMLButtonElement;
-	private uiWorkspaceHomePlanButton!: HTMLButtonElement;
+	private uiWorkspaceHomeCardRail!: CardRailLayout;
+	/** Section cards of the selected surface, shown in the shared rail below the surfaces group. */
+	private surfaceRailCards: readonly CardRailItem[] = [];
+	/** True while a surface is open and its section cards have not published yet. */
+	private surfaceRailCardsLoading = false;
+	/** surfaceId → next human Plan CTA label (Start planning / Confirm repos / Lock & build / …). */
+	private readonly surfacePendingActionById = new Map<string, string>();
+	private surfacePendingActionRefreshGeneration = 0;
+	private readonly surfacePendingActionWatcher = this._register(new MutableDisposable());
+	/** Which left-rail card is highlighted — independent of surface open state so section/home cards can stick. */
+	private activeRailCardId: string | undefined;
+	private uiWorkspacePlanHomePanel!: HTMLElement;
 	private uiWorkspaceClaudeMdPanelRoot!: HTMLElement;
 	private workspaceClaudeMdPanel: SurfaceClaudeMdPanel | undefined;
+	/** Active Console section (Plan / Rules / Brand / Surfaces). */
 	private workspaceHomeView: WorkspaceHomeView = 'workspacePlan';
+	/** When true (and no surface open), Console section cards appear under the Console rail card. */
+	private consoleExpanded = true;
+	private uiConsoleHomeHost!: HTMLElement;
+	private uiConsoleStatusTracker!: HTMLElement;
+	private uiConsoleStatusRail!: HTMLElement;
+	private uiConsoleStatusLabel!: HTMLElement;
+	private uiConsoleSectionHost!: HTMLElement;
+	private lastConsoleCenteredStepId: string | undefined;
 	private uiWorkspacePlanBrandFields!: HTMLElement;
-	private uiSurfaceSetupSurfacesSection!: HTMLElement;
 	private uiSurfaceSetupSurfacesBody!: HTMLElement;
 	private uiSurfaceCreateHost!: HTMLElement;
 	private uiSurfaceCreateChooser!: HTMLElement;
@@ -345,7 +378,9 @@ class ModeShellContribution extends Disposable {
 	private uiWorkspacePlanIntentInput!: HTMLTextAreaElement;
 	private uiWorkspacePlanAttachmentList!: HTMLElement;
 	private uiWorkspacePlanSubmitButton!: HTMLButtonElement;
-	private uiWorkspacePlanStatus!: HTMLElement;
+	private uiWorkspaceSurfacesHost!: HTMLElement;
+	private uiWorkspaceSurfacesGrid!: HTMLElement;
+	private readonly workspaceSurfaceCardListeners = this._register(new DisposableStore());
 	private uiWorkspaceSuggestedHost!: HTMLElement;
 	private uiWorkspaceSuggestedGrid!: HTMLElement;
 	private uiWorkspaceSuggestedCreateButton!: HTMLButtonElement;
@@ -362,6 +397,11 @@ class ModeShellContribution extends Disposable {
 	private workspaceSuggestedSurfaces: WorkspaceSuggestedSurfaces | undefined;
 	private workspaceSuggestedWriteInFlight = false;
 	private workspacePlanKickoffInFlight = false;
+	/** True after kickoff prompt is sent until suggested surfaces (or failure) arrive. */
+	private workspacePlanSessionActive = false;
+	private workspacePlanArtifactExists = false;
+	/** Ensures Surfaces is opened once when suggestions first appear after kickoff. */
+	private workspaceSuggestedSurfacesRevealPending = false;
 	private readonly uiSurfaceSetupSections = new Map<SurfaceSetupStep, HTMLElement>();
 	private surfaceSetupBrandLogoPath: string | undefined;
 	private surfaceSetupBrandLogoMarkPath: string | undefined;
@@ -375,6 +415,8 @@ class ModeShellContribution extends Disposable {
 	private readonly uiSurfaceEmptySubtitle: HTMLElement;
 	private readonly uiSurfaceButtons = new Map<string, HTMLButtonElement>();
 	private selectedSurfaceId: string | undefined;
+	/** Bumped on each surface open / deselect so in-flight opens cannot re-select after collapse. */
+	private surfacePlanOpenGeneration = 0;
 	private lastSurfaceRoutingLogKey: string | undefined;
 	private lastUiStartHints: DevServerSuggestedCommands | undefined;
 	private autoStartAppAttempted = false;
@@ -519,9 +561,78 @@ class ModeShellContribution extends Disposable {
 			this.container.classList.add('custom-mode-web');
 		}
 		this.styleSheet.textContent = `
+			${CARD_RAIL_STYLESHEET.split('\n').map(line => line.trim() ? `\t\t\t${line}` : '').join('\n')}
+
+			.monaco-workbench .custom-mode-ui-workspace-home-rail {
+				flex: 1 1 auto;
+				min-height: 0;
+				height: 100%;
+				margin: 0;
+				border: 0;
+				border-radius: 0;
+				overflow: hidden;
+				background: var(--vscode-editor-background);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-home-rail .custom-mode-card-rail-cards {
+				/* Match Surface proposal tree: sticky left 2-col meta rail */
+				background: var(--vscode-sideBar-background);
+				/* Keep above in-flow webviews that can otherwise steal hits from the rail. */
+				position: relative;
+				z-index: 2;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-home-rail .custom-mode-card-rail-content {
+				padding: 16px 28px;
+				gap: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-home-rail .custom-mode-card-rail-content > .hidden {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-home-panel {
+				display: flex;
+				flex-direction: column;
+				gap: 12px;
+				/* Content-sized so the Console section host can scroll long Plan/Surfaces/Brand views. */
+				flex: 0 0 auto;
+				min-height: auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-home-panel.hidden {
+				display: none !important;
+			}
+
+			/* Code mode: prominent back control to leave the separate editor and return to Console. */
+			.monaco-workbench.custom-mode-shell-enabled.custom-mode-code .custom-mode-ui-project-name {
+				background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-hoverBackground));
+				color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+				border: 1px solid var(--vscode-button-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.35)));
+				font-weight: 700;
+			}
+
+			.monaco-workbench.custom-mode-shell-enabled.custom-mode-code .custom-mode-ui-project-name:hover {
+				background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
+			}
+
 			.monaco-workbench.custom-mode-shell-enabled {
 				--custom-mode-shell-height: 34px;
 				--custom-mode-shell-bottom-inset: 0px;
+			}
+
+			/* Console mode: no top tab row — Code lives as a card in the shared rail. */
+			.monaco-workbench.custom-mode-shell-enabled.custom-mode-top-collapsed {
+				--custom-mode-shell-height: 0px;
+			}
+
+			.monaco-workbench.custom-mode-shell-enabled.custom-mode-top-collapsed > .custom-mode-top-modes {
+				display: none;
+			}
+
+			/* Keep the first rail cards clear of the macOS traffic lights when the top bar is gone. */
+			.monaco-workbench.custom-mode-shell-enabled.custom-mode-top-collapsed.mac:not(.fullscreen) .custom-mode-ui-workspace-home-rail .custom-mode-card-rail-cards {
+				padding-top: 40px;
 			}
 
 			.monaco-workbench.custom-mode-shell-enabled.border.mac {
@@ -600,7 +711,7 @@ class ModeShellContribution extends Disposable {
 				align-items: center;
 				justify-content: flex-start;
 				gap: 8px;
-				padding: 0 12px;
+				padding: 0 20px;
 				box-sizing: border-box;
 				border-bottom: 1px solid var(--vscode-panel-border);
 				background-color: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBar-background));
@@ -610,12 +721,12 @@ class ModeShellContribution extends Disposable {
 			/* Native macOS traffic lights sit in the top-left corner and overlay our shell bar. */
 			.monaco-workbench.custom-mode-shell-enabled.mac:not(.fullscreen) > .custom-mode-top-modes,
 			.monaco-workbench.custom-mode-shell-enabled > .custom-mode-top-modes.mac-native:not(.custom-mode-top-modes-fullscreen) {
-				padding-left: 96px;
+				padding-left: 100px;
 			}
 
 			.monaco-workbench.custom-mode-shell-enabled.mac.macos-tahoe:not(.fullscreen) > .custom-mode-top-modes,
 			.monaco-workbench.custom-mode-shell-enabled > .custom-mode-top-modes.mac-native.macos-tahoe:not(.custom-mode-top-modes-fullscreen) {
-				padding-left: 104px;
+				padding-left: 108px;
 			}
 
 			/*
@@ -673,12 +784,20 @@ class ModeShellContribution extends Disposable {
 				font-weight: 600;
 				line-height: 1;
 				padding: 4px 8px;
-				margin: 0 0 0 12px;
+				margin: 0;
 				border: 0;
 				border-radius: 4px;
 				background: transparent;
 				cursor: pointer;
 				-webkit-app-region: no-drag;
+			}
+
+			.monaco-workbench .custom-mode-ui-code-tab {
+				margin-left: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-code-tab + .custom-mode-ui-project-name {
+				margin-left: 4px;
 			}
 
 			.monaco-workbench .custom-mode-ui-project-name-label {
@@ -805,7 +924,7 @@ class ModeShellContribution extends Disposable {
 				align-items: center;
 				justify-content: space-between;
 				gap: 8px;
-				padding: 6px 10px;
+				padding: 6px 20px;
 				border-bottom: 1px solid var(--vscode-panel-border);
 				color: var(--vscode-foreground);
 				font-size: 12px;
@@ -1460,40 +1579,6 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-tab-activeForeground);
 			}
 
-			.monaco-workbench .custom-mode-ui-surface-code {
-				flex: 0 0 auto;
-				display: inline-flex;
-				align-items: center;
-				justify-content: center;
-				width: 20px;
-				height: 20px;
-				padding: 0;
-				border: 0;
-				border-radius: 4px;
-				background: transparent;
-				color: var(--vscode-tab-inactiveForeground);
-				cursor: pointer;
-				line-height: 1;
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-code .codicon {
-				font-size: 12px;
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-code:hover {
-				background: var(--vscode-toolbar-hoverBackground);
-				color: var(--vscode-tab-activeForeground);
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-code.active {
-				color: var(--vscode-textLink-foreground);
-				background: var(--vscode-list-hoverBackground);
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-tab.active .custom-mode-ui-surface-code:not(.active) {
-				color: var(--vscode-tab-activeForeground);
-			}
-
 			.monaco-workbench .custom-mode-ui-surface-close {
 				flex: 0 0 auto;
 				width: 18px;
@@ -1627,8 +1712,96 @@ class ModeShellContribution extends Disposable {
 				color: var(--vscode-button-foreground);
 			}
 
+			/* Surface Console: view switcher as left 2-col card rail */
+			.monaco-workbench.custom-mode-ui.custom-mode-shell-hasProject .custom-mode-ui-browser-shell.custom-mode-ui-surface-view-cards {
+				flex-direction: row;
+				align-items: stretch;
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell > .custom-mode-ui-surface-main-view-toggle:not(.hidden) {
+				display: grid;
+				grid-template-columns: 1fr 1fr;
+				gap: 8px;
+				align-content: start;
+				align-self: stretch;
+				flex: 0 0 220px;
+				width: 220px;
+				max-width: 220px;
+				padding: 12px;
+				border-right: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.24));
+				background: var(--vscode-sideBar-background);
+				overflow-x: hidden;
+				overflow-y: auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell > .custom-mode-ui-surface-main-view-toggle button {
+				display: flex;
+				flex-direction: column;
+				align-items: flex-start;
+				justify-content: center;
+				gap: 4px;
+				height: auto;
+				min-height: 56px;
+				width: 100%;
+				padding: 10px 12px;
+				border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.24)));
+				border-radius: 7px;
+				background: var(--vscode-editorWidget-background);
+				color: var(--vscode-foreground);
+				text-align: left;
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell > .custom-mode-ui-surface-main-view-toggle button:first-child,
+			.monaco-workbench .custom-mode-ui-browser-shell > .custom-mode-ui-surface-main-view-toggle button:last-child {
+				border-radius: 7px;
+				border-right: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.24)));
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell > .custom-mode-ui-surface-main-view-toggle button:hover:not(.active) {
+				border-color: var(--vscode-focusBorder);
+				background: var(--vscode-toolbar-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell > .custom-mode-ui-surface-main-view-toggle button.active {
+				background: var(--vscode-button-background);
+				border-color: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-main-view-card-key {
+				font: 700 10px/1.3 var(--vscode-font-family);
+				letter-spacing: 0.04em;
+				text-transform: uppercase;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-browser-shell > .custom-mode-ui-surface-main-view-toggle button.active .custom-mode-ui-surface-main-view-card-key {
+				color: inherit;
+				opacity: 0.85;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-main-view-card-value {
+				font-size: 12px;
+				font-weight: 600;
+				line-height: 1.25;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				max-width: 100%;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-main-content {
+				display: flex;
+				flex-direction: column;
+				flex: 1 1 auto;
+				min-width: 0;
+				min-height: 0;
+				overflow: hidden;
+			}
+
 			.monaco-workbench .custom-mode-ui-surface-plan-panel,
-			.monaco-workbench .custom-mode-ui-surface-claude-md-panel {
+			.monaco-workbench .custom-mode-ui-surface-claude-md-panel,
+			.monaco-workbench .custom-mode-ui-surface-ix-subsystems-panel {
 				display: none;
 				flex: 1 1 auto;
 				min-height: 0;
@@ -1636,19 +1809,22 @@ class ModeShellContribution extends Disposable {
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-plan-panel:not(.hidden),
-			.monaco-workbench .custom-mode-ui-surface-claude-md-panel:not(.hidden) {
+			.monaco-workbench .custom-mode-ui-surface-claude-md-panel:not(.hidden),
+			.monaco-workbench .custom-mode-ui-surface-ix-subsystems-panel:not(.hidden) {
 				display: flex;
 				flex-direction: column;
 			}
 
+			/* Padding comes from the shared card rail content host the panel renders in. */
 			.monaco-workbench .custom-mode-surface-plan {
 				display: flex;
 				flex-direction: column;
 				flex: 1 1 auto;
 				min-height: 0;
 				overflow: hidden;
-				padding: 16px 18px;
-				gap: 10px;
+				box-sizing: border-box;
+				padding: 0;
+				gap: 12px;
 				width: 100%;
 			}
 
@@ -1684,6 +1860,199 @@ class ModeShellContribution extends Disposable {
 			.monaco-workbench .custom-mode-surface-plan-status {
 				font-size: 11px;
 				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-tracker {
+				flex: 0 0 auto;
+				display: flex;
+				flex-direction: row;
+				align-items: center;
+				gap: 8px;
+				padding: 10px 12px;
+				border: 1px solid var(--vscode-editorWidget-border);
+				border-radius: 8px;
+				background: var(--vscode-editorWidget-background);
+				min-width: 0;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-scroll {
+				flex: 0 0 auto;
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				width: 26px;
+				height: 26px;
+				padding: 0;
+				border: 1px solid var(--vscode-button-border, transparent);
+				border-radius: 6px;
+				background: var(--vscode-button-secondaryBackground, transparent);
+				color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-scroll:hover:not(:disabled) {
+				background: var(--vscode-toolbar-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-scroll:disabled {
+				opacity: 0.35;
+				cursor: default;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-scroll .codicon {
+				font-size: 14px;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-rail {
+				display: flex;
+				flex-direction: row;
+				align-items: stretch;
+				gap: 0;
+				flex: 1 1 auto;
+				min-width: 0;
+				overflow-x: auto;
+				overflow-y: hidden;
+				scroll-snap-type: x proximity;
+				scrollbar-width: none; /* Firefox */
+				padding: 2px 0;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-rail::-webkit-scrollbar {
+				display: none; /* Chromium / Electron */
+				width: 0;
+				height: 0;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-step {
+				position: relative;
+				display: flex;
+				flex-direction: column;
+				justify-content: center;
+				gap: 4px;
+				flex: 0 0 auto;
+				width: min(200px, 42vw);
+				min-width: 148px;
+				max-width: 220px;
+				padding: 4px 18px 4px 8px;
+				scroll-snap-align: center;
+				box-sizing: border-box;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-step.linked-surface {
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-step.linked-surface:hover {
+				background: color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent);
+				border-radius: 6px;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-step.has-next-action {
+				width: min(280px, 56vw);
+				min-width: 200px;
+				max-width: 300px;
+				padding: 6px 18px 8px 10px;
+				gap: 6px;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-step.current .custom-mode-surface-plan-status-value {
+				color: var(--vscode-foreground);
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-step.completed .custom-mode-surface-plan-status-value {
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-step.pending .custom-mode-surface-plan-status-value {
+				color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-step.current {
+				border-radius: 6px;
+				background: color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent);
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-connector {
+				position: absolute;
+				top: 50%;
+				right: 4px;
+				width: 10px;
+				height: 1px;
+				background: var(--vscode-editorWidget-border);
+				transform: translateY(-50%);
+				pointer-events: none;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-label {
+				font: 700 10px/1.3 var(--vscode-font-family);
+				letter-spacing: .04em;
+				text-transform: uppercase;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-step.current .custom-mode-surface-plan-status-label {
+				color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-value {
+				font-size: 12px;
+				line-height: 1.35;
+				color: var(--vscode-descriptionForeground);
+				overflow: hidden;
+				display: -webkit-box;
+				-webkit-line-clamp: 2;
+				-webkit-box-orient: vertical;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-next-action {
+				flex: 0 0 auto;
+				align-self: flex-start;
+				height: 24px;
+				margin-top: 2px;
+				padding: 0 10px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-button-border, transparent);
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+				font-size: 11px;
+				font-weight: 600;
+				cursor: pointer;
+				max-width: 100%;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			/* Parked on the tracker shell only when there is no current-step host. */
+			.monaco-workbench .custom-mode-surface-plan-status-tracker > .custom-mode-surface-plan-status-next-action {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-next-action.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-next-action:disabled {
+				opacity: 0.55;
+				cursor: default;
+			}
+
+			.monaco-workbench .custom-mode-surface-plan-status-in-flight {
+				flex: 0 0 auto;
+				align-self: flex-start;
+				margin-top: 2px;
+				padding: 2px 8px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-editorWidget-border);
+				background: color-mix(in srgb, var(--vscode-badge-background) 40%, transparent);
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+				font-weight: 600;
+				max-width: 100%;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
 			}
 
 			.monaco-workbench .custom-mode-surface-plan-references {
@@ -2306,10 +2675,10 @@ class ModeShellContribution extends Disposable {
 				cursor: default;
 			}
 
+			/* The surface setup dashboard stays visible in plan overlay mode — it hosts the shared card rail. */
 			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-overlay .custom-mode-ui-frame,
 			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-overlay .custom-mode-ui-webview,
-			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-overlay .custom-mode-ui-surface-empty,
-			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-overlay .custom-mode-ui-surface-setup {
+			.monaco-workbench .custom-mode-ui-browser-shell.custom-mode-ui-surface-main-view-overlay .custom-mode-ui-surface-empty {
 				display: none !important;
 			}
 
@@ -2321,10 +2690,10 @@ class ModeShellContribution extends Disposable {
 				display: none;
 				flex: 1 1 auto;
 				min-height: 0;
-				padding: 24px 28px;
+				padding: 0;
 				background: var(--vscode-editorBackground);
 				color: var(--vscode-foreground);
-				overflow: auto;
+				overflow: hidden;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup:not(.hidden) {
@@ -2338,21 +2707,23 @@ class ModeShellContribution extends Disposable {
 				display: flex;
 				flex-direction: column;
 				width: 100%;
-				max-width: 960px;
 				flex: 1 1 auto;
 				min-height: 0;
-			}
-
-			.monaco-workbench .custom-mode-ui-surface-context-item.handoff-active {
-				border-color: var(--vscode-focusBorder);
-				background: var(--vscode-list-hoverBackground);
+				overflow: hidden;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-main {
 				min-width: 0;
 				display: flex;
 				flex-direction: column;
-				gap: 16px;
+				flex: 1 1 auto;
+				min-height: 0;
+				overflow: hidden;
+			}
+
+			.monaco-workbench .custom-mode-ui-surface-context-item.handoff-active {
+				border-color: var(--vscode-focusBorder);
+				background: var(--vscode-list-hoverBackground);
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-setup-inner.custom-mode-ui-surface-scaffold-open {
@@ -2537,6 +2908,12 @@ class ModeShellContribution extends Disposable {
 				background: var(--vscode-editorWidget-background);
 			}
 
+			/* Rules fills the section host; markdown body scrolls inside (same as Surface CLAUDE.md). */
+			.monaco-workbench .custom-mode-ui-workspace-claude-md-panel:not(.hidden) {
+				flex: 1 1 auto;
+				min-height: 0;
+			}
+
 			.monaco-workbench .custom-mode-ui-workspace-home-toggle {
 				padding: 0;
 			}
@@ -2699,6 +3076,14 @@ class ModeShellContribution extends Disposable {
 				gap: 12px;
 			}
 
+			/* Danger-zone footer on the workspace Plan home — hosts Clear all Surfaces. */
+			.monaco-workbench .custom-mode-ui-workspace-plan-home-actions {
+				display: flex;
+				justify-content: flex-end;
+				flex: 0 0 auto;
+				padding-top: 4px;
+			}
+
 			.monaco-workbench .custom-mode-ui-surface-starters-header .custom-mode-ui-surface-surfaces-title {
 				flex: 1 1 auto;
 				min-width: 0;
@@ -2849,11 +3234,52 @@ class ModeShellContribution extends Disposable {
 				cursor: default;
 			}
 
-			.monaco-workbench .custom-mode-ui-workspace-plan-status {
+			.monaco-workbench .custom-mode-ui-console-home {
+				display: flex;
+				flex-direction: column;
+				gap: 12px;
+				flex: 1 1 auto;
+				min-height: 0;
+				min-width: 0;
+				/* Match Surface plan: pin steps, scroll section content below. */
+				overflow: hidden;
+			}
+
+			.monaco-workbench .custom-mode-ui-console-home.hidden {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-ui-console-home-status {
+				flex: 0 0 auto;
 				font-size: 11px;
 				color: var(--vscode-descriptionForeground);
 			}
 
+			.monaco-workbench .custom-mode-ui-console-home > .custom-mode-surface-plan-status-tracker {
+				flex: 0 0 auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-console-home-status.hidden,
+			.monaco-workbench .custom-mode-ui-console-home > .custom-mode-surface-plan-status-tracker.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-console-section-host {
+				display: flex;
+				flex-direction: column;
+				flex: 1 1 auto;
+				min-height: 0;
+				min-width: 0;
+				/* Same role as Surface proposal-tree `.sections` — scroll all card content. */
+				overflow: auto;
+				padding-right: 4px;
+			}
+
+			.monaco-workbench .custom-mode-ui-console-section-host > .custom-mode-ui-workspace-home-panel {
+				margin: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-surfaces,
 			.monaco-workbench .custom-mode-ui-workspace-suggested {
 				display: flex;
 				flex-direction: column;
@@ -2861,8 +3287,37 @@ class ModeShellContribution extends Disposable {
 				margin: 0 0 16px;
 			}
 
+			.monaco-workbench .custom-mode-ui-workspace-surfaces.hidden,
 			.monaco-workbench .custom-mode-ui-workspace-suggested.hidden {
 				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-surfaces-header {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 10px;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-surfaces-title {
+				font-size: 13px;
+				font-weight: 650;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-surfaces-grid {
+				display: grid;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				gap: 12px;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-surfaces-card.active {
+				border-color: var(--vscode-focusBorder, var(--vscode-panel-border));
+				background: color-mix(in srgb, var(--vscode-focusBorder, #3794ff) 12%, var(--vscode-editor-background));
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-surfaces-card-badge {
+				color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
 			}
 
 			.monaco-workbench .custom-mode-ui-workspace-suggested-header {
@@ -5015,14 +5470,24 @@ class ModeShellContribution extends Disposable {
 			observer.observe(this.container, { attributes: true, attributeFilter: ['class'] });
 			this._register(toDisposable(() => observer.disconnect()));
 		}
+		this.uiCodeTab = $('button.custom-mode-ui-project-name.custom-mode-ui-code-tab.hidden', {
+			type: 'button',
+			role: 'tab',
+			title: localize('customMode.codeTabTitle', 'Open Code editor'),
+			'aria-pressed': 'false',
+		}, localize('customMode.codeTab', 'Code')) as HTMLButtonElement;
 		this.uiProjectNameLabel = $('span.custom-mode-ui-project-name-label');
 		this.uiProjectName = $('button.custom-mode-ui-project-name.hidden', {
 			type: 'button',
 			role: 'tab',
-			title: localize('customMode.consoleHomeTitle', 'Open Console surfaces home'),
+			title: localize('customMode.backToConsoleTitle', 'Back to Console'),
 			'aria-pressed': 'false',
 		}, this.uiProjectNameLabel) as HTMLButtonElement;
+		this.modeTopBar.appendChild(this.uiCodeTab);
 		this.modeTopBar.appendChild(this.uiProjectName);
+		this._register(addDisposableListener(this.uiCodeTab, 'click', () => {
+			this.openCodeTab();
+		}));
 		this._register(addDisposableListener(this.uiProjectName, 'click', () => {
 			this.goToConsoleHome();
 		}));
@@ -5153,22 +5618,38 @@ class ModeShellContribution extends Disposable {
 			type: 'button',
 			role: 'tab',
 			'aria-selected': 'false',
-		}, localize('customMode.surfaceMainViewPlan', 'Plan')) as HTMLButtonElement;
+			title: localize('customMode.surfaceMainViewPlan', 'Plan'),
+		},
+			$('span.custom-mode-ui-surface-main-view-card-key', undefined, localize('customMode.surfaceMainViewPlanKey', 'Plan')),
+			$('span.custom-mode-ui-surface-main-view-card-value', undefined, localize('customMode.surfaceMainViewPlanValue', 'plan.md')),
+		) as HTMLButtonElement;
 		const claudeMdToggleButton = $('button', {
 			type: 'button',
 			role: 'tab',
 			'aria-selected': 'false',
-		}, localize('customMode.surfaceMainViewClaudeMd', 'CLAUDE.md')) as HTMLButtonElement;
+			title: localize('customMode.surfaceMainViewClaudeMd', 'CLAUDE.md'),
+		},
+			$('span.custom-mode-ui-surface-main-view-card-key', undefined, localize('customMode.surfaceMainViewClaudeMdKey', 'Rules')),
+			$('span.custom-mode-ui-surface-main-view-card-value', undefined, localize('customMode.surfaceMainViewClaudeMd', 'CLAUDE.md')),
+		) as HTMLButtonElement;
 		const previewToggleButton = $('button', {
 			type: 'button',
 			role: 'tab',
 			'aria-selected': 'false',
-		}, localize('customMode.surfaceMainViewPreview', 'Preview')) as HTMLButtonElement;
+			title: localize('customMode.surfaceMainViewPreview', 'Preview'),
+		},
+			$('span.custom-mode-ui-surface-main-view-card-key', undefined, localize('customMode.surfaceMainViewPreviewKey', 'Preview')),
+			$('span.custom-mode-ui-surface-main-view-card-value', undefined, localize('customMode.surfaceMainViewPreviewValue', 'Live app')),
+		) as HTMLButtonElement;
 		const ixSubsystemsToggleButton = $('button', {
 			type: 'button',
 			role: 'tab',
 			'aria-selected': 'false',
-		}, localize('customMode.surfaceMainViewIxSubsystems', 'Generated Code Graph')) as HTMLButtonElement;
+			title: localize('customMode.surfaceMainViewIxSubsystems', 'Generated Code Graph'),
+		},
+			$('span.custom-mode-ui-surface-main-view-card-key', undefined, localize('customMode.surfaceMainViewIxSubsystemsKey', 'Graph')),
+			$('span.custom-mode-ui-surface-main-view-card-value', undefined, localize('customMode.surfaceMainViewIxSubsystemsShort', 'Code graph')),
+		) as HTMLButtonElement;
 		this.uiSurfaceTaskTreeToggleButtons.set('claudeMd', claudeMdToggleButton);
 		this.uiSurfaceTaskTreeToggleButtons.set('plan', planToggleButton);
 		this.uiSurfaceTaskTreeToggleButtons.set('preview', previewToggleButton);
@@ -5183,22 +5664,61 @@ class ModeShellContribution extends Disposable {
 		this._register(addDisposableListener(ixSubsystemsToggleButton, 'click', () => this.setSurfaceMainView('ixSubsystems')));
 		this.uiSurfacePlanPanelRoot = $('div.custom-mode-ui-surface-plan-panel.hidden');
 		this.uiSurfacePlanPanelRoot.hidden = true;
-		this.surfacePlanPanel = this._register(new SurfacePlanPanel(this.uiSurfacePlanPanelRoot, this.fileService, this.webviewService));
+		this.surfacePlanPanel = this._register(new SurfacePlanPanel(
+			this.uiSurfacePlanPanelRoot,
+			this.fileService,
+			this.webviewService,
+			this.ixIntegrationService,
+		));
 		this._register(this.surfacePlanPanel.onDidRequestBuild(request => {
+			this.selectOwningSurfaceCard(request.surfaceId);
 			void this.submitPlanBuildIntent(request);
 		}));
 		this._register(this.surfacePlanPanel.onDidConfirmReferenceSelection(selection => {
+			this.selectOwningSurfaceCard(selection.surfaceId);
 			void this.notifyClaudeReferenceSelectionConfirmed(selection);
+		}));
+		this._register(this.surfacePlanPanel.onDidRequestNextAction(request => {
+			this.selectOwningSurfaceCard(request.surfaceId);
+			void this.notifyClaudePlanNextAction(request);
+		}));
+		this._register(this.surfacePlanPanel.onDidSelectOwningSurface(request => {
+			this.selectOwningSurfaceCard(request.surfaceId);
+		}));
+		this._register(this.surfacePlanPanel.onDidChangeCards(cards => {
+			// Ignore tree republishes after the surface was collapsed — otherwise stale section
+			// cards keep the rail in surface mode and setCards thrash destroys pressable buttons.
+			const openSurfaceId = this.getOpenSurfaceId();
+			if (!openSurfaceId) {
+				this.surfaceRailCardsLoading = false;
+				return;
+			}
+			const next = cards.map(card => ({
+				id: `surfaceSection:${card.id}`,
+				key: card.key,
+				value: card.value,
+				title: localize('customMode.surfaceRailSectionTitle', 'Show {0}', card.key),
+			}));
+			const wasLoading = this.surfaceRailCardsLoading;
+			this.surfaceRailCardsLoading = false;
+			if (cardRailItemsEqual(this.surfaceRailCards, next)) {
+				if (wasLoading) {
+					// First section-card publish after open — keep owning SURFACE card selected.
+					this.selectOwningSurfaceCard(openSurfaceId);
+				}
+				return;
+			}
+			this.surfaceRailCards = next;
+			if (wasLoading || !this.activeRailCardId?.startsWith('surface:')) {
+				this.selectOwningSurfaceCard(openSurfaceId);
+			} else {
+				this.syncWorkspaceHomeView();
+			}
 		}));
 		this.uiSurfaceClaudeMdPanelRoot = $('div.custom-mode-ui-surface-claude-md-panel.hidden');
 		this.uiSurfaceClaudeMdPanelRoot.hidden = true;
-		this.surfaceClaudeMdPanel = this._register(new SurfaceClaudeMdPanel(this.uiSurfaceClaudeMdPanelRoot, this.fileService));
 		this.uiSurfaceIxSubsystemsPanelRoot = $('div.custom-mode-ui-surface-ix-subsystems-panel.hidden');
 		this.uiSurfaceIxSubsystemsPanelRoot.hidden = true;
-		this.surfaceIxSubsystemsPanel = this._register(new SurfaceIxSubsystemsPanel(
-			this.uiSurfaceIxSubsystemsPanelRoot,
-			this.ixIntegrationService,
-		));
 		this._register(this.agentTaskTreeService.onDidChangeTaskTree(tree => {
 			if (!tree?.surfaceId || tree.surfaceId !== this.selectedSurfaceId) {
 				return;
@@ -5220,14 +5740,18 @@ class ModeShellContribution extends Disposable {
 				this.uiSurfaceEmptySubtitle
 			)
 		);
+		// The surface plan panel renders inside the shared card rail's content host (see
+		// createSurfaceSetupDashboard), so Console home and surface views share one card column.
+		this.uiSurfaceMainContent = $('div.custom-mode-ui-surface-main-content', undefined,
+			this.uiSurfaceLaunchPanel,
+			this.uiSurfaceClaudeMdPanelRoot,
+			this.uiSurfaceIxSubsystemsPanelRoot,
+			this.uiSurfaceSetupDashboard,
+			this.uiSurfaceEmptyState,
+			this.uiBrowser,
+		);
 		this.uiBrowserShell.appendChild(this.uiSurfaceMainViewToggle);
-		this.uiBrowserShell.appendChild(this.uiSurfaceLaunchPanel);
-		this.uiBrowserShell.appendChild(this.uiSurfacePlanPanelRoot);
-		this.uiBrowserShell.appendChild(this.uiSurfaceClaudeMdPanelRoot);
-		this.uiBrowserShell.appendChild(this.uiSurfaceIxSubsystemsPanelRoot);
-		this.uiBrowserShell.appendChild(this.uiSurfaceSetupDashboard);
-		this.uiBrowserShell.appendChild(this.uiSurfaceEmptyState);
-		this.uiBrowserShell.appendChild(this.uiBrowser);
+		this.uiBrowserShell.appendChild(this.uiSurfaceMainContent);
 
 		this.uiMainColumn.appendChild(this.uiSetup);
 		this.uiMainColumn.appendChild(this.uiBrowserShell);
@@ -5317,7 +5841,6 @@ class ModeShellContribution extends Disposable {
 		this.modeTopBar.appendChild(this.uiSurfaceSwitcher);
 		const topBarSpacer = $('div.custom-mode-top-spacer');
 		this.modeTopBar.appendChild(topBarSpacer);
-		this.modeTopBar.appendChild(this.uiClearAllSurfacesBtn);
 		this.modeTopBar.appendChild(this.uiSelectionClearBtn);
 		this.modeTopBar.appendChild(this.uiSelectionPill);
 		this._register(toDisposable(() => {
@@ -5519,6 +6042,7 @@ class ModeShellContribution extends Disposable {
 		this._register(this.consoleService.onDidChangeWorkspace(() => {
 			this.syncGoalSurfaceSwitcher();
 			void this.refreshSurfaceSetupDashboard();
+			void this.refreshSurfacePendingActions();
 		}));
 		this._register(this.devServerService.onDidChangeActiveUrl(url => {
 			if (!url) {
@@ -6516,23 +7040,15 @@ class ModeShellContribution extends Disposable {
 			this.uiSurfaceDescribeCompose,
 		);
 		this.uiWorkspacePlanStrip = this.createWorkspacePlanStrip();
+		this.uiWorkspaceSurfacesHost = this.createWorkspaceSurfacesHost();
 		this.uiWorkspaceSuggestedHost = this.createWorkspaceSuggestedHost();
 		this.uiStartAllSurfacesButton = $('button.custom-mode-start-all-surfaces', { type: 'button' }, localize('customMode.startAllSurfaces', 'Start all surfaces')) as HTMLButtonElement;
 		this._register(addDisposableListener(this.uiStartAllSurfacesButton, 'click', () => void this.onStartAllSurfacesClicked()));
 		const surfacesTitle = $('div.custom-mode-ui-surface-surfaces-title', undefined, localize('customMode.surfaceSetupStartersTitle', 'Surfaces'));
-		this.uiSurfaceSetupSurfacesBody = $('div.custom-mode-ui-surface-surfaces-body', { id: 'surface-setup-surfaces-body' },
-			$('div.custom-mode-ui-surface-starters', undefined,
-				$('div.custom-mode-ui-surface-starters-header', undefined,
-					surfacesTitle,
-					this.uiStartAllSurfacesButton,
-				),
-				this.uiWorkspaceSuggestedHost,
-				this.uiSurfaceCreateHost,
-			),
-		);
 
 		this.uiSurfaceSetupGoalNameInput = $('input.custom-mode-ui-surface-goal-input', {
 			type: 'text',
+			value: DEFAULT_WORKSPACE_PLAN_BUSINESS_NAME,
 			placeholder: localize('customMode.surfaceSetupGoalNamePlaceholder', 'e.g. Summit Coaching Co.'),
 			'aria-label': localize('customMode.surfaceSetupGoalNameAria', 'Business name'),
 		}) as HTMLInputElement;
@@ -6561,7 +7077,7 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceSetupLogoMarkDropzone = logoMarkDropzone.dropzone;
 		this.uiSurfaceSetupLogoMarkPreview = logoMarkDropzone.preview;
 
-		this.uiWorkspacePlanBrandFields = $('div.custom-mode-ui-surface-business-context.hidden', undefined,
+		this.uiWorkspacePlanBrandFields = $('div.custom-mode-ui-surface-business-context.custom-mode-ui-workspace-home-panel.hidden', undefined,
 			$('label.custom-mode-ui-surface-goal-field', undefined,
 				$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalDescriptionLabel', 'Description')),
 				this.uiSurfaceSetupGoalDescriptionInput
@@ -6579,56 +7095,154 @@ class ModeShellContribution extends Disposable {
 			brandColors,
 		);
 
-		this.uiWorkspaceHomeClaudeMdButton = $('button', {
-			type: 'button',
-			role: 'tab',
-			'aria-selected': 'false',
-		}, localize('customMode.workspaceHomeClaudeMd', 'CLAUDE.md')) as HTMLButtonElement;
-		this.uiWorkspaceHomePlanButton = $('button', {
-			type: 'button',
-			role: 'tab',
-			'aria-selected': 'true',
-		}, localize('customMode.workspaceHomePlan', 'Workspace Plan')) as HTMLButtonElement;
-		this.uiWorkspaceHomeTabToggle = $('div.custom-mode-ui-surface-main-view-toggle.custom-mode-ui-workspace-home-toggle', {
-			role: 'tablist',
-			'aria-label': localize('customMode.workspaceHomeTabs', 'Workspace home views'),
-		}, this.uiWorkspaceHomeClaudeMdButton, this.uiWorkspaceHomePlanButton);
-		this._register(addDisposableListener(this.uiWorkspaceHomeClaudeMdButton, 'click', () => this.setWorkspaceHomeView('claudeMd')));
-		this._register(addDisposableListener(this.uiWorkspaceHomePlanButton, 'click', () => this.setWorkspaceHomeView('workspacePlan')));
-
 		this.uiWorkspaceClaudeMdPanelRoot = $('div.custom-mode-ui-workspace-claude-md-panel.custom-mode-ui-workspace-home-panel.hidden');
 		this.workspaceClaudeMdPanel = this._register(new SurfaceClaudeMdPanel(this.uiWorkspaceClaudeMdPanelRoot, this.fileService));
 
-		const storedHomeView = this.storageService.get(STORAGE_WORKSPACE_HOME_VIEW, StorageScope.WORKSPACE);
-		this.workspaceHomeView = isWorkspaceHomeView(storedHomeView) ? storedHomeView : 'workspacePlan';
-
-		const goalSection = $('section.custom-mode-ui-surface-setup-section', { id: 'surface-setup-section-goal', 'data-section': 'goal' },
-			$('div.custom-mode-ui-surface-goal-form', undefined,
-				$('label.custom-mode-ui-surface-goal-field', undefined,
-					$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalNameLabel', 'Business name')),
-					this.uiSurfaceSetupGoalNameInput
-				),
-				this.uiWorkspaceHomeTabToggle,
-				this.uiWorkspaceClaudeMdPanelRoot,
-				this.uiWorkspacePlanStrip,
-				this.uiWorkspacePlanBrandFields,
-			)
+		this.uiWorkspacePlanHomePanel = $('div.custom-mode-ui-workspace-plan-home.custom-mode-ui-workspace-home-panel', undefined,
+			$('label.custom-mode-ui-surface-goal-field', undefined,
+				$('span.custom-mode-ui-surface-goal-label', undefined, localize('customMode.surfaceSetupGoalNameLabel', 'Business name')),
+				this.uiSurfaceSetupGoalNameInput
+			),
+			this.uiWorkspacePlanStrip,
+			$('div.custom-mode-ui-workspace-plan-home-actions', undefined,
+				this.uiClearAllSurfacesBtn,
+			),
 		);
-		this.uiSurfaceSetupSurfacesSection = $('section.custom-mode-ui-surface-setup-section', { id: 'surface-setup-section-surfaces', 'data-section': 'surfaces' },
+
+		this.uiSurfaceSetupSurfacesBody = $('div.custom-mode-ui-surface-surfaces-body.custom-mode-ui-workspace-home-panel.hidden', { id: 'surface-setup-surfaces-body' },
+			$('div.custom-mode-ui-surface-starters', undefined,
+				$('div.custom-mode-ui-surface-starters-header', undefined,
+					surfacesTitle,
+					this.uiStartAllSurfacesButton,
+				),
+				// Order: real workspace surfaces → suggested → Create Surface.
+				this.uiWorkspaceSurfacesHost,
+				this.uiWorkspaceSuggestedHost,
+				this.uiSurfaceCreateHost,
+			),
+		);
+
+		this.uiConsoleStatusRail = $('div.custom-mode-surface-plan-status-rail', {
+			role: 'list',
+			'aria-label': localize('customMode.consoleWorkflowProgressRail', 'Console lifecycle progress'),
+		});
+		this.uiConsoleStatusTracker = $('div.custom-mode-surface-plan-status-tracker', {
+			'aria-live': 'polite',
+		}, this.uiConsoleStatusRail);
+		this.uiConsoleStatusLabel = $('div.custom-mode-ui-console-home-status');
+		this.uiConsoleSectionHost = $('div.custom-mode-ui-console-section-host', undefined,
+			this.uiWorkspacePlanHomePanel,
+			this.uiWorkspaceClaudeMdPanelRoot,
+			this.uiWorkspacePlanBrandFields,
 			this.uiSurfaceSetupSurfacesBody,
 		);
-		const surfacesSection = this.uiSurfaceSetupSurfacesSection;
+		this.uiConsoleHomeHost = $('div.custom-mode-ui-console-home', undefined,
+			this.uiConsoleStatusTracker,
+			this.uiConsoleStatusLabel,
+			this.uiConsoleSectionHost,
+		);
+
+		const storedConsoleSection = this.storageService.get(STORAGE_CONSOLE_SECTION, StorageScope.WORKSPACE)
+			?? this.storageService.get(STORAGE_WORKSPACE_HOME_VIEW, StorageScope.WORKSPACE);
+		this.workspaceHomeView = isWorkspaceHomeView(storedConsoleSection) ? storedConsoleSection : 'workspacePlan';
+		const storedConsoleExpanded = this.storageService.get(STORAGE_CONSOLE_EXPANDED, StorageScope.WORKSPACE);
+		this.consoleExpanded = storedConsoleExpanded !== '0';
+
+		// Recover the workbench grid if a prior session left it inside a removed in-canvas Code host.
+		const strandedGrid = this.container.querySelector('.custom-mode-ui-workspace-code-panel > .monaco-grid-view');
+		if (strandedGrid instanceof HTMLElement) {
+			this.container.appendChild(strandedGrid);
+			this.container.classList.remove('custom-mode-canvas-code');
+			this.scheduleWorkbenchRelayout();
+		}
+
+		const storedRailWidth = Number(this.storageService.get(STORAGE_CARD_RAIL_WIDTH, StorageScope.PROFILE));
+		this.uiWorkspaceHomeCardRail = createCardRailLayout({
+			ariaLabel: localize('customMode.workspaceHomeTabs', 'Workspace home views'),
+			className: 'custom-mode-ui-workspace-home-rail',
+			activeId: this.consoleExpanded ? `consoleSection:${this.workspaceHomeView}` : 'console',
+			width: Number.isFinite(storedRailWidth) ? clampCardRailWidth(storedRailWidth) : CARD_RAIL_DEFAULT_WIDTH,
+			onWidthChange: width => {
+				this.storageService.store(STORAGE_CARD_RAIL_WIDTH, String(width), StorageScope.PROFILE, StorageTarget.USER);
+			},
+			cards: this.getWorkspaceHomeCards(),
+			onSelect: id => {
+				if (id === 'code') {
+					this.openCodeTab();
+					return;
+				}
+				if (id === 'console') {
+					this.onSelectConsoleCard();
+					return;
+				}
+				if (id === 'newSurface:describe') {
+					this.openNewSurfaceDescribe();
+					return;
+				}
+				if (id === 'newSurface:import') {
+					this.openNewSurfaceImport();
+					return;
+				}
+				if (id.startsWith('consoleSection:')) {
+					const sectionId = id.slice('consoleSection:'.length);
+					if (!isWorkspaceHomeView(sectionId)) {
+						return;
+					}
+					this.consoleExpanded = true;
+					this.persistConsoleExpanded();
+					this.activeRailCardId = id;
+					this.deselectSurfaceForHomeRail();
+					this.setWorkspaceHomeView(sectionId);
+					// Keep Console parent selected with the section subcard (same pattern as SURFACE + Plan).
+					this.uiWorkspaceHomeCardRail.setActiveId(id, ['console']);
+					return;
+				}
+				if (id.startsWith('surfaceSection:')) {
+					const sectionId = id.slice('surfaceSection:'.length);
+					if (!sectionId) {
+						return;
+					}
+					// Keep the surface open — highlight section + keep parent surface selected.
+					this.activeRailCardId = id;
+					const openSurfaceId = this.getOpenSurfaceId();
+					this.uiWorkspaceHomeCardRail.setActiveId(
+						id,
+						openSurfaceId ? [`surface:${openSurfaceId}`] : [],
+					);
+					this.surfacePlanPanel?.selectSection(sectionId);
+					return;
+				}
+				if (id.startsWith('surface:')) {
+					const surfaceId = id.slice('surface:'.length);
+					if (!surfaceId) {
+						return;
+					}
+					if (this.selectedSurfaceId === surfaceId) {
+						// Selecting the open surface again collapses its section cards and returns to Console.
+						this.openConsoleWithSection(this.workspaceHomeView);
+						return;
+					}
+					this.activeRailCardId = id;
+					void this.openWorkspaceSuggestedSurfacePlan(surfaceId);
+				}
+			},
+			content: [
+				this.uiConsoleHomeHost,
+				this.uiSurfacePlanPanelRoot,
+			],
+		});
+		this._register({ dispose: () => this.uiWorkspaceHomeCardRail.dispose() });
+
 		for (const [step, section] of [
-			['goal', goalSection],
+			['goal', this.uiWorkspacePlanHomePanel],
 			['brand', this.uiWorkspacePlanBrandFields],
-			['surfaces', surfacesSection],
+			['surfaces', this.uiSurfaceSetupSurfacesBody],
 		] as const) {
 			this.uiSurfaceSetupSections.set(step, section);
 		}
 
 		this.uiSurfaceSetupMain = $('div.custom-mode-ui-surface-setup-main', undefined,
-			goalSection,
-			surfacesSection,
+			this.uiWorkspaceHomeCardRail.root,
 		);
 		this.syncWorkspaceHomeView();
 		this.uiSurfaceScaffoldTitle = $('div.custom-mode-ui-surface-scaffold-title');
@@ -6680,11 +7294,11 @@ class ModeShellContribution extends Disposable {
 			),
 			'aria-label': localize('customMode.workspacePlanIntentAria', 'Workspace planning intent'),
 		}) as HTMLTextAreaElement;
+		this.uiWorkspacePlanIntentInput.value = DEFAULT_WORKSPACE_PLAN_INTENT;
 		this.uiWorkspacePlanAttachmentList = $('div.custom-mode-ui-workspace-plan-attachments');
 		this.uiWorkspacePlanSubmitButton = $('button.custom-mode-ui-workspace-plan-submit', {
 			type: 'button',
 		}, localize('customMode.workspacePlanSubmit', 'Start workspace planning')) as HTMLButtonElement;
-		this.uiWorkspacePlanStatus = $('div.custom-mode-ui-workspace-plan-status');
 
 		const fileInput = $('input', { type: 'file', accept: '.pdf,application/pdf,image/*,.doc,.docx,.md,.txt', hidden: 'true', multiple: 'true' }) as HTMLInputElement;
 		const fileButton = $('button.custom-mode-ui-surface-describe-media-btn', {
@@ -6716,7 +7330,6 @@ class ModeShellContribution extends Disposable {
 				this.uiWorkspacePlanAttachmentList,
 				$('div.custom-mode-ui-workspace-plan-actions', undefined, fileButton, fileInput, this.uiWorkspacePlanSubmitButton),
 			),
-			this.uiWorkspacePlanStatus,
 		);
 		this._register(addDisposableListener(root, 'dragenter', event => {
 			if (!this.dragEventHasFiles(event)) {
@@ -6751,6 +7364,16 @@ class ModeShellContribution extends Disposable {
 			}
 		}));
 		return root;
+	}
+
+	private createWorkspaceSurfacesHost(): HTMLElement {
+		this.uiWorkspaceSurfacesGrid = $('div.custom-mode-ui-workspace-surfaces-grid');
+		return $('div.custom-mode-ui-workspace-surfaces.hidden', undefined,
+			$('div.custom-mode-ui-workspace-surfaces-header', undefined,
+				$('div.custom-mode-ui-workspace-surfaces-title', undefined, localize('customMode.workspaceSurfacesTitle', 'Your surfaces')),
+			),
+			this.uiWorkspaceSurfacesGrid,
+		);
 	}
 
 	private createWorkspaceSuggestedHost(): HTMLElement {
@@ -6836,16 +7459,29 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 		this.workspacePlanKickoffInFlight = true;
+		this.workspacePlanSessionActive = false;
 		this.uiWorkspacePlanSubmitButton.disabled = true;
 		const submitLabel = this.uiWorkspacePlanSubmitButton.textContent;
 		this.uiWorkspacePlanSubmitButton.textContent = localize('customMode.workspacePlanSubmitStarting', 'Starting…');
-		this.uiWorkspacePlanStatus.textContent = localize('customMode.workspacePlanStatusPlanning', 'Planning…');
+		this.renderConsoleWorkflowProgress();
 		const attachmentsSnapshot = [...this.workspacePlanAttachments];
 		try {
 			this.logClaudeKickoff(`workspace-plan start attachments=${attachmentsSnapshot.length}`);
 			await this.ensureWorkspaceClaudeMd(workspaceFolder);
 			await this.fileService.createFolder(joinPath(workspaceFolder, '.agent'));
 			await this.fileService.createFolder(workspaceAttachmentsDir(workspaceFolder));
+			// Re-derive planning from the current brief: the kickoff prompt stops when both
+			// artifacts exist, so stale ones from a previous pass would short-circuit it.
+			for (const resource of [workspacePlanResource(workspaceFolder), workspaceSuggestedSurfacesResource(workspaceFolder)]) {
+				try {
+					await this.fileService.del(resource);
+				} catch {
+					// Missing artifacts are fine on a first run.
+				}
+			}
+			this.workspaceSuggestedSurfaces = undefined;
+			this.renderWorkspaceSuggestedSurfaces();
+			this.logClaudeKickoff('workspace-plan cleared previous planning artifacts');
 			const attachmentPaths: string[] = [];
 			const usedNames = new Set<string>();
 			for (const attachment of attachmentsSnapshot) {
@@ -6897,23 +7533,31 @@ class ModeShellContribution extends Disposable {
 				throw new Error(`Claude terminal exited during kickoff (reason=${terminal.exitReason ?? 'disposed'})`);
 			}
 			this.logClaudeKickoff(`workspace-plan kickoff submitted (${prompt.length} chars)`);
+			this.workspacePlanSessionActive = true;
+			this.workspaceSuggestedSurfacesRevealPending = true;
+			this.applyClaudeTerminalHeight(Math.max(this.claudeTerminalHeight, CLAUDE_TERMINAL_DEFAULT_HEIGHT), { persist: false });
 			this.watchWorkspaceSuggestedSurfaces(workspaceFolder);
+			this.renderConsoleWorkflowProgress();
 			this.notificationService.info(localize(
 				'customMode.workspacePlanStarted',
-				'Claude is drafting a workspace plan and suggested surfaces. Watch the Console for cards.',
+				'Claude is drafting a workspace plan and suggested surfaces. Cards will appear under Surfaces.',
 			));
 		} catch (error: unknown) {
-			this.uiWorkspacePlanStatus.textContent = localize('customMode.workspacePlanStatusFailed', 'Planning failed');
+			this.workspacePlanSessionActive = false;
 			this.logClaudeKickoff(`workspace-plan FAILED: ${String((error as Error)?.message ?? error)}`, true);
 			this.notificationService.error(localize(
 				'customMode.workspacePlanStartFailed',
 				'Failed to start workspace planning: {0}',
 				String((error as Error)?.message ?? error),
 			));
+			this.renderConsoleWorkflowProgress();
 		} finally {
 			this.workspacePlanKickoffInFlight = false;
 			this.uiWorkspacePlanSubmitButton.disabled = false;
 			this.uiWorkspacePlanSubmitButton.textContent = submitLabel || localize('customMode.workspacePlanSubmit', 'Start workspace planning');
+			if (this.workspacePlanSessionActive) {
+				this.renderConsoleWorkflowProgress();
+			}
 		}
 	}
 
@@ -6935,12 +7579,63 @@ class ModeShellContribution extends Disposable {
 			// Watching is best-effort.
 		}
 		void this.refreshWorkspaceSuggestedSurfaces(workspaceFolder);
+		this.watchSurfacePendingActions(workspaceFolder);
+	}
+
+	/** Watch plan/workflow/candidates/proposal files so surface-card attention dots stay current. */
+	private watchSurfacePendingActions(workspaceFolder: URI): void {
+		const store = new DisposableStore();
+		this.surfacePendingActionWatcher.value = store;
+		try {
+			store.add(this.fileService.watch(joinPath(workspaceFolder, '.agent')));
+			store.add(this.fileService.watch(joinPath(workspaceFolder, '.agent', 'surfaces')));
+			store.add(this.fileService.watch(joinPath(workspaceFolder, '.agent', 'task-trees')));
+			store.add(this.fileService.onDidFilesChange(e => {
+				const surfacesDir = joinPath(workspaceFolder, '.agent', 'surfaces');
+				const treesDir = joinPath(workspaceFolder, '.agent', 'task-trees');
+				if (e.affects(surfacesDir) || e.contains(surfacesDir) || e.affects(treesDir) || e.contains(treesDir)) {
+					void this.refreshSurfacePendingActions(workspaceFolder);
+				}
+			}));
+		} catch {
+			// Watching is best-effort.
+		}
+		void this.refreshSurfacePendingActions(workspaceFolder);
+	}
+
+	private async refreshSurfacePendingActions(workspaceFolder?: URI): Promise<void> {
+		const folder = workspaceFolder ?? this.getWorkspaceFolderUri();
+		const generation = ++this.surfacePendingActionRefreshGeneration;
+		if (!folder) {
+			this.surfacePendingActionById.clear();
+			this.syncWorkspaceHomeView();
+			return;
+		}
+		const surfaces = this.consoleService.getSurfaces();
+		const entries = await Promise.all(surfaces.map(async surface => {
+			const action = await resolveSurfacePendingPlanAction(this.fileService, folder, surface.id, {
+				surfacePath: surface.path,
+				surfaceConfirmed: true,
+			});
+			return [surface.id, action?.label] as const;
+		}));
+		if (generation !== this.surfacePendingActionRefreshGeneration) {
+			return;
+		}
+		this.surfacePendingActionById.clear();
+		for (const [surfaceId, label] of entries) {
+			if (label) {
+				this.surfacePendingActionById.set(surfaceId, label);
+			}
+		}
+		this.syncWorkspaceHomeView();
 	}
 
 	private async refreshWorkspaceSuggestedSurfaces(workspaceFolder?: URI): Promise<void> {
 		const folder = workspaceFolder ?? this.getWorkspaceFolderUri();
 		if (!folder) {
 			this.workspaceSuggestedSurfaces = undefined;
+			this.workspacePlanArtifactExists = false;
 			this.renderWorkspaceSuggestedSurfaces();
 			void this.refreshWorkspacePlanGeneratedState(undefined);
 			return;
@@ -6951,11 +7646,164 @@ class ModeShellContribution extends Disposable {
 		} catch {
 			this.workspaceSuggestedSurfaces = undefined;
 		}
+		try {
+			this.workspacePlanArtifactExists = await this.fileService.exists(workspacePlanResource(folder));
+		} catch {
+			this.workspacePlanArtifactExists = false;
+		}
+		if (this.workspaceSuggestedSurfaces?.surfaces.length) {
+			this.workspacePlanSessionActive = false;
+		}
 		this.renderWorkspaceSuggestedSurfaces();
 		void this.refreshWorkspacePlanGeneratedState(folder);
 	}
 
 	private async refreshWorkspacePlanGeneratedState(_workspaceFolder?: URI): Promise<void> {
+		this.renderConsoleWorkflowProgress();
+		this.syncWorkspaceHomeView();
+	}
+
+	/** Workspace/Console steps row — only while Console (parent or section) is the selection. */
+	private isConsoleCardSelected(): boolean {
+		if (this.getOpenSurfaceId()) {
+			return false;
+		}
+		const activeId = this.activeRailCardId ?? '';
+		return activeId === 'console' || activeId.startsWith('consoleSection:');
+	}
+
+	private renderConsoleWorkflowProgress(): void {
+		if (!this.uiConsoleStatusTracker || !this.uiConsoleStatusRail || !this.uiConsoleStatusLabel) {
+			return;
+		}
+		const showSteps = this.isConsoleCardSelected();
+		this.uiConsoleStatusTracker.classList.toggle('hidden', !showSteps);
+		this.uiConsoleStatusLabel.classList.toggle('hidden', !showSteps);
+		if (!showSteps) {
+			this.uiConsoleStatusRail.replaceChildren();
+			this.uiConsoleStatusLabel.textContent = '';
+			this.lastConsoleCenteredStepId = undefined;
+			return;
+		}
+		const pendingLabels = [...this.surfacePendingActionById.values()];
+		const status = resolveConsoleWorkflowStatus({
+			kickoffInFlight: this.workspacePlanKickoffInFlight,
+			sessionActive: this.workspacePlanSessionActive,
+			hasWorkspacePlan: this.workspacePlanArtifactExists,
+			hasSuggestedSurfaces: Boolean(this.workspaceSuggestedSurfaces?.surfaces.length),
+			suggestedStatus: this.workspaceSuggestedSurfaces?.status,
+			surfaceCount: this.consoleService.getSurfaces().length,
+			anySurfaceRunning: this.startedSurfaceServers.size > 0,
+			anySurfaceBuilding: this.startingSurfaceServers.size > 0
+				|| pendingLabels.some(label => !/start planning|confirm repos/i.test(label)),
+			anySurfacePlanLocked: pendingLabels.some(label => /lock/i.test(label)),
+		});
+		this.uiConsoleStatusRail.replaceChildren();
+		for (let index = 0; index < status.steps.length; index++) {
+			const step = status.steps[index]!;
+			this.uiConsoleStatusRail.appendChild(this.createConsoleWorkflowProgressStep(step, index < status.steps.length - 1));
+		}
+		this.uiConsoleStatusLabel.textContent = status.statusLabel
+			|| (status.stageId === 'idle'
+				? localize('customMode.consoleWorkflowIdle', 'Kick off workspace planning to start the Console lifecycle.')
+				: '');
+		const currentStepId = status.steps.find(step => step.status === 'current')?.id;
+		if (currentStepId && currentStepId !== this.lastConsoleCenteredStepId) {
+			this.lastConsoleCenteredStepId = currentStepId;
+			queueMicrotask(() => this.centerConsoleWorkflowProgressStep(currentStepId));
+		} else if (!currentStepId) {
+			this.lastConsoleCenteredStepId = undefined;
+		}
+	}
+
+	private createConsoleWorkflowProgressStep(step: ConsoleWorkflowStepState, withConnector: boolean): HTMLElement {
+		const statusLabel = step.status === 'completed'
+			? localize('surfacePlan.statusCompleted', 'Done')
+			: step.status === 'current'
+				? localize('surfacePlan.statusCurrent', 'Current')
+				: localize('surfacePlan.statusUpcoming', 'Upcoming');
+		const stepEl = $('div.custom-mode-surface-plan-status-step', {
+			role: 'listitem',
+			'data-step-id': step.id,
+			'data-status': step.status,
+			'aria-current': step.status === 'current' ? 'step' : undefined,
+			title: step.label,
+		},
+			$('div.custom-mode-surface-plan-status-label', undefined, statusLabel),
+			$('div.custom-mode-surface-plan-status-value', undefined, step.label),
+		);
+		stepEl.classList.toggle('completed', step.status === 'completed');
+		stepEl.classList.toggle('current', step.status === 'current');
+		stepEl.classList.toggle('pending', step.status === 'pending' || step.status === 'skipped');
+		if (withConnector) {
+			stepEl.appendChild($('div.custom-mode-surface-plan-status-connector', { 'aria-hidden': 'true' }));
+		}
+		return stepEl;
+	}
+
+	private centerConsoleWorkflowProgressStep(stepId: string): void {
+		const rail = this.uiConsoleStatusRail;
+		if (!rail) {
+			return;
+		}
+		const stepEl = Array.from(rail.children).find(child =>
+			child instanceof HTMLElement && child.dataset.stepId === stepId
+		) as HTMLElement | undefined;
+		if (!stepEl) {
+			return;
+		}
+		const maxScroll = Math.max(0, rail.scrollWidth - rail.clientWidth);
+		const target = stepEl.offsetLeft + (stepEl.offsetWidth / 2) - (rail.clientWidth / 2);
+		const left = Math.max(0, Math.min(maxScroll, target));
+		if (Math.abs(rail.scrollLeft - left) < 2) {
+			return;
+		}
+		rail.scrollTo({ left, behavior: 'auto' });
+	}
+
+	/** Collapse any selected surface so the rail returns to a workspace home view. */
+	private deselectSurfaceForHomeRail(): void {
+		if (!this.selectedSurfaceId || this.selectedSurfaceId === ADD_SURFACE_ID) {
+			return;
+		}
+		// Invalidate any in-flight openWorkspaceSuggestedSurfacePlan so refresh completion
+		// cannot snap the surface back open after the user collapsed it.
+		this.surfacePlanOpenGeneration++;
+		this.surfaceRailCards = [];
+		this.surfaceRailCardsLoading = false;
+		this.selectedSurfaceId = ADD_SURFACE_ID;
+		if (!this.activeRailCardId || this.activeRailCardId.startsWith('surface:') || this.activeRailCardId.startsWith('surfaceSection:')) {
+			this.activeRailCardId = this.consoleExpanded
+				? `consoleSection:${this.workspaceHomeView}`
+				: 'console';
+		}
+		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
+		// Hide the surface plan webview immediately — async routing used to leave it painted
+		// over the rail so cards looked dead.
+		this.uiSurfacePlanPanelRoot.classList.add('hidden');
+		this.uiSurfacePlanPanelRoot.hidden = true;
+		this.uiBrowserShell.classList.remove('custom-mode-ui-surface-main-view-overlay');
+		// Drop Steps ownership so home never shows another surface's tracker.
+		this.surfacePlanPanel?.clear();
+		this.applySurfaceSelection(ADD_SURFACE_ID, { contextGathering: true });
+		this.syncGoalSurfaceSwitcher();
+		this.syncSurfaceMainView();
+	}
+
+	/** Highlight the SURFACE card that owns the Steps rail (keep Plan open). */
+	private selectOwningSurfaceCard(surfaceId: string): void {
+		const id = surfaceId.trim();
+		if (!id) {
+			return;
+		}
+		const cardId = `surface:${id}`;
+		this.activeRailCardId = cardId;
+		if (this.selectedSurfaceId !== id) {
+			void this.openWorkspaceSuggestedSurfacePlan(id);
+			return;
+		}
+		// Primary selection is always the SURFACE card; section cards stay visible but not focused.
+		this.uiWorkspaceHomeCardRail?.setActiveId(cardId, []);
 		this.syncWorkspaceHomeView();
 	}
 
@@ -6966,60 +7814,333 @@ class ModeShellContribution extends Disposable {
 		}
 		this.workspaceHomeView = view;
 		this.storageService.store(STORAGE_WORKSPACE_HOME_VIEW, view, StorageScope.WORKSPACE, StorageTarget.USER);
+		this.storageService.store(STORAGE_CONSOLE_SECTION, view, StorageScope.WORKSPACE, StorageTarget.USER);
 		this.syncWorkspaceHomeView();
 	}
 
-	private syncWorkspaceHomeView(): void {
-		if (!this.uiWorkspaceHomeTabToggle || !this.uiWorkspacePlanStrip || !this.uiWorkspaceClaudeMdPanelRoot) {
+	private persistConsoleExpanded(): void {
+		this.storageService.store(
+			STORAGE_CONSOLE_EXPANDED,
+			this.consoleExpanded ? '1' : '0',
+			StorageScope.WORKSPACE,
+			StorageTarget.USER,
+		);
+	}
+
+	/** Open Console (expanded) on a section — used by ← Console and collapsing a surface. */
+	private openConsoleWithSection(view: WorkspaceHomeView): void {
+		this.consoleExpanded = true;
+		this.persistConsoleExpanded();
+		this.activeRailCardId = `consoleSection:${view}`;
+		this.deselectSurfaceForHomeRail();
+		this.setWorkspaceHomeView(view);
+	}
+
+	/** Console card: expand home / restore last section, or collapse section cards when already open. */
+	private onSelectConsoleCard(): void {
+		const openSurfaceId = this.getOpenSurfaceId();
+		if (openSurfaceId) {
+			this.openConsoleWithSection(this.workspaceHomeView);
 			return;
 		}
-		const showClaudeMd = this.workspaceHomeView === 'claudeMd';
-		const showPlan = this.workspaceHomeView === 'workspacePlan';
-		this.uiWorkspaceHomeClaudeMdButton.classList.toggle('active', showClaudeMd);
-		this.uiWorkspaceHomePlanButton.classList.toggle('active', showPlan);
-		this.uiWorkspaceHomeClaudeMdButton.setAttribute('aria-selected', String(showClaudeMd));
-		this.uiWorkspaceHomePlanButton.setAttribute('aria-selected', String(showPlan));
+		if (this.consoleExpanded) {
+			this.consoleExpanded = false;
+			this.persistConsoleExpanded();
+			this.activeRailCardId = 'console';
+			this.syncWorkspaceHomeView();
+			return;
+		}
+		this.consoleExpanded = true;
+		this.persistConsoleExpanded();
+		this.activeRailCardId = `consoleSection:${this.workspaceHomeView}`;
+		this.setWorkspaceHomeView(this.workspaceHomeView);
+	}
+
+	private getWorkspaceHomeCards(): CardRailItem[] {
+		const existing = this.consoleService.getSurfaces();
+		const openSurfaceId = this.getOpenSurfaceId();
+		const cards: CardRailItem[] = [
+			{
+				id: 'code',
+				key: localize('customMode.workspaceHomeCodeKey', 'Code'),
+				value: localize('customMode.workspaceHomeCodeValue', 'Editor'),
+				title: localize('customMode.codeTabTitle', 'Open Code editor'),
+				groupLabel: localize('customMode.workspaceHomeWorkspaceSection', 'Workspace'),
+			},
+			{
+				id: 'console',
+				key: localize('customMode.workspaceHomeConsoleKey', 'Console'),
+				value: localize('customMode.workspaceHomeConsoleValue', 'home'),
+				title: this.consoleExpanded && !openSurfaceId
+					? localize('customMode.workspaceHomeConsoleCollapse', 'Collapse Console sections')
+					: localize('customMode.workspaceHomeConsoleOpen', 'Open Console'),
+			},
+		];
+
+		if (this.consoleExpanded && !openSurfaceId) {
+			const suggestedCount = this.workspaceSuggestedSurfaces?.surfaces.length ?? 0;
+			cards.push(
+				{
+					id: 'consoleSection:workspacePlan',
+					key: localize('customMode.workspaceHomePlanKey', 'Plan'),
+					value: localize('customMode.workspaceHomePlanValue', 'workspace.plan'),
+					title: localize('customMode.workspaceHomePlan', 'Workspace Plan'),
+					groupStart: true,
+				},
+				{
+					id: 'consoleSection:claudeMd',
+					key: localize('customMode.workspaceHomeClaudeMdKey', 'Rules'),
+					value: localize('customMode.workspaceHomeClaudeMd', 'CLAUDE.md'),
+					title: localize('customMode.workspaceHomeClaudeMd', 'CLAUDE.md'),
+				},
+				{
+					id: 'consoleSection:branding',
+					key: localize('customMode.workspaceHomeBrandingKey', 'Brand'),
+					value: localize('customMode.workspaceHomeBrandingValue', 'logo · colors'),
+					title: localize('customMode.workspaceHomeBranding', 'Branding'),
+				},
+				{
+					id: 'consoleSection:surfaces',
+					key: localize('customMode.workspaceHomeSurfacesKey', 'Surfaces'),
+					value: suggestedCount > 0
+						? localize('customMode.workspaceHomeSurfacesSuggestedValue', '{0} suggested', suggestedCount)
+						: localize('customMode.workspaceHomeSurfacesValue', 'apps'),
+					title: localize('customMode.workspaceHomeSurfaces', 'Surfaces — suggested apps and create'),
+				},
+			);
+		}
+
+		// Surfaces list: existing surfaces, then open-surface section cards (Files / Graph / …).
+		// Describe / Import stay on the workspace home rail only — never mixed into an open
+		// surface's section cards.
+		let surfaceGroupStarted = false;
+		for (const surface of existing) {
+			const open = surface.id === openSurfaceId;
+			const pendingLabel = this.surfacePendingActionById.get(surface.id);
+			const pendingAction = Boolean(pendingLabel);
+			cards.push({
+				id: `surface:${surface.id}`,
+				key: localize('customMode.workspaceHomeSurfaceKey', 'Surface'),
+				value: surface.name,
+				title: pendingLabel
+					? localize(
+						'customMode.workspaceHomeSurfacePending',
+						'{0} — next: {1}',
+						surface.name,
+						pendingLabel,
+					)
+					: open
+						? localize('customMode.workspaceHomeSurfaceClose', 'Close {0}', surface.name)
+						: localize('customMode.workspaceHomeSurfaceOpen', 'Open {0}', surface.name),
+				pendingAction,
+				groupLabel: !surfaceGroupStarted
+					? localize('customMode.workspaceHomeSurfacesSection', 'Surfaces')
+					: undefined,
+			});
+			surfaceGroupStarted = true;
+		}
+		if (openSurfaceId && this.surfaceRailCards.length) {
+			let sectionGroupStarted = false;
+			for (const card of this.surfaceRailCards) {
+				cards.push({
+					...card,
+					groupStart: !sectionGroupStarted,
+				});
+				sectionGroupStarted = true;
+			}
+		}
+		if (!openSurfaceId) {
+			cards.push(
+				{
+					id: 'newSurface:describe',
+					key: localize('customMode.workspaceHomeNewSurfaceDescribeKey', 'Describe'),
+					value: localize('customMode.workspaceHomeNewSurfaceDescribeValue', 'New app'),
+					title: localize('customMode.surfaceDescribeAppTitle', 'Describe an app and start Claude planning'),
+					groupLabel: localize('customMode.workspaceHomeNewSurfaceSection', 'New Surface'),
+				},
+				{
+					id: 'newSurface:import',
+					key: localize('customMode.workspaceHomeNewSurfaceImportKey', 'Import'),
+					value: localize('customMode.workspaceHomeNewSurfaceImportValue', 'Repo'),
+					title: localize('customMode.surfaceImportRepoTitle', 'Import an existing repo as a surface'),
+				},
+			);
+		}
+		return cards;
+	}
+
+	/** The surface whose cards are expanded in the shared rail, if any. */
+	private getOpenSurfaceId(): string | undefined {
+		return this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID
+			? this.selectedSurfaceId
+			: undefined;
+	}
+
+	private syncWorkspaceHomeView(): void {
+		if (!this.uiWorkspaceHomeCardRail || !this.uiWorkspacePlanStrip || !this.uiWorkspaceClaudeMdPanelRoot || !this.uiWorkspacePlanHomePanel || !this.uiConsoleHomeHost) {
+			return;
+		}
+		// With a surface open, the rail content host shows the surface plan panel instead of
+		// the Console host (its visibility is driven by syncSurfaceMainView).
+		const openSurfaceId = this.getOpenSurfaceId();
+		const showConsoleHost = !openSurfaceId;
+		const showClaudeMd = showConsoleHost && this.workspaceHomeView === 'claudeMd';
+		const showPlan = showConsoleHost && this.workspaceHomeView === 'workspacePlan';
+		const showSurfaces = showConsoleHost && this.workspaceHomeView === 'surfaces';
+		const showBranding = showConsoleHost && this.workspaceHomeView === 'branding';
+
+		const cards = this.getWorkspaceHomeCards();
+		const cardIds = new Set(cards.map(card => card.id));
+		const fallbackActive = openSurfaceId
+			? `surface:${openSurfaceId}`
+			: (this.consoleExpanded ? `consoleSection:${this.workspaceHomeView}` : 'console');
+		let activeId = this.activeRailCardId && cardIds.has(this.activeRailCardId)
+			? this.activeRailCardId
+			: fallbackActive;
+		// Don't keep a Console / new-surface card highlighted while surface content is still open.
+		if (openSurfaceId && (
+			activeId === 'code'
+			|| activeId === 'console'
+			|| activeId.startsWith('consoleSection:')
+			|| isWorkspaceHomeView(activeId)
+			|| activeId.startsWith('newSurface:')
+		)) {
+			activeId = fallbackActive;
+		}
+		// Console expanded: always focus a section subcard (never leave only the parent selected).
+		if (!openSurfaceId && this.consoleExpanded && !activeId.startsWith('consoleSection:')) {
+			activeId = `consoleSection:${this.workspaceHomeView}`;
+		}
+		this.activeRailCardId = activeId;
+		// Keep the open Console / surface parent highlighted when a nested section card is focused.
+		const alsoSelected: string[] = [];
+		if (openSurfaceId && activeId !== `surface:${openSurfaceId}`) {
+			alsoSelected.push(`surface:${openSurfaceId}`);
+		}
+		if (!openSurfaceId && this.consoleExpanded) {
+			alsoSelected.push('console');
+		}
+		// Apply selection before setCards so a rail rebuild paints parent + subcard active together.
+		this.uiWorkspaceHomeCardRail.setActiveId(activeId, alsoSelected);
+		this.uiWorkspaceHomeCardRail.setCards(cards);
+		this.uiWorkspaceHomeCardRail.setActiveId(activeId, alsoSelected);
+		this.uiWorkspaceHomeCardRail.setLoading(
+			Boolean(openSurfaceId && this.surfaceRailCardsLoading && this.surfaceRailCards.length === 0),
+			localize('customMode.surfaceRailCardsLoading', 'Loading surface…'),
+		);
+
+		this.uiConsoleHomeHost.classList.toggle('hidden', !showConsoleHost);
+		this.uiWorkspacePlanHomePanel.classList.toggle('hidden', !showPlan);
 		this.uiWorkspaceClaudeMdPanelRoot.classList.toggle('hidden', !showClaudeMd);
+		this.uiSurfaceSetupSurfacesBody.classList.toggle('hidden', !showSurfaces);
+		this.uiWorkspacePlanBrandFields.classList.toggle('hidden', !showBranding);
 		this.uiWorkspacePlanStrip.classList.toggle('hidden', !showPlan);
-		// Temporarily hide description / logo / brand color fields.
-		this.uiWorkspacePlanBrandFields.classList.add('hidden');
+		// Steps row visibility follows Console selection (not merely "no surface open").
+		this.renderConsoleWorkflowProgress();
+		if (showSurfaces) {
+			this.renderWorkspaceSurfaces();
+		}
 		if (showClaudeMd) {
 			void this.workspaceClaudeMdPanel?.load({ workspaceFolder: this.getWorkspaceFolderUri() });
 		}
 	}
 
+	private renderWorkspaceSurfaces(): void {
+		this.workspaceSurfaceCardListeners.clear();
+		this.uiWorkspaceSurfacesGrid.replaceChildren();
+		const surfaces = this.consoleService.getSurfaces();
+		if (!surfaces.length) {
+			this.uiWorkspaceSurfacesHost.classList.add('hidden');
+			return;
+		}
+		this.uiWorkspaceSurfacesHost.classList.remove('hidden');
+		const openId = this.getOpenSurfaceId();
+		for (const surface of surfaces) {
+			this.uiWorkspaceSurfacesGrid.appendChild(this.createWorkspaceSurfaceCard(surface, openId === surface.id));
+		}
+	}
+
+	private createWorkspaceSurfaceCard(surface: WorkspaceSurface, active: boolean): HTMLElement {
+		const card = $('button.custom-mode-ui-workspace-suggested-card.custom-mode-ui-workspace-surfaces-card', {
+			type: 'button',
+			title: localize('customMode.workspaceSurfaceOpenTitle', 'Open {0}', surface.name),
+			'aria-pressed': active ? 'true' : 'false',
+		}) as HTMLButtonElement;
+		card.classList.toggle('active', active);
+		card.classList.toggle('selected', active);
+
+		const top = $('div.custom-mode-ui-workspace-suggested-card-top', undefined,
+			$('div.custom-mode-ui-workspace-suggested-card-name', undefined, surface.name),
+			$('span.custom-mode-ui-workspace-suggested-card-badge.custom-mode-ui-workspace-surfaces-card-badge', undefined,
+				localize('customMode.workspaceSurfaceBadge', 'Surface')),
+		);
+		card.appendChild(top);
+		if (surface.purpose) {
+			card.appendChild($('div.custom-mode-ui-workspace-suggested-card-purpose', undefined, surface.purpose));
+		}
+		const chips = [
+			...(surface.path ? [surface.path] : []),
+			...surface.capabilities.slice(0, 6),
+		];
+		if (chips.length) {
+			card.appendChild($('div.custom-mode-ui-workspace-suggested-card-chips', undefined,
+				...chips.map(chip =>
+					$('span.custom-mode-ui-workspace-suggested-card-chip', undefined, chip)
+				),
+			));
+		}
+		this.workspaceSurfaceCardListeners.add(addDisposableListener(card, 'click', () => {
+			void this.openWorkspaceSuggestedSurfacePlan(surface.id);
+		}));
+		return card;
+	}
+
 	private renderWorkspaceSuggestedSurfaces(): void {
+		this.renderWorkspaceSurfaces();
 		this.workspaceSuggestedCardListeners.clear();
 		this.uiWorkspaceSuggestedGrid.replaceChildren();
 		const doc = this.workspaceSuggestedSurfaces;
-		if (!doc?.surfaces.length) {
+		// Keep Suggested for surfaces not yet materialized in workspace.goal.json.
+		const pending = (doc?.surfaces ?? []).filter(surface => !this.findExistingSuggestedSurfaceId(surface));
+		if (!pending.length) {
 			this.uiWorkspaceSuggestedHost.classList.add('hidden');
-			if (!this.workspacePlanKickoffInFlight) {
-				this.uiWorkspacePlanStatus.textContent = '';
-			}
+			this.renderConsoleWorkflowProgress();
+			this.syncWorkspaceHomeView();
 			return;
 		}
 
 		this.uiWorkspaceSuggestedHost.classList.remove('hidden');
-		const interactive = doc.status === 'draft';
-		const selectedCount = selectedSuggestedSurfaces(doc).length;
-		this.uiWorkspaceSuggestedCreateButton.disabled = !interactive || selectedCount === 0;
-		this.uiWorkspacePlanStatus.textContent = doc.status === 'confirmed'
-			? localize('customMode.workspacePlanStatusCreated', 'Created selected surfaces from the workspace plan.')
-			: localize('customMode.workspacePlanStatusSuggested', '{0} suggested surface(s) — toggle and create.', doc.surfaces.length);
+		const selectedCount = pending.filter(surface => surface.selected).length;
+		this.uiWorkspaceSuggestedCreateButton.disabled = selectedCount === 0;
+		this.renderConsoleWorkflowProgress();
 
-		for (const surface of doc.surfaces) {
-			this.uiWorkspaceSuggestedGrid.appendChild(this.createWorkspaceSuggestedCard(surface, interactive));
+		for (const surface of pending) {
+			this.uiWorkspaceSuggestedGrid.appendChild(this.createWorkspaceSuggestedCard(surface));
 		}
+		// Suggestions belong on Surfaces — open that Console section once when they first appear after kickoff.
+		if (
+			this.workspaceSuggestedSurfacesRevealPending
+			&& doc
+			&& doc.status !== 'confirmed'
+			&& !this.getOpenSurfaceId()
+		) {
+			this.workspaceSuggestedSurfacesRevealPending = false;
+			this.openConsoleWithSection('surfaces');
+			return;
+		}
+		this.syncWorkspaceHomeView();
 	}
 
-	private createWorkspaceSuggestedCard(surface: WorkspaceSuggestedSurface, interactive: boolean): HTMLElement {
+	private createWorkspaceSuggestedCard(surface: WorkspaceSuggestedSurface): HTMLElement {
+		const existingId = this.findExistingSuggestedSurfaceId(surface);
 		const card = $('button.custom-mode-ui-workspace-suggested-card', {
 			type: 'button',
 			'aria-pressed': surface.selected ? 'true' : 'false',
+			title: existingId
+				? localize('customMode.workspaceSuggestedOpenTitle', 'Open {0}', surface.name)
+				: localize('customMode.workspaceSuggestedCreateTitle', 'Create {0}', surface.name),
 		}) as HTMLButtonElement;
 		card.classList.toggle('selected', surface.selected);
-		card.disabled = !interactive;
 
 		const top = $('div.custom-mode-ui-workspace-suggested-card-top', undefined,
 			$('div.custom-mode-ui-workspace-suggested-card-name', undefined, surface.name),
@@ -7040,30 +8161,188 @@ class ModeShellContribution extends Disposable {
 				),
 			));
 		}
-		if (interactive) {
-			this.workspaceSuggestedCardListeners.add(addDisposableListener(card, 'click', () => {
-				void this.toggleWorkspaceSuggestedSelection(surface.id, !surface.selected);
-			}));
-		}
+		this.workspaceSuggestedCardListeners.add(addDisposableListener(card, 'click', () => {
+			void this.createAndOpenWorkspaceSuggestedSurface(surface);
+		}));
 		return card;
 	}
 
-	private async toggleWorkspaceSuggestedSelection(surfaceId: string, selected: boolean): Promise<void> {
-		if (!this.workspaceSuggestedSurfaces || this.workspaceSuggestedSurfaces.status !== 'draft') {
-			return;
+	private findExistingSuggestedSurfaceId(surface: WorkspaceSuggestedSurface): string | undefined {
+		const preferredId = slugifySurfaceId(surface.id || surface.name);
+		const byId = this.consoleService.getSurface(preferredId)
+			?? (preferredId !== surface.id ? this.consoleService.getSurface(surface.id) : undefined);
+		if (byId) {
+			return byId.id;
 		}
+		return this.consoleService.getSurfaces().find(candidate => candidate.name === surface.name)?.id;
+	}
+
+	/** Create (or reopen) one suggested surface and switch Console to its Plan view. */
+	private async createAndOpenWorkspaceSuggestedSurface(surface: WorkspaceSuggestedSurface): Promise<void> {
 		const workspaceFolder = this.getWorkspaceFolderUri();
 		if (!workspaceFolder) {
+			this.notificationService.warn(localize('customMode.surfaceClaudeNoWorkspace', 'Open a workspace folder before creating a new surface.'));
 			return;
 		}
-		const next = withSuggestedSurfaceSelection(this.workspaceSuggestedSurfaces, surfaceId, selected);
-		await this.persistWorkspaceSuggestedSurfaces(workspaceFolder, next);
+		try {
+			const existingId = this.findExistingSuggestedSurfaceId(surface);
+			const surfaceId = existingId ?? await this.materializeWorkspaceSuggestedSurface(workspaceFolder, surface);
+			if (!surfaceId) {
+				this.notificationService.warn(localize(
+					'customMode.workspaceSuggestedCreateOneFailed',
+					'Could not create {0} as a surface view.',
+					surface.name,
+				));
+				return;
+			}
+			// Console owns the confirm gate: durable status + selection before any Claude kickoff.
+			if (this.workspaceSuggestedSurfaces) {
+				const selected = withSuggestedSurfaceSelection(this.workspaceSuggestedSurfaces, surface.id, true);
+				const confirmed = withSuggestedSurfacesStatus(selected, 'confirmed');
+				await this.persistWorkspaceSuggestedSurfaces(workspaceFolder, confirmed);
+			}
+			await this.openWorkspaceSuggestedSurfacePlan(surfaceId);
+			if (!existingId) {
+				await this.kickoffSuggestedSurfaceResearch(workspaceFolder, surfaceId, surface);
+				this.notificationService.info(localize(
+					'customMode.workspaceSuggestedCreatedOne',
+					'Created {0} surface view.',
+					surface.name,
+				));
+			} else {
+				this.notificationService.info(localize('customMode.workspaceSuggestedOpened', 'Opened {0}.', surface.name));
+			}
+		} catch (error: unknown) {
+			this.notificationService.error(localize(
+				'customMode.workspaceSuggestedCreateOneError',
+				'Failed to create {0}: {1}',
+				surface.name,
+				String((error as Error)?.message ?? error),
+			));
+		}
+	}
+
+	/** After Console confirms a suggested surface, kick Claude into per-surface Research. */
+	private async kickoffSuggestedSurfaceResearch(
+		workspaceFolder: URI,
+		surfaceId: string,
+		surface: WorkspaceSuggestedSurface,
+	): Promise<void> {
+		const intentParts = [
+			surface.purpose?.trim() || `Build ${surface.name}.`,
+			surface.primaryUsers.length ? `Primary users: ${surface.primaryUsers.join(', ')}` : '',
+			surface.keyCapabilities.length ? `Key capabilities:\n${surface.keyCapabilities.map(cap => `- ${cap}`).join('\n')}` : '',
+		].filter(Boolean);
+		try {
+			await this.ensureWorkspaceClaudeMd(workspaceFolder);
+			await this.beginSurfacePlanningSession({
+				workspaceFolder,
+				surfaceId,
+				surfaceName: surface.name,
+				intent: intentParts.join('\n'),
+				writeProvisionalPlan: false,
+			});
+		} catch (error: unknown) {
+			this.notificationService.warn(localize(
+				'customMode.workspaceSuggestedResearchKickoffFailed',
+				'Created {0}, but could not start Claude Research: {1}',
+				surface.name,
+				String((error as Error)?.message ?? error),
+			));
+		}
+	}
+
+	private async materializeWorkspaceSuggestedSurface(
+		workspaceFolder: URI,
+		surface: WorkspaceSuggestedSurface,
+	): Promise<string | undefined> {
+		await this.fileService.createFolder(joinPath(workspaceFolder, '.agent', 'surfaces'));
+		await this.fileService.createFolder(joinPath(workspaceFolder, '.agent', 'task-trees'));
+		const surfaceId = this.uniqueSurfaceId(surface.id || surface.name);
+		const imported = await upsertImportedGoalWorkspaceSurface(this.fileService, workspaceFolder, {
+			surfaceId,
+			surfaceName: surface.name,
+			relativePath: `apps/${surfaceId}`,
+			purpose: surface.purpose || localize('customMode.surfaceClaudePurpose', 'Planning surface for {0}.', surface.name),
+		});
+		if (!imported) {
+			return undefined;
+		}
+		const planResource = surfacePlanResource(workspaceFolder, surfaceId);
+		try {
+			await this.fileService.stat(planResource);
+		} catch {
+			const provisional = [
+				`# ${surface.name} — Plan`,
+				'',
+				'## Status',
+				'Created from workspace plan — open Plan to continue Research.',
+				'',
+				'## Intent',
+				surface.purpose || surface.name,
+				'',
+				'## Primary users',
+				...(surface.primaryUsers.length ? surface.primaryUsers.map(user => `- ${user}`) : ['- (tbd)']),
+				'',
+				'## Key capabilities',
+				...(surface.keyCapabilities.length ? surface.keyCapabilities.map(cap => `- ${cap}`) : ['- (tbd)']),
+				'',
+				'## §0 Plan lock',
+				'- [ ] Locked',
+				'',
+				'## Research',
+				'(pending)',
+				'',
+				'## Risks / deferrals',
+				'(pending)',
+				'',
+				'## Proposed Code Graph',
+				`See \`.agent/task-trees/${surfaceId}.graph-proposal.json\` (pending).`,
+				'',
+			].join('\n');
+			await this.fileService.writeFile(planResource, VSBuffer.fromString(provisional));
+		}
+		return surfaceId;
+	}
+
+	private async openWorkspaceSuggestedSurfacePlan(surfaceId: string): Promise<void> {
+		const generation = ++this.surfacePlanOpenGeneration;
+		// Select eagerly so the rail highlights immediately and toggle-to-close works while
+		// refresh is in flight. Without this, a second click starts another open instead of collapse.
+		this.modeService.setMode('UI');
+		const surfaceChanged = this.selectedSurfaceId !== surfaceId;
+		if (surfaceChanged) {
+			// Drop the previous surface's section cards / Steps until the new surface loads.
+			this.surfaceRailCards = [];
+			this.surfaceRailCardsLoading = true;
+			this.surfacePlanPanel?.clear();
+		} else if (!this.surfaceRailCards.length) {
+			this.surfaceRailCardsLoading = true;
+		}
+		this.selectedSurfaceId = surfaceId;
+		this.activeRailCardId = `surface:${surfaceId}`;
+		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surfaceId, StorageScope.WORKSPACE, StorageTarget.USER);
+		this.contextGatheringOpen = false;
+		this.persistContextGatheringOpen();
+		this.surfaceMainView = 'plan';
+		this.persistSurfaceMainView(surfaceId, 'plan');
+		this.selectOwningSurfaceCard(surfaceId);
+
+		await this.consoleService.refresh();
+		if (generation !== this.surfacePlanOpenGeneration || this.selectedSurfaceId !== surfaceId) {
+			return;
+		}
+		this.syncGoalSurfaceSwitcher();
+		void this.surfaceFeatureChecklistService.refresh();
+		this.setSurfaceMainView('plan');
+		// Re-assert after Plan load / section cards may have shuffled the rail.
+		this.selectOwningSurfaceCard(surfaceId);
 	}
 
 	private async createSelectedWorkspaceSurfaces(): Promise<void> {
 		const doc = this.workspaceSuggestedSurfaces;
 		const workspaceFolder = this.getWorkspaceFolderUri();
-		if (!doc || doc.status !== 'draft' || !workspaceFolder) {
+		if (!doc || !workspaceFolder) {
 			return;
 		}
 		const selected = selectedSuggestedSurfaces(doc);
@@ -7072,61 +8351,41 @@ class ModeShellContribution extends Disposable {
 		}
 		this.uiWorkspaceSuggestedCreateButton.disabled = true;
 		const failed: string[] = [];
+		const created: Array<{ surfaceId: string; surface: WorkspaceSuggestedSurface; isNew: boolean }> = [];
 		try {
-			await this.fileService.createFolder(joinPath(workspaceFolder, '.agent', 'surfaces'));
-			await this.fileService.createFolder(joinPath(workspaceFolder, '.agent', 'task-trees'));
 			for (const surface of selected) {
 				try {
-					const surfaceId = this.uniqueSurfaceId(surface.id || surface.name);
-					await upsertImportedGoalWorkspaceSurface(this.fileService, workspaceFolder, {
-						surfaceId,
-						surfaceName: surface.name,
-						relativePath: `apps/${surfaceId}`,
-						purpose: surface.purpose || localize('customMode.surfaceClaudePurpose', 'Planning surface for {0}.', surface.name),
-					});
-					const planResource = surfacePlanResource(workspaceFolder, surfaceId);
-					try {
-						await this.fileService.stat(planResource);
-					} catch {
-						const provisional = [
-							`# ${surface.name} — Plan`,
-							'',
-							'## Status',
-							'Created from workspace plan — open Plan to continue Research.',
-							'',
-							'## Intent',
-							surface.purpose || surface.name,
-							'',
-							'## Primary users',
-							...(surface.primaryUsers.length ? surface.primaryUsers.map(user => `- ${user}`) : ['- (tbd)']),
-							'',
-							'## Key capabilities',
-							...(surface.keyCapabilities.length ? surface.keyCapabilities.map(cap => `- ${cap}`) : ['- (tbd)']),
-							'',
-							'## §0 Plan lock',
-							'- [ ] Locked',
-							'',
-							'## Research',
-							'(pending)',
-							'',
-							'## Risks / deferrals',
-							'(pending)',
-							'',
-							'## Proposed Code Graph',
-							`See \`.agent/task-trees/${surfaceId}.graph-proposal.json\` (pending).`,
-							'',
-						].join('\n');
-						await this.fileService.writeFile(planResource, VSBuffer.fromString(provisional));
+					const existingId = this.findExistingSuggestedSurfaceId(surface);
+					const surfaceId = existingId ?? await this.materializeWorkspaceSuggestedSurface(workspaceFolder, surface);
+					if (!surfaceId) {
+						failed.push(surface.name);
+						continue;
+					}
+					created.push({ surfaceId, surface, isNew: !existingId });
+					if (!existingId) {
+						await this.consoleService.refresh();
 					}
 				} catch {
 					failed.push(surface.name);
 				}
 			}
-			const confirmed = withSuggestedSurfacesStatus(doc, 'confirmed');
-			await this.persistWorkspaceSuggestedSurfaces(workspaceFolder, confirmed);
-			await this.consoleService.refresh();
-			this.syncGoalSurfaceSwitcher();
-			void this.surfaceFeatureChecklistService.refresh();
+			if (!created.length) {
+				this.notificationService.warn(localize(
+					'customMode.workspaceSuggestedCreateNone',
+					'Could not create the selected surfaces.',
+				));
+				return;
+			}
+			if (failed.length === 0) {
+				const confirmed = withSuggestedSurfacesStatus(doc, 'confirmed');
+				await this.persistWorkspaceSuggestedSurfaces(workspaceFolder, confirmed);
+			}
+			const first = created[0]!;
+			await this.openWorkspaceSuggestedSurfacePlan(first.surfaceId);
+			const kickoffTarget = created.find(entry => entry.isNew) ?? first;
+			if (kickoffTarget.isNew) {
+				await this.kickoffSuggestedSurfaceResearch(workspaceFolder, kickoffTarget.surfaceId, kickoffTarget.surface);
+			}
 			if (failed.length) {
 				this.notificationService.warn(localize(
 					'customMode.workspaceSuggestedCreatePartial',
@@ -7137,7 +8396,7 @@ class ModeShellContribution extends Disposable {
 				this.notificationService.info(localize(
 					'customMode.workspaceSuggestedCreateSuccess',
 					'Created {0} surface(s) from the workspace plan.',
-					selected.length,
+					created.length,
 				));
 			}
 		} finally {
@@ -7498,6 +8757,25 @@ class ModeShellContribution extends Disposable {
 		return Array.from(types).includes('Files');
 	}
 
+	private openNewSurfaceDescribe(): void {
+		this.consoleExpanded = true;
+		this.persistConsoleExpanded();
+		this.activeRailCardId = 'newSurface:describe';
+		this.deselectSurfaceForHomeRail();
+		this.setWorkspaceHomeView('surfaces');
+		this.showDescribeAppCompose();
+	}
+
+	private openNewSurfaceImport(): void {
+		this.consoleExpanded = true;
+		this.persistConsoleExpanded();
+		this.activeRailCardId = 'newSurface:import';
+		this.deselectSurfaceForHomeRail();
+		this.setWorkspaceHomeView('surfaces');
+		this.showSurfaceCreateChooser();
+		void this.importSurfaceRepo();
+	}
+
 	private showDescribeAppCompose(): void {
 		this.uiSurfaceCreateChooser.classList.add('hidden');
 		this.uiSurfaceDescribeCompose.classList.add('visible');
@@ -7787,7 +9065,6 @@ class ModeShellContribution extends Disposable {
 			// Do not call selectGoalSurface — that switches to Code and hides the Claude panel.
 			this.logClaudeKickoff(`select UI + surface ${logCtx}`);
 			this.modeService.setMode('UI');
-			this.persistSurfaceCodeView(surfaceId, false);
 			this.selectedSurfaceId = surfaceId;
 			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surfaceId, StorageScope.WORKSPACE, StorageTarget.USER);
 			this.contextGatheringOpen = false;
@@ -7871,11 +9148,14 @@ class ModeShellContribution extends Disposable {
 			this.logClaudeKickoff(`kickoff submitted ${logCtx}`);
 
 			// Refresh Plan tab in case the watcher has not picked up the provisional file yet.
+			const surface = this.consoleService.getSurface(surfaceId);
 			void this.surfacePlanPanel?.load({
 				surfaceId,
 				surfaceName,
-				surfacePath: this.consoleService.getSurface(surfaceId)?.path,
+				surfacePath: surface?.path,
 				treeId: this.selectedSurfaceTaskTree?.id,
+				localUrl: surface?.localUrl,
+				surface,
 				workspaceFolder,
 			});
 		} catch (error: unknown) {
@@ -8116,7 +9396,14 @@ class ModeShellContribution extends Disposable {
 	private async ensureWorkspaceClaudeMd(workspaceFolder: URI): Promise<void> {
 		const resource = joinPath(workspaceFolder, 'CLAUDE.md');
 		try {
-			await this.fileService.stat(resource);
+			const existing = await this.fileService.readFile(resource);
+			// Refresh stale seeded templates (identified by the seeded header) so contract
+			// updates reach existing workspaces — hand-customized files are left alone.
+			const text = existing.value.toString();
+			const isSeededTemplate = text.startsWith('# CLAUDE.md — Surface agent working agreement');
+			if (isSeededTemplate && text !== CADRE_SURFACE_CLAUDE_MD) {
+				await this.fileService.writeFile(resource, VSBuffer.fromString(CADRE_SURFACE_CLAUDE_MD));
+			}
 		} catch {
 			await this.fileService.writeFile(resource, VSBuffer.fromString(CADRE_SURFACE_CLAUDE_MD));
 		}
@@ -8247,6 +9534,69 @@ class ModeShellContribution extends Disposable {
 			this.notificationService.warn(localize(
 				'customMode.referenceSelectionSendFailed',
 				'Saved selection, but could not notify Claude: {0}',
+				String((error as Error)?.message ?? error),
+			));
+		}
+	}
+
+	/** Plan status-tracker Next button — kick Claude; phase completion is via phase-progress.json. */
+	private async notifyClaudePlanNextAction(request: {
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+		readonly actionId: string;
+		readonly stepId: string;
+		readonly stepLabel: string;
+	}): Promise<void> {
+		if (request.actionId !== 'lock_plan' && request.actionId !== 'run_next_phase') {
+			return;
+		}
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			this.notificationService.warn(localize(
+				'customMode.planNextActionNoWorkspace',
+				'Recorded "{0}", but open a workspace folder before continuing in Claude.',
+				request.stepLabel,
+			));
+			return;
+		}
+		const progressPath = `.agent/surfaces/${request.surfaceId}.phase-progress.json`;
+		const prompt = request.actionId === 'lock_plan'
+			? [
+				`§0 Plan lock is checked for surface ${request.surfaceId} (${request.surfaceName}) via the Console Plan UI.`,
+				`Do not start generate phases yet — wait for the Console Next button to kick each phase.`,
+				`Do not re-open Research. Do not edit .workflow.json step statuses — the Console owns the Steps row.`,
+			].join(' ')
+			: [
+				`Console started phase "${request.stepLabel}" (${request.stepId}) for surface ${request.surfaceId} (${request.surfaceName}).`,
+				`${progressPath} is status "running" for that stepId.`,
+				`Execute that phase from the graph proposal checklist, then remap_and_wait + compare_proposal.`,
+				`When the phase gate passes, update ${progressPath} to status "completed" for the same stepId/stepLabel (keep surfaceId).`,
+				`On failure, set status "failed" with a short error field, then stop.`,
+				`Do not edit .workflow.json — Console marks Steps completed only after it sees completed progress.`,
+			].join(' ');
+		try {
+			const { terminal, created } = await this.attachOrCreateClaudeTerminal(workspaceFolder);
+			await terminal.processReady;
+			await this.prepareTerminalForCommandOutput(terminal, 40, 2000);
+			await terminal.focusWhenReady(true);
+			this.relayoutTerminalInstances();
+			if (created) {
+				// Resume the in-flight Claude Code session for this workspace when possible.
+				await terminal.sendText('claude --continue', true);
+				await timeout(1800);
+				this.relayoutTerminalInstances();
+			}
+			await this.submitClaudePrompt(terminal, prompt);
+			this.notificationService.info(localize(
+				'customMode.planNextActionSent',
+				'Sent next step to Claude: {0}',
+				request.stepLabel,
+			));
+		} catch (error: unknown) {
+			this.notificationService.warn(localize(
+				'customMode.planNextActionSendFailed',
+				'Recorded "{0}", but could not notify Claude: {1}',
+				request.stepLabel,
 				String((error as Error)?.message ?? error),
 			));
 		}
@@ -8506,8 +9856,18 @@ class ModeShellContribution extends Disposable {
 
 	private focusSurfaceSetupSection(step: SurfaceSetupStep, options?: { scroll?: boolean }): void {
 		this.surfaceSetupCurrentStep = step;
-		if (step === 'brand' || step === 'goal') {
-			this.setWorkspaceHomeView('workspacePlan');
+		const section: WorkspaceHomeView | undefined = step === 'goal'
+			? 'workspacePlan'
+			: step === 'brand'
+				? 'branding'
+				: step === 'surfaces'
+					? 'surfaces'
+					: undefined;
+		if (section) {
+			this.consoleExpanded = true;
+			this.persistConsoleExpanded();
+			this.activeRailCardId = `consoleSection:${section}`;
+			this.setWorkspaceHomeView(section);
 		}
 		if (options?.scroll === false) {
 			return;
@@ -8518,8 +9878,11 @@ class ModeShellContribution extends Disposable {
 	private populateSurfaceSetupBuilderFields(): void {
 		const goal = this.consoleService.getGoal();
 		const brand = this.consoleService.getWorkspace()?.brand;
-		this.uiSurfaceSetupGoalNameInput.value = goal?.name ?? '';
+		this.uiSurfaceSetupGoalNameInput.value = goal?.name?.trim() || DEFAULT_WORKSPACE_PLAN_BUSINESS_NAME;
 		this.uiSurfaceSetupGoalDescriptionInput.value = goal?.description ?? '';
+		if (!this.uiWorkspacePlanIntentInput.value.trim()) {
+			this.uiWorkspacePlanIntentInput.value = DEFAULT_WORKSPACE_PLAN_INTENT;
+		}
 		this.uiSurfaceSetupPrimaryColorInput.value = brand?.primaryColor ?? '#2563eb';
 		this.uiSurfaceSetupSecondaryColorInput.value = brand?.secondaryColor ?? '#0f172a';
 		this.uiSurfaceSetupAccentColorInput.value = brand?.accentColor ?? '#f59e0b';
@@ -8657,18 +10020,40 @@ class ModeShellContribution extends Disposable {
 
 	private updateUiProjectName(): void {
 		const hasProject = this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY;
-		const label = localize('customMode.consoleTab', 'Console');
+		const codeOpen = this.modeService.getMode() === 'Code';
+		const label = codeOpen
+			? localize('customMode.backToConsole', '← Console')
+			: localize('customMode.consoleTab', 'Console');
 		this.uiProjectNameLabel.textContent = hasProject ? label : '';
-		this.uiProjectName.setAttribute('aria-label', localize('customMode.consoleHomeAria', 'Open Console surfaces home'));
+		this.uiProjectName.setAttribute(
+			'aria-label',
+			codeOpen
+				? localize('customMode.backToConsoleAria', 'Back to Console')
+				: localize('customMode.consoleHomeAria', 'Open Console surfaces home'),
+		);
+		this.uiProjectName.title = codeOpen
+			? localize('customMode.backToConsoleTitle', 'Back to Console')
+			: localize('customMode.consoleHomeTitle', 'Open Console surfaces home');
 		this.uiProjectName.classList.toggle('hidden', !hasProject);
+		// Code entry lives on the Console rail card; top bar only shows ← Console while in Code mode.
+		this.uiCodeTab.classList.add('hidden');
 		this.syncContextGatheringUi();
 	}
 
-	/** Console top-left control: always Surfaces home — Code lives on each surface tab. */
+	/** Leave separate Code mode and return to Console canvas. */
 	private goToConsoleHome(): void {
+		this.ensureWorkspaceView();
 		this.selectGoalSurface(ADD_SURFACE_ID);
+		this.openConsoleWithSection(this.workspaceHomeView);
 		this.syncContextGatheringUi();
 		this.updateUiProjectName();
+	}
+
+	/** Separate Code mode — full editor; use ← Console in the top bar to return. */
+	private openCodeTab(): void {
+		this.modeService.setMode('Code');
+		this.syncContextGatheringUi();
+		this.renderGoalSurfaceButtons(this.consoleService.getSurfaces());
 	}
 
 	private ensureWorkspaceView(): void {
@@ -8683,11 +10068,17 @@ class ModeShellContribution extends Disposable {
 
 	private syncContextGatheringUi(): void {
 		this.container.classList.toggle('custom-mode-context-gathering-open', this.contextGatheringOpen);
-		const builderOpen = this.selectedSurfaceId === ADD_SURFACE_ID && this.modeService.getMode() === 'UI';
-		this.uiProjectName.classList.toggle('active', builderOpen);
-		this.uiProjectName.setAttribute('aria-pressed', String(builderOpen));
-		this.uiProjectName.setAttribute('aria-selected', String(builderOpen));
-		this.uiProjectName.title = localize('customMode.consoleHomeTitle', 'Open Console surfaces home');
+		const codeOpen = this.modeService.getMode() === 'Code';
+		// Console collapses the top tab row; Code mode shows it so ← Console is available.
+		this.container.classList.toggle('custom-mode-top-collapsed', !codeOpen);
+		const builderOpen = !codeOpen && this.selectedSurfaceId === ADD_SURFACE_ID && this.modeService.getMode() === 'UI';
+		this.uiCodeTab.classList.toggle('active', codeOpen);
+		this.uiCodeTab.setAttribute('aria-pressed', String(codeOpen));
+		this.uiCodeTab.setAttribute('aria-selected', String(codeOpen));
+		// In Code mode, highlight the back control so the exit path is obvious.
+		this.uiProjectName.classList.toggle('active', codeOpen || builderOpen);
+		this.uiProjectName.setAttribute('aria-pressed', String(codeOpen || builderOpen));
+		this.uiProjectName.setAttribute('aria-selected', String(codeOpen || builderOpen));
 		this.syncTopBarSelectionChrome();
 	}
 
@@ -8697,14 +10088,10 @@ class ModeShellContribution extends Disposable {
 			this.persistContextGatheringOpen();
 			this.syncContextGatheringUi();
 		}
-		if (surfaceId === ADD_SURFACE_ID) {
-			this.ensureWorkspaceView();
-		} else if (this.getStoredSurfaceCodeView(surfaceId)) {
-			this.modeService.setMode('Code');
-		} else {
-			this.modeService.setMode('UI');
-		}
+		// Surfaces always open in Console (UI). Code is only via the top Code tab.
+		this.ensureWorkspaceView();
 		this.renderGoalSurfaceButtons(this.consoleService.getSurfaces());
+		this.syncWorkspaceHomeView();
 		if (surfaceId !== ADD_SURFACE_ID) {
 			const storedView = this.getStoredSurfaceMainView(surfaceId);
 			if (storedView) {
@@ -8743,7 +10130,8 @@ class ModeShellContribution extends Disposable {
 		const surfaces = this.consoleService.getSurfaces();
 		const goalWorkspaceLoaded = state.status === 'loaded';
 		const hasManifestSurfaces = goalWorkspaceLoaded && surfaces.length > 0;
-		this.uiSurfaceSwitcher.classList.toggle('hidden', !hasManifestSurfaces);
+		// Surfaces live as cards in the shared left rail — the top tab row stays hidden.
+		this.uiSurfaceSwitcher.classList.add('hidden');
 
 		if (!goalWorkspaceLoaded) {
 			this.selectedSurfaceId = undefined;
@@ -8786,6 +10174,7 @@ class ModeShellContribution extends Disposable {
 		this.refreshStartCommandHints();
 		this.refreshUiChatTabsAndSession();
 		this.syncTopBarSelectionChrome();
+		this.syncWorkspaceHomeView();
 	}
 
 	private async freeWorkspaceSurfacePortsAtStartup(surfaces: readonly WorkspaceSurface[]): Promise<void> {
@@ -8852,26 +10241,13 @@ class ModeShellContribution extends Disposable {
 				this._register(addDisposableListener(button, 'click', () => this.selectGoalSurface(surface.id)));
 			}
 
-			const isActive = surface.id === this.selectedSurfaceId;
-			const isCodeActive = isActive && codeViewActive;
+			const isActive = surface.id === this.selectedSurfaceId && !codeViewActive;
 			const description = this.formatGoalSurfaceDescription(surface);
 			button.textContent = surface.name;
 			button.title = description;
-			button.classList.toggle('active', isActive && !codeViewActive);
-			button.setAttribute('aria-selected', String(isActive && !codeViewActive));
+			button.classList.toggle('active', isActive);
+			button.setAttribute('aria-selected', String(isActive));
 			button.setAttribute('aria-label', description);
-
-			const codeLabel = isCodeActive
-				? localize('customMode.surfaceCodeToggleToConsole', 'Show {0} Console view', surface.name)
-				: localize('customMode.surfaceCodeToggleToCode', 'Show {0} Code view', surface.name);
-			const codeButton = $('button.custom-mode-ui-surface-code', {
-				type: 'button',
-				title: codeLabel,
-				'aria-label': codeLabel,
-				'aria-pressed': String(isCodeActive),
-			}, $('span.codicon' + ThemeIcon.asCSSSelector(Codicon.arrowSwap))) as HTMLButtonElement;
-			codeButton.dataset.surfaceId = surface.id;
-			codeButton.classList.toggle('active', isCodeActive);
 
 			const closeLabel = localize('customMode.surfaceCloseButtonAria', 'Delete {0} surface', surface.name);
 			const closeButton = $('button.custom-mode-ui-surface-close', {
@@ -8881,7 +10257,7 @@ class ModeShellContribution extends Disposable {
 			}, '\u00d7') as HTMLButtonElement;
 			closeButton.dataset.surfaceId = surface.id;
 
-			const tab = $('div.custom-mode-ui-surface-tab', undefined, button, codeButton, closeButton);
+			const tab = $('div.custom-mode-ui-surface-tab', undefined, button, closeButton);
 			tab.classList.toggle('active', isActive);
 
 			nextButtons.set(surface.id, button);
@@ -8900,14 +10276,6 @@ class ModeShellContribution extends Disposable {
 		if (!(target instanceof HTMLElement)) {
 			return;
 		}
-		const codeButton = target.closest('.custom-mode-ui-surface-code') as HTMLElement | null;
-		const codeSurfaceId = codeButton?.dataset.surfaceId;
-		if (codeSurfaceId) {
-			event.preventDefault();
-			event.stopPropagation();
-			this.toggleSurfaceCodeView(codeSurfaceId);
-			return;
-		}
 		const closeButton = target.closest('.custom-mode-ui-surface-close') as HTMLElement | null;
 		const surfaceId = closeButton?.dataset.surfaceId;
 		if (!surfaceId) {
@@ -8918,57 +10286,13 @@ class ModeShellContribution extends Disposable {
 		void this.deleteGoalSurface(surfaceId);
 	}
 
-	private surfaceCodeViewStorageKey(surfaceId: string): string {
-		return `${STORAGE_SURFACE_CODE_VIEW_PREFIX}${surfaceId}`;
-	}
-
-	private getStoredSurfaceCodeView(surfaceId: string): boolean {
-		return this.storageService.get(this.surfaceCodeViewStorageKey(surfaceId), StorageScope.WORKSPACE) === '1';
-	}
-
-	private persistSurfaceCodeView(surfaceId: string, enabled: boolean): void {
-		const key = this.surfaceCodeViewStorageKey(surfaceId);
-		if (enabled) {
-			this.storageService.store(key, '1', StorageScope.WORKSPACE, StorageTarget.USER);
-		} else {
-			this.storageService.remove(key, StorageScope.WORKSPACE);
-		}
-	}
-
-	/** Per-surface ⇄ Code toggle — independent of the Console home control. */
-	private toggleSurfaceCodeView(surfaceId: string): void {
-		const surface = this.consoleService.getSurface(surfaceId);
-		if (!surface) {
-			return;
-		}
-		const currentlyCode = this.selectedSurfaceId === surfaceId && this.modeService.getMode() === 'Code';
-		const next = !currentlyCode;
-		this.persistSurfaceCodeView(surfaceId, next);
-		this.autoStartAppAttempted = false;
-		this.selectedSurfaceId = surface.id;
-		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
-		this.contextGatheringOpen = false;
-		this.persistContextGatheringOpen();
-		if (!next) {
-			// Returning to Console surface chrome — keep preview routing.
-			this.applySurfaceSelection(surfaceId, { contextGathering: false });
-			return;
-		}
-		this.clearEmbeddedUiUrl();
-		this.setAppReachable(false);
-		this.applySurfaceSelection(surfaceId, { contextGathering: false, deferPreviewRouting: true });
-		void this.ensureSurfaceServerStarted(surface, { force: true }).then(started => {
-			if (started && this.selectedSurfaceId === surface.id) {
-				this.refreshSelectedSurfaceTaskTreeAndRoute();
-			}
-		});
-	}
-
 	private selectGoalSurface(surfaceId: string): void {
 		// Retry surface auto-start whenever the user explicitly switches tabs.
 		this.autoStartAppAttempted = false;
 
 		if (surfaceId === ADD_SURFACE_ID) {
+			this.surfaceRailCards = [];
+			this.surfaceRailCardsLoading = false;
 			this.selectedSurfaceId = ADD_SURFACE_ID;
 			this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, ADD_SURFACE_ID, StorageScope.WORKSPACE, StorageTarget.USER);
 			this.applySurfaceSelection(surfaceId, { contextGathering: true });
@@ -8980,8 +10304,13 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 
-		// Name click always opens Console surface view; Code is only via the ⇄ control.
-		this.persistSurfaceCodeView(surface.id, false);
+		// Surface tabs always open Console (UI). Code is only via the top Code tab.
+		if (this.selectedSurfaceId !== surface.id) {
+			this.surfaceRailCards = [];
+			this.surfaceRailCardsLoading = true;
+		} else if (!this.surfaceRailCards.length) {
+			this.surfaceRailCardsLoading = true;
+		}
 		this.selectedSurfaceId = surface.id;
 		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
 		this.clearEmbeddedUiUrl();
@@ -9017,7 +10346,6 @@ class ModeShellContribution extends Disposable {
 				return;
 			}
 			this.clearStoredUiChatDraft(surfaceId);
-			this.persistSurfaceCodeView(surfaceId, false);
 			if (this.boundUiChatSurfaceId === surfaceId) {
 				this.boundUiChatSurfaceId = undefined;
 			}
@@ -9098,7 +10426,7 @@ class ModeShellContribution extends Disposable {
 		const { confirmed } = await this.dialogService.confirm({
 			message: localize(
 				'customMode.clearAllSurfacesConfirm',
-				'Clear all {0} surface(s) and wipe the entire apps/ directory? This deletes plans, proposals, and every generated app folder.',
+				'Clear all {0} surface(s) and wipe the entire apps/ directory? This deletes plans, proposals, the workspace plan, suggested surfaces, task trees, reference clones, and every generated app folder.',
 				surfaces.length,
 			),
 			primaryButton: localize('customMode.clearAllSurfacesConfirmButton', 'Clear all Surfaces'),
@@ -9144,6 +10472,40 @@ class ModeShellContribution extends Disposable {
 			appsWipeFailed = true;
 		}
 
+		// Planning residue goes too — stale suggestion cards and plans would otherwise
+		// resurrect surfaces after a clear. Attachments (user-provided briefs) are kept.
+		const planningArtifacts = [
+			workspacePlanResource(workspaceFolder),
+			workspaceSuggestedSurfacesResource(workspaceFolder),
+			joinPath(workspaceFolder, '.agent', 'surfaces'),
+			joinPath(workspaceFolder, '.agent', 'task-trees'),
+			joinPath(workspaceFolder, '.agent', 'references'),
+		];
+		for (const resource of planningArtifacts) {
+			try {
+				await this.fileService.del(resource, { recursive: true, useTrash: false });
+			} catch {
+				// Already gone is fine.
+			}
+		}
+		// Restore the hardcoded default Workspace Plan so Console stays past kickoff.
+		try {
+			await this.fileService.createFolder(joinPath(workspaceFolder, '.agent'));
+			await this.fileService.writeFile(
+				workspacePlanResource(workspaceFolder),
+				VSBuffer.fromString(DEFAULT_WORKSPACE_PLAN_MARKDOWN),
+			);
+			await this.fileService.writeFile(
+				workspaceSuggestedSurfacesResource(workspaceFolder),
+				VSBuffer.fromString(DEFAULT_WORKSPACE_SUGGESTED_SURFACES_JSON),
+			);
+		} catch {
+			// Non-fatal — user can still Start workspace planning.
+		}
+		this.workspaceSuggestedSurfaces = undefined;
+		await this.refreshWorkspaceSuggestedSurfaces(workspaceFolder);
+		this.renderWorkspaceSuggestedSurfaces();
+
 		this.boundUiChatSurfaceId = undefined;
 		this.selectedSurfaceId = ADD_SURFACE_ID;
 		this.activeUiChatSurfaceId = ADD_SURFACE_ID;
@@ -9169,7 +10531,7 @@ class ModeShellContribution extends Disposable {
 		}
 		this.notificationService.info(localize(
 			'customMode.clearAllSurfacesSuccess',
-			'Cleared {0} surface(s) and wiped apps/.',
+			'Cleared {0} surface(s), planning artifacts, and wiped apps/.',
 			surfaces.length,
 		));
 	}
@@ -9189,10 +10551,18 @@ class ModeShellContribution extends Disposable {
 		return this.devServerService.getActiveUrl();
 	}
 
+	/** Last route signature — avoid re-entrant preview routing that thrash-logs and leaks listeners. */
+	private lastSurfacePreviewRouteKey: string | undefined;
+
 	private routeSelectedSurfacePreview(): void {
 		if (this.modeService.getMode() === 'Code') {
 			return;
 		}
+		const routeKey = `${this.contextGatheringOpen ? '1' : '0'}:${this.selectedSurfaceId ?? ''}:${this.surfaceMainView}`;
+		if (this.lastSurfacePreviewRouteKey === routeKey) {
+			return;
+		}
+		this.lastSurfacePreviewRouteKey = routeKey;
 		this.updateSurfaceFeatureChecklistVisibility();
 
 		if (this.contextGatheringOpen) {
@@ -9312,12 +10682,12 @@ class ModeShellContribution extends Disposable {
 		return this.appReachable && this.embeddedUiShowsUrl(surface.localUrl);
 	}
 
-	private setSurfaceMainView(view: SurfaceMainView): void {
-		// Surface content tabs (CLAUDE.md / Plan / Generated Code Graph / …) live in Console UI.
+	private setSurfaceMainView(_view: SurfaceMainView): void {
+		// All surface content lives in one Plan column — ignore view switches.
 		this.ensureWorkspaceView();
-		this.surfaceMainView = normalizeSurfaceMainView(view) ?? 'plan';
+		this.surfaceMainView = 'plan';
 		if (this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID) {
-			this.persistSurfaceMainView(this.selectedSurfaceId, this.surfaceMainView === 'taskTree' ? 'plan' : this.surfaceMainView);
+			this.persistSurfaceMainView(this.selectedSurfaceId, 'plan');
 		}
 		this.syncSurfaceMainView();
 		this.syncContextGatheringUi();
@@ -9334,23 +10704,23 @@ class ModeShellContribution extends Disposable {
 			addSurfaceId: ADD_SURFACE_ID,
 			contextGatheringOpen: this.contextGatheringOpen,
 		});
-		this.uiSurfaceMainViewToggle.classList.toggle('hidden', !showToggle);
+		// Unified Plan column owns Rules / Graph / Preview sections — never show the left rail.
+		this.uiSurfaceMainViewToggle.classList.add('hidden');
+		this.uiBrowserShell.classList.remove('custom-mode-ui-surface-view-cards');
 		for (const [view, button] of this.uiSurfaceTaskTreeToggleButtons) {
-			const active = view === this.surfaceMainView;
+			const active = view === 'plan';
 			button.classList.toggle('active', active);
 			button.setAttribute('aria-selected', String(active));
 		}
 
-		const showPlan = showToggle && this.surfaceMainView === 'plan';
-		const showClaudeMd = showToggle && this.surfaceMainView === 'claudeMd';
-		const showIxSubsystems = showToggle && this.surfaceMainView === 'ixSubsystems';
-		const showOverlay = showPlan || showClaudeMd || showIxSubsystems;
+		const showPlan = showToggle;
+		const showOverlay = showPlan;
 		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-main-view-overlay', showOverlay);
 		this.uiSurfacePlanPanelRoot.classList.toggle('hidden', !showPlan);
 		this.uiSurfacePlanPanelRoot.hidden = !showPlan;
-		this.uiSurfaceClaudeMdPanelRoot.classList.toggle('hidden', !showClaudeMd);
-		this.uiSurfaceClaudeMdPanelRoot.hidden = !showClaudeMd;
-		this.uiSurfaceIxSubsystemsPanelRoot.classList.toggle('hidden', !showIxSubsystems);
+		this.uiSurfaceClaudeMdPanelRoot.classList.add('hidden');
+		this.uiSurfaceClaudeMdPanelRoot.hidden = true;
+		this.uiSurfaceIxSubsystemsPanelRoot.classList.add('hidden');
 		if (showPlan) {
 			const surface = this.getSelectedSurface();
 			void this.surfacePlanPanel?.load({
@@ -9358,20 +10728,12 @@ class ModeShellContribution extends Disposable {
 				surfaceName: surface?.name,
 				surfacePath: surface?.path,
 				treeId: this.selectedSurfaceTaskTree?.id,
+				localUrl: surface?.localUrl,
+				surface,
 				workspaceFolder: this.getWorkspaceFolderUri(),
 			});
 		}
-		if (showClaudeMd) {
-			void this.surfaceClaudeMdPanel?.load({
-				workspaceFolder: this.getWorkspaceFolderUri(),
-			});
-		}
-		if (showIxSubsystems) {
-			void this.surfaceIxSubsystemsPanel?.load({
-				surface: this.getSelectedSurface(),
-				workspaceFolder: this.getWorkspaceFolderUri(),
-			});
-		}
+		this.syncWorkspaceHomeView();
 		this.renderSelectedSurfaceLaunchPanel();
 		this.syncTopBarSelectionChrome();
 	}
@@ -9676,7 +11038,9 @@ class ModeShellContribution extends Disposable {
 		if (this.selectedSurfaceId === ADD_SURFACE_ID) {
 			return;
 		}
-		this.uiSurfaceSetupDashboard.classList.add('hidden');
+		// The dashboard hosts the shared card rail, so it stays visible while a surface is open;
+		// syncWorkspaceHomeView swaps its home panels for the surface plan panel.
+		this.uiSurfaceSetupDashboard.classList.remove('hidden');
 		this.setSurfaceSetupBuilderOpen(false);
 	}
 
@@ -10102,6 +11466,7 @@ class ModeShellContribution extends Disposable {
 			await this.prepareTerminalForCommandOutput(terminal);
 			terminal.sendText(alignedCommand, true);
 			this.startedSurfaceServers.add(surfaceId);
+			this.renderConsoleWorkflowProgress();
 			void this.refreshStarterSurfaceCardStatuses();
 		} finally {
 			this.startingSurfaceServers.delete(surfaceId);
@@ -11050,23 +12415,7 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
-	private ensureCodeModeForDevServerTerminal(): void {
-		// Only jump to editors when this surface explicitly opted into Code view.
-		const surfaceId = this.selectedSurfaceId;
-		if (!surfaceId || surfaceId === ADD_SURFACE_ID || !this.getStoredSurfaceCodeView(surfaceId)) {
-			return;
-		}
-		if (this.modeService.getMode() === 'Code') {
-			return;
-		}
-		this.modeService.setMode('Code');
-	}
-
 	private updateDevServerDebug(state: DevServerState): void {
-		if (state.phase === 'installing' || state.phase === 'starting') {
-			this.ensureCodeModeForDevServerTerminal();
-		}
-
 		const lines: string[] = [];
 		lines.push(`phase: ${state.phase}`);
 		if (state.script) {
