@@ -14212,7 +14212,7 @@ class ModeShellContribution extends Disposable {
 	private getTargetEmbeddedUiUrl(): string | undefined {
 		const selectedSurface = this.getSelectedSurface();
 		if (selectedSurface) {
-			if (this.isPublishedSectionSelected()) {
+			if (this.isDeployedSectionSelected()) {
 				return selectedSurface.productionUrl?.trim() || undefined;
 			}
 			return selectedSurface.localUrl;
@@ -14226,17 +14226,17 @@ class ModeShellContribution extends Disposable {
 	/** True when the Preview section card owns the content pane. */
 	private isPreviewSectionSelected(): boolean {
 		return this.activeRailCardId === 'surfaceSection:preview'
-			|| (this.surfaceMainView === 'preview' && !this.isPublishedSectionSelected());
+			|| (this.surfaceMainView === 'preview' && !this.isDeployedSectionSelected());
 	}
 
-	/** True when the Published (Vercel) section card owns the content pane. */
-	private isPublishedSectionSelected(): boolean {
-		return this.activeRailCardId === 'surfaceSection:published';
+	/** True when the Deployed (Vercel) section card owns the content pane. */
+	private isDeployedSectionSelected(): boolean {
+		return this.activeRailCardId === 'surfaceSection:deployed';
 	}
 
-	/** Preview or Published — either routes a URL into the embedded Console pane. */
+	/** Preview or Deployed — either routes a URL into the embedded Console pane. */
 	private isLiveUrlSectionSelected(): boolean {
-		return this.isPreviewSectionSelected() || this.isPublishedSectionSelected();
+		return this.isPreviewSectionSelected() || this.isDeployedSectionSelected();
 	}
 
 	private routeSelectedSurfacePreview(): void {
@@ -14276,12 +14276,12 @@ class ModeShellContribution extends Disposable {
 			if (!surface) {
 				this.setSurfaceEmptyState(undefined);
 			} else {
-				const publishedSelected = this.isPublishedSectionSelected();
+				const deployedSelected = this.isDeployedSectionSelected();
 				const liveSelected = this.isLiveUrlSectionSelected();
-				const url = publishedSelected
+				const url = deployedSelected
 					? surface.productionUrl?.trim()
 					: surface.localUrl?.trim();
-				// Live waiting/missing chrome only while Preview or Published is focused —
+				// Live waiting/missing chrome only while Preview or Deployed is focused —
 				// Plan / Rules / … keep the plan column, never the "no URL" empty.
 				if (!url) {
 					if (liveSelected) {
@@ -14291,7 +14291,7 @@ class ModeShellContribution extends Disposable {
 					}
 					this.clearEmbeddedUiUrl();
 					this.logSelectedSurfaceRoute(surface, undefined);
-				} else if (liveSelected && !this.appReachable && !publishedSelected) {
+				} else if (liveSelected && !this.appReachable && !deployedSelected) {
 					// Local Preview owns waiting chrome until the dev server is up.
 					this.setSurfaceServerDownState(surface, url);
 					// Same-origin is enough — don't stomp SPA routes (e.g. /analytics) back to /.
