@@ -544,7 +544,7 @@ suite('resolveSurfaceSectionIdForStep', () => {
 		);
 	});
 
-	test('maps verify_graph to graph, enable_preview to preview, deployed to published', () => {
+	test('maps verify_graph to graph, enable_preview to preview, deployed to deployed card', () => {
 		assert.strictEqual(
 			resolveSurfaceSectionIdForStep({ id: VERIFY_GRAPH_STEP_ID, kind: 'action' }, sections),
 			'graph',
@@ -555,7 +555,7 @@ suite('resolveSurfaceSectionIdForStep', () => {
 		);
 		assert.strictEqual(
 			resolveSurfaceSectionIdForStep({ id: DEPLOYED_STEP_ID, kind: 'action' }, sections),
-			'published',
+			'deployed',
 		);
 		assert.strictEqual(
 			resolveSurfaceSectionIdForStep({ id: DEPLOYED_STEP_ID, kind: 'action' }, ['preview', 'plan']),
@@ -650,6 +650,7 @@ suite('surfacePlanWorkflow', () => {
 			hasPlanContent: true,
 			hasDraftProposal: true,
 			hasFinalProposal: true,
+			hasCandidates: true,
 			planLocked: true,
 			previewEnabled: true,
 			proposalPhases: [{ id: 'P1', title: 'Phase 1' }],
@@ -673,6 +674,7 @@ suite('surfacePlanWorkflow', () => {
 				hasPlanContent: true,
 				hasDraftProposal: true,
 				hasFinalProposal: true,
+				hasCandidates: true,
 				planLocked: true,
 				previewEnabled: true,
 				proposalPhases: [{ id: 'P1', title: 'Phase 1' }],
@@ -687,6 +689,7 @@ suite('surfacePlanWorkflow', () => {
 			hasPlanContent: false,
 			hasDraftProposal: false,
 			hasFinalProposal: false,
+			hasCandidates: false,
 			planLocked: false,
 			proposalPhases: [],
 			completedStepIds: [],

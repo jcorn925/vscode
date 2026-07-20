@@ -5,15 +5,18 @@
 
 import type { ConsoleHomeSection } from './consoleWorkflowStatus.js';
 
-/** Console home content sections in rail / stack order. */
+/** Console home content sections in rail / stack order. Surfaces is the Workspace default. */
 export const CONSOLE_HOME_SECTION_ORDER: readonly ConsoleHomeSection[] = [
-	'workspacePlan',
 	'surfaces',
+	'workspacePlan',
 	'claudeMd',
 	'howItWorks',
 	'branding',
 	'settings',
 ];
+
+/** Default Console / Workspace section when opening home (not a surface). */
+export const CONSOLE_HOME_DEFAULT_SECTION: ConsoleHomeSection = 'surfaces';
 
 /**
  * Exclusive accordion open map — same rule as Surface proposal-tree `focusSection`:

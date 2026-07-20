@@ -62,10 +62,23 @@ suite('CustomAiVerifySurfaceBlueprintTool', () => {
 			installOrResolve: async () => { },
 			openDocs: async () => { },
 			mapPath: async () => ({ ok: true, raw: '', command: 'ix map --all-items .' }),
-			runJsonQuery: async () => ({ ok: true, value: { regions: [] }, raw: '{}' }),
+			runJsonQuery: async () => ({
+				ok: true,
+				value: {
+					regions: [{
+						region_id: 'booking-app',
+						name: 'Booking App',
+						entry_path: 'apps/booking/src/app/page.tsx',
+						member_files: ['apps/booking/src/app/page.tsx'],
+						file_count: 1,
+					}],
+				},
+				raw: '{}',
+			}),
 			prepareForDiscovery: async () => true,
 			ensureIxBackendReady: async () => true,
 			ensureIxMappedIfEmpty: async () => ({ statsPreview: '', ranMap: false, statsOk: true }),
+			pruneWorkspaceRegistry: async () => ({ ok: true, output: '', exitCode: 0 }),
 		} as IIxIntegrationService;
 	}
 

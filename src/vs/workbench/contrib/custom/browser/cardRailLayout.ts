@@ -37,6 +37,11 @@ export interface CardRailItem {
 	readonly key: string;
 	readonly value: string;
 	readonly title?: string;
+	/**
+	 * When set, the value renders as a link that opens this URL (card body still selects).
+	 * Nested `<a>` is invalid inside the card `<button>`, so the rail uses a role=link span.
+	 */
+	readonly href?: string;
 	/** When true, render a full-width gap above this card to separate rail groups. */
 	readonly groupStart?: boolean;
 	/** Optional section title rendered above the group gap (implies a group break). */
@@ -56,6 +61,8 @@ export interface CardRailLayoutOptions {
 	readonly cards: readonly CardRailItem[];
 	readonly activeId?: string;
 	readonly onSelect: (id: string) => void;
+	/** Open an external URL from a card value link (Preview / Deployed). */
+	readonly onOpenHref?: (url: string) => void;
 	readonly content?: HTMLElement | readonly HTMLElement[];
 	readonly ariaLabel?: string;
 	readonly className?: string;
@@ -347,6 +354,20 @@ export const CARD_RAIL_STYLESHEET = `
 .custom-mode-card-rail-card-value:empty {
 	display: none;
 }
+.custom-mode-card-rail-card-value.is-link {
+	color: var(--vscode-textLink-foreground, var(--vscode-focusBorder, #3794ff));
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: pointer;
+}
+.custom-mode-card-rail-card-value.is-link:hover {
+	color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground, #3794ff));
+}
+.custom-mode-card-rail-card.active .custom-mode-card-rail-card-value.is-link {
+	color: inherit;
+	opacity: 0.95;
+	text-decoration-color: color-mix(in srgb, currentColor 70%, transparent);
+}
 .custom-mode-card-rail-card-progress {
 	display: flex;
 	flex-direction: row;
@@ -498,6 +519,29 @@ export function clampCardRailWidth(width: number): number {
 	return Math.max(CARD_RAIL_MIN_WIDTH, Math.min(CARD_RAIL_MAX_WIDTH, Math.round(width)));
 }
 
+function createCardValueEl(value: string, href: string | undefined): HTMLElement {
+	const el = $('span.custom-mode-card-rail-card-value', undefined, value);
+	syncCardValueEl(el, value, href);
+	return el;
+}
+
+function syncCardValueEl(el: HTMLElement, value: string, href: string | undefined): void {
+	if (el.textContent !== value) {
+		el.textContent = value;
+	}
+	const openUrl = href?.trim() || undefined;
+	el.classList.toggle('is-link', Boolean(openUrl));
+	if (openUrl) {
+		el.dataset.href = openUrl;
+		el.setAttribute('role', 'link');
+		el.title = openUrl;
+	} else {
+		delete el.dataset.href;
+		el.removeAttribute('role');
+		el.removeAttribute('title');
+	}
+}
+
 export function cardRailItemsEqual(a: readonly CardRailItem[], b: readonly CardRailItem[]): boolean {
 	if (a.length !== b.length) {
 		return false;
@@ -510,6 +554,7 @@ export function cardRailItemsEqual(a: readonly CardRailItem[], b: readonly CardR
 			|| left.key !== right.key
 			|| left.value !== right.value
 			|| left.title !== right.title
+			|| (left.href ?? '') !== (right.href ?? '')
 			|| !!left.groupStart !== !!right.groupStart
 			|| (left.groupLabel ?? '') !== (right.groupLabel ?? '')
 			|| (left.assocGroup ?? '') !== (right.assocGroup ?? '')
@@ -644,17 +689,18 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 			}
 
 			let valueEl = button.querySelector('.custom-mode-card-rail-card-value') as HTMLElement | null;
+			const href = card.href?.trim() || undefined;
 			if (value) {
 				if (!valueEl) {
-					valueEl = $('span.custom-mode-card-rail-card-value', undefined, value);
+					valueEl = createCardValueEl(value, href);
 					const progressEl = button.querySelector('.custom-mode-card-rail-card-progress');
 					if (progressEl) {
 						button.insertBefore(valueEl, progressEl);
 					} else {
 						button.appendChild(valueEl);
 					}
-				} else if (valueEl.textContent !== value) {
-					valueEl.textContent = value;
+				} else {
+					syncCardValueEl(valueEl, value, href);
 				}
 			} else if (valueEl) {
 				valueEl.remove();
@@ -761,6 +807,7 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 		const appendCard = (card: CardRailItem, host: HTMLElement): void => {
 			const active = activeIds.has(card.id);
 			const value = card.value.trim();
+			const href = card.href?.trim() || undefined;
 			const progressPercent = typeof card.progressPercent === 'number' && Number.isFinite(card.progressPercent)
 				? Math.max(0, Math.min(100, Math.round(card.progressPercent)))
 				: undefined;
@@ -772,7 +819,7 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 				'data-card-id': card.id,
 			},
 				$('span.custom-mode-card-rail-card-key', undefined, card.key),
-				...(value ? [$('span.custom-mode-card-rail-card-value', undefined, value)] : []),
+				...(value ? [createCardValueEl(value, href)] : []),
 			) as HTMLButtonElement;
 			if (progressPercent !== undefined) {
 				const complete = progressPercent >= 100;
@@ -799,6 +846,18 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 			cardListeners.add(addDisposableListener(button, 'pointerdown', (event: PointerEvent) => {
 				if (event.button !== 0) {
 					return;
+				}
+				const link = event.target instanceof Element
+					? event.target.closest('.custom-mode-card-rail-card-value.is-link')
+					: null;
+				if (link instanceof HTMLElement) {
+					const openUrl = link.dataset.href?.trim() || href;
+					if (openUrl && options.onOpenHref) {
+						event.preventDefault();
+						event.stopPropagation();
+						options.onOpenHref(openUrl);
+						return;
+					}
 				}
 				event.preventDefault();
 				options.onSelect(card.id);

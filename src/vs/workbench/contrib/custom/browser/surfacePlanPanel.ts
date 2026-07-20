@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, clearNode } from '../../../../base/browser/dom.js';
+import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
@@ -248,6 +249,11 @@ export class SurfacePlanPanel extends Disposable {
 	private workstreamRunsDocument: SurfaceWorkstreamRunsDocument | undefined;
 	private blockersDocument: SurfaceBlockersDocument | undefined;
 	private loadGeneration = 0;
+	/** Last generation that reached a terminal render (publish or message) — used to catch dropped loads. */
+	private settledGeneration = 0;
+	private loadRecoveryAttempts = 0;
+	/** Re-runs load() when a superseded/failed load ended without any terminal render. */
+	private readonly loadRecovery = this._register(new RunOnceScheduler(() => this.recoverDroppedLoad(), 250));
 	private candidates: SurfaceReferenceCandidates | undefined;
 	private candidatesWriteInFlight = false;
 	private workflowWriteInFlight = false;
@@ -439,6 +445,8 @@ export class SurfacePlanPanel extends Disposable {
 		this.renderStatusNextAction(undefined);
 		this._onDidChangeCurrentStep.fire(undefined);
 		this.showTreeMessage(localize('surfacePlan.selectSurface', 'Select a surface to view its plan.md.'));
+		// Cleared intentionally — the placeholder message is the terminal render for this generation.
+		this.markLoadSettled(this.loadGeneration);
 	}
 
 	/**
@@ -455,6 +463,11 @@ export class SurfacePlanPanel extends Disposable {
 			}
 			if (this.signalsHydrated && this.lastHydratedSignature === signature) {
 				this.setParallelClaudeWorkstreamsEnabled(options.parallelClaudeWorkstreamsEnabled === true);
+				// Re-emit cards — modeShell may have painted static "—" placeholders while this
+				// load was coalesced as already-hydrated (same-surface reopen / Steps sync).
+				if (this.lastTreeDocument) {
+					this.publishTreeDocument(this.lastTreeDocument);
+				}
 				return;
 			}
 		}
@@ -497,6 +510,7 @@ export class SurfacePlanPanel extends Disposable {
 			this.renderStatusTracker();
 			this.clearCompose();
 			this.showTreeMessage(localize('surfacePlan.noWorkspace', 'Open a workspace folder to load plan.md.'));
+			this.markLoadSettled(generation);
 			return;
 		}
 
@@ -579,6 +593,7 @@ export class SurfacePlanPanel extends Disposable {
 					'Could not read plan: {0}',
 					String((error as Error)?.message ?? error),
 				));
+				this.markLoadSettled(generation);
 				return;
 			}
 		}
@@ -693,11 +708,26 @@ export class SurfacePlanPanel extends Disposable {
 				? proposalMissingMessage
 				: (proposalMissingMessage || localize('surfacePlan.emptyContent', 'No plan or proposal content yet.')),
 		});
+		this.markLoadSettled(generation);
 		void this.refreshGraphRegionsInBackground(workspaceFolder, options.surface, surfaceId, generation);
 		} finally {
-			// If this generation aborted or threw before hydrate, do not leave coalescing stuck.
-			if (generation === this.loadGeneration && !this.signalsHydrated) {
-				this.loadInFlightSignature = undefined;
+			if (generation === this.loadGeneration) {
+				// If this generation aborted or threw before hydrate, do not leave coalescing stuck.
+				if (!this.signalsHydrated) {
+					this.loadInFlightSignature = undefined;
+				}
+				// Ended without a terminal render (threw, or a supersede chain dropped every
+				// pass) — schedule a recovery load so the placeholder cards do not stay up.
+				if (this.settledGeneration !== generation) {
+					this.loadRecovery.schedule();
+				}
+			} else if (
+				this.settledGeneration !== this.loadGeneration
+				&& this.loadInFlightSignature === undefined
+			) {
+				// We were superseded, but nothing is in flight for the newer generation (it may
+				// have coalesced). Recover so static "—" cards are not left up permanently.
+				this.loadRecovery.schedule();
 			}
 		}
 	}
@@ -711,37 +741,149 @@ export class SurfacePlanPanel extends Disposable {
 		this.loadInFlightSignature = undefined;
 	}
 
-	/** First paint: disk/memory graph cache + preview — do not wait on Ix CLI. */
+	/** Record that this generation reached a terminal render (document publish or message). */
+	private markLoadSettled(generation: number): void {
+		if (generation !== this.loadGeneration) {
+			return;
+		}
+		this.settledGeneration = generation;
+		this.loadRecoveryAttempts = 0;
+		this.loadRecovery.cancel();
+	}
+
+	/**
+	 * The latest load ended without rendering anything — a supersede chain dropped every
+	 * pass, or the load threw. Re-run one forced load; after repeated failures publish the
+	 * last cached document (or an explicit message) instead of leaving placeholder cards up.
+	 */
+	private recoverDroppedLoad(): void {
+		const options = this.lastOptions;
+		if (!options || this.settledGeneration === this.loadGeneration) {
+			return;
+		}
+		if (this.loadInFlightSignature !== undefined) {
+			// A newer load is mid-hydrate — its own finally re-schedules recovery if it drops too.
+			return;
+		}
+		if (this.loadRecoveryAttempts >= 2) {
+			const cached = this.lastTreeDocument;
+			if (cached && cached.storageKey === `surfaceProposalTree.visibility.${options.surfaceId}`) {
+				this.publishTreeDocument(cached);
+			} else {
+				this.showTreeMessage(localize('surfacePlan.loadDropped', 'Plan data could not be loaded. Use Refresh to try again.'));
+			}
+			this.statusEl.textContent = localize('surfacePlan.loadDroppedStatus', 'Load interrupted — Refresh to retry');
+			this.settledGeneration = this.loadGeneration;
+			return;
+		}
+		this.loadRecoveryAttempts++;
+		void this.load({ ...options }, { force: true }).catch(() => {
+			// load()'s finally already re-scheduled recovery for this failure.
+		});
+	}
+
+	/**
+	 * First paint from on-disk artifacts — plan.md, graph-proposal.json, Real Graph cache.
+	 * Do not wait on Ix CLI, blockers probe, or compare snapshot.
+	 */
 	private async publishImmediateCachedDocument(
 		options: SurfacePlanPanelLoadOptions,
 		generation: number,
 	): Promise<void> {
-		const { surfaceId, workspaceFolder } = options;
+		const { surfaceId, surfacePath, treeId, workspaceFolder } = options;
 		if (!workspaceFolder) {
 			return;
 		}
-		let cached = this.graphRegionsBySurfaceId.get(surfaceId);
-		if (!cached) {
-			const fromDisk = await readSurfaceGraphRegionsCache(this.fileService, workspaceFolder, surfaceId);
-			if (generation !== this.loadGeneration) {
-				return;
-			}
-			if (fromDisk) {
-				cached = { regions: fromDisk.regions, message: fromDisk.message };
-				this.graphRegionsBySurfaceId.set(surfaceId, cached);
-			}
+		const [cachedGraph, planMarkdown, proposal] = await Promise.all([
+			(async () => {
+				let cached = this.graphRegionsBySurfaceId.get(surfaceId);
+				if (!cached) {
+					const fromDisk = await readSurfaceGraphRegionsCache(this.fileService, workspaceFolder, surfaceId);
+					if (fromDisk) {
+						cached = { regions: fromDisk.regions, message: fromDisk.message };
+						this.graphRegionsBySurfaceId.set(surfaceId, cached);
+					}
+				}
+				return cached;
+			})(),
+			this.readPlanMarkdownForImmediatePaint(workspaceFolder, surfaceId, surfacePath),
+			this.readProposalForImmediatePaint(workspaceFolder, surfaceId, treeId),
+		]);
+		if (generation !== this.loadGeneration) {
+			return;
 		}
+		if (planMarkdown !== undefined) {
+			this.lastPlanMarkdown = planMarkdown;
+			this.hasPlanContent = Boolean(planMarkdown.trim());
+			this.planLocked = isSurfacePlanLocked(planMarkdown);
+		}
+		if (proposal) {
+			this.hasFinalProposal = true;
+			const phases: SurfacePlanWorkflowPhaseRef[] = [];
+			for (const phase of proposal.phases ?? []) {
+				const id = typeof phase.id === 'string' ? phase.id.trim() : '';
+				const title = typeof phase.title === 'string' ? phase.title.trim() : '';
+				if (id && title) {
+					phases.push({ id, title });
+				}
+			}
+			this.lastProposalPhases = phases;
+		}
+		const partition = proposal ? partitionProposalWorkstreams(proposal) : undefined;
+		const graph = proposal ? buildProposalPreviewGraph(proposal) : undefined;
+		const progress = proposal ? computeSurfaceProposalProgress(proposal, partition, undefined) : undefined;
 		this.treeAnchor.classList.remove('hidden');
 		this.publishTreeDocument({
-			graphRegions: cached?.regions,
-			graphMessage: cached?.regions?.length
-				? undefined
-				: localize('surfacePlan.graphRefreshing', 'Refreshing code graph…'),
+			proposal,
+			graph,
+			partition,
+			progress,
+			planMarkdown,
+			graphRegions: cachedGraph?.regions,
+			graphMessage: cachedGraph?.regions?.length
+				? cachedGraph.message
+				: (cachedGraph?.message || localize('surfacePlan.graphRefreshing', 'Refreshing code graph…')),
 			previewInfo: this.buildPreviewInfo(options),
-			referenceCandidates: this.withResolvedRepoReasons(this.candidates, this.lastPlanMarkdown),
+			referenceCandidates: this.withResolvedRepoReasons(this.candidates, planMarkdown ?? this.lastPlanMarkdown),
 			storageKey: `surfaceProposalTree.visibility.${surfaceId}`,
-			proposalMissingMessage: localize('surfacePlan.loadingContent', 'Loading plan…'),
+			proposalMissingMessage: proposal || planMarkdown
+				? undefined
+				: localize('surfacePlan.loadingContent', 'Loading plan…'),
 		});
+	}
+
+	private async readPlanMarkdownForImmediatePaint(
+		workspaceFolder: URI,
+		surfaceId: string,
+		surfacePath: string | undefined,
+	): Promise<string | undefined> {
+		try {
+			const planResource = await resolveSurfacePlanResource(this.fileService, workspaceFolder, surfaceId, surfacePath);
+			if (!planResource) {
+				return undefined;
+			}
+			const content = await this.fileService.readFile(planResource);
+			return content.value.toString();
+		} catch {
+			return undefined;
+		}
+	}
+
+	private async readProposalForImmediatePaint(
+		workspaceFolder: URI,
+		surfaceId: string,
+		treeId: string | undefined,
+	): Promise<GraphProposalDocument | undefined> {
+		try {
+			const proposalResource = await this.resolveProposalResource(workspaceFolder, surfaceId, treeId);
+			if (!proposalResource) {
+				return undefined;
+			}
+			const content = await this.fileService.readFile(proposalResource);
+			return JSON.parse(content.value.toString()) as GraphProposalDocument;
+		} catch {
+			return undefined;
+		}
 	}
 
 	private async refreshGraphRegionsInBackground(

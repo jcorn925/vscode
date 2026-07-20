@@ -171,7 +171,10 @@ import {
 	type ConsoleWorkflowSignals,
 	type ConsoleWorkflowStepState,
 } from '../../../../../custom/goalWorkspace/consoleWorkflowStatus.js';
-import { exclusiveConsoleHomeOpenStates } from '../../../../../custom/goalWorkspace/consoleHomeAccordion.js';
+import {
+	CONSOLE_HOME_DEFAULT_SECTION,
+	exclusiveConsoleHomeOpenStates,
+} from '../../../../../custom/goalWorkspace/consoleHomeAccordion.js';
 import { resolveSurfacePendingPlanAction } from '../../../../../custom/goalWorkspace/surfacePlanPendingAction.js';
 import {
 	decideSurfaceAutoContinue,
@@ -232,6 +235,7 @@ import { SurfaceClaudeMdPanel } from './surfaceClaudeMdPanel.js';
 import {
 	orderSurfaceProposalTreeCards,
 	staticSurfaceProposalTreeCards,
+	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
 	SURFACE_RAIL_BUILD_SECTION_IDS,
 	type SurfaceProposalTreeCardItem,
 } from './surfaceProposalTreeCards.js';
@@ -520,8 +524,6 @@ class ModeShellContribution extends Disposable {
 	private workspaceHomeView: WorkspaceHomeView = 'surfaces';
 	/** True while programmatically setting details.open (ignore toggle → rail feedback). */
 	private consoleHomeAccordionApplying = false;
-	/** User closed the focused section via summary — don't force it open again until the next section select. */
-	private consoleHomeUserCollapsedFocused = false;
 	/** When true (and no surface open), Console section cards appear under the Console rail card. */
 	private consoleExpanded = true;
 	private uiConsoleHomeHost!: HTMLElement;
@@ -9080,10 +9082,10 @@ class ModeShellContribution extends Disposable {
 		// Console Steps share the shell top panel with Surface plan Steps.
 		this.uiStepsHost.appendChild(this.uiConsoleStatusTracker);
 		this.uiConsoleStatusLabel = $('div.custom-mode-ui-console-home-status');
-		// Stack order matches Console section rail cards: Plan → Surfaces → Rules → How it works → Brand → Settings.
+		// Stack order matches Console section rail cards: Surfaces (default) → Plan → Rules → How it works → Brand → Settings.
 		this.uiConsoleSectionHost = $('div.custom-mode-ui-console-section-host', undefined,
-			this.uiWorkspacePlanHomePanel,
 			this.uiSurfaceSetupSurfacesBody,
+			this.uiWorkspacePlanHomePanel,
 			this.uiWorkspaceClaudeMdPanelRoot,
 			this.uiWorkspaceHowItWorksPanel,
 			this.uiWorkspacePlanBrandFields,
@@ -9094,9 +9096,8 @@ class ModeShellContribution extends Disposable {
 			this.uiConsoleSectionHost,
 		);
 
-		const storedConsoleSection = this.storageService.get(STORAGE_CONSOLE_SECTION, StorageScope.WORKSPACE)
-			?? this.storageService.get(STORAGE_WORKSPACE_HOME_VIEW, StorageScope.WORKSPACE);
-		this.workspaceHomeView = isWorkspaceHomeView(storedConsoleSection) ? storedConsoleSection : 'surfaces';
+		// Surfaces is always the Workspace landing section (do not restore Plan/Brand/etc. across reloads).
+		this.workspaceHomeView = CONSOLE_HOME_DEFAULT_SECTION;
 		const storedConsoleExpanded = this.storageService.get(STORAGE_CONSOLE_EXPANDED, StorageScope.WORKSPACE);
 		this.consoleExpanded = storedConsoleExpanded !== '0';
 
@@ -9119,6 +9120,9 @@ class ModeShellContribution extends Disposable {
 			onCollapsedChange: collapsed => this.onConsoleRailCollapsedChange(collapsed),
 			onWidthChange: width => {
 				this.storageService.store(STORAGE_CARD_RAIL_WIDTH, String(width), StorageScope.PROFILE, StorageTarget.USER);
+			},
+			onOpenHref: url => {
+				void this.openerService.open(URI.parse(url), { openExternal: true });
 			},
 			cards: this.getWorkspaceHomeCards(),
 			onSelect: id => {
@@ -9175,8 +9179,8 @@ class ModeShellContribution extends Disposable {
 						return;
 					}
 					if (this.selectedSurfaceId === surfaceId) {
-						// Selecting the open surface again collapses its section cards and returns to Console.
-						this.openConsoleWithSection(this.workspaceHomeView);
+						// Selecting the open surface again collapses its section cards and returns to Console Surfaces.
+						this.openConsoleWithSection(CONSOLE_HOME_DEFAULT_SECTION);
 						return;
 					}
 					this.activeRailCardId = id;
@@ -10235,11 +10239,11 @@ class ModeShellContribution extends Disposable {
 		this.setWorkspaceHomeView(view);
 	}
 
-	/** Console card: expand home / restore last section, or collapse section cards when already open. */
+	/** Console card: expand home on Surfaces (Workspace default), or collapse section cards when already open. */
 	private onSelectConsoleCard(): void {
 		const openSurfaceId = this.getOpenSurfaceId();
 		if (openSurfaceId) {
-			this.openConsoleWithSection(this.workspaceHomeView);
+			this.openConsoleWithSection(CONSOLE_HOME_DEFAULT_SECTION);
 			return;
 		}
 		if (this.consoleExpanded) {
@@ -10249,10 +10253,7 @@ class ModeShellContribution extends Disposable {
 			this.syncWorkspaceHomeView();
 			return;
 		}
-		this.consoleExpanded = true;
-		this.persistConsoleExpanded();
-		this.activeRailCardId = `consoleSection:${this.workspaceHomeView}`;
-		this.setWorkspaceHomeView(this.workspaceHomeView);
+		this.openConsoleWithSection(CONSOLE_HOME_DEFAULT_SECTION);
 	}
 
 	private getWorkspaceSectionLabel(): string {
@@ -10293,20 +10294,20 @@ class ModeShellContribution extends Disposable {
 			const suggestedCount = this.workspaceSuggestedSurfaces?.surfaces.length ?? 0;
 			cards.push(
 				{
-					id: 'consoleSection:workspacePlan',
-					key: localize('customMode.workspaceHomePlanKey', 'Plan'),
-					value: '',
-					title: localize('customMode.workspaceHomePlan', 'Workspace Plan'),
-					groupStart: true,
-					assocGroup: 'console',
-				},
-				{
 					id: 'consoleSection:surfaces',
 					key: localize('customMode.workspaceHomeSurfacesKey', 'Surfaces'),
 					value: suggestedCount > 0
 						? localize('customMode.workspaceHomeSurfacesSuggestedValue', '{0} suggested', suggestedCount)
 						: localize('customMode.workspaceHomeSurfacesValue', 'apps'),
 					title: localize('customMode.workspaceHomeSurfaces', 'Surfaces — suggested apps and create'),
+					groupStart: true,
+					assocGroup: 'console',
+				},
+				{
+					id: 'consoleSection:workspacePlan',
+					key: localize('customMode.workspaceHomePlanKey', 'Plan'),
+					value: '',
+					title: localize('customMode.workspaceHomePlan', 'Workspace Plan'),
 					assocGroup: 'console',
 				},
 				{
@@ -10815,8 +10816,12 @@ class ModeShellContribution extends Disposable {
 		this.activeRailCardId = `surface:${surfaceId}`;
 		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surfaceId, StorageScope.WORKSPACE, StorageTarget.USER);
 		// Section cards + default section once — avoid selectOwningSurfaceCard (it re-selects again).
+		// Force placeholders only on surface switch; same-surface reopen keeps hydrated badges.
 		if (surface) {
-			this.applyImmediateSurfaceRailCards(surface, { focusDefaultSection: true });
+			this.applyImmediateSurfaceRailCards(surface, {
+				focusDefaultSection: true,
+				forcePlaceholders: surfaceChanged,
+			});
 		} else {
 			this.surfaceRailCardsLoading = !this.surfaceRailCards.length;
 			this.syncWorkspaceHomeView();
@@ -11625,8 +11630,9 @@ class ModeShellContribution extends Disposable {
 			this.routeSelectedSurfacePreview();
 
 			// Custom AI narrate/dispatch when workspace orchestrator is OpenAI-compatible or Ollama.
+			const startPlanningLabel = localize('customMode.planOrchestrateStartPlanning', 'Start planning');
+			let orchestrationUsedFallback: boolean | undefined;
 			if (shouldOrchestratePlanAction('start_planning')) {
-				const startPlanningLabel = localize('customMode.planOrchestrateStartPlanning', 'Start planning');
 				const orchestrated = await this.runSurfacePlanOrchestrationTurn({
 					surfaceId,
 					surfaceName,
@@ -11634,6 +11640,7 @@ class ModeShellContribution extends Disposable {
 					stepId: 'intent',
 					stepLabel: startPlanningLabel,
 				});
+				orchestrationUsedFallback = orchestrated.usedFallback;
 				const provider = this.getAgentOrchestratorProvider();
 				if (!shouldRunCustomAiPlanOrchestration(provider)) {
 					this.logClaudeKickoff(`orchestrator=${provider ?? 'unset'}; Claude kickoff continues ${logCtx}`);
@@ -11680,7 +11687,7 @@ class ModeShellContribution extends Disposable {
 			this.notificationService.info(localize(
 				'customMode.planKickoffDispatched',
 				'{0}',
-				buildClaudeDispatchNotification(startPlanningLabel, orchestrated.usedFallback),
+				buildClaudeDispatchNotification(startPlanningLabel, orchestrationUsedFallback === true, { claudeDirect: orchestrationUsedFallback === undefined }),
 			));
 
 			// Refresh Plan tab in case the watcher has not picked up the provisional file yet.
@@ -13600,11 +13607,11 @@ class ModeShellContribution extends Disposable {
 		this.syncContextGatheringUi();
 	}
 
-	/** Leave separate Code mode and return to Console canvas. */
+	/** Leave separate Code mode and return to Console canvas on Surfaces. */
 	private goToConsoleHome(): void {
 		this.ensureWorkspaceView();
 		this.selectGoalSurface(ADD_SURFACE_ID);
-		this.openConsoleWithSection(this.workspaceHomeView);
+		this.openConsoleWithSection(CONSOLE_HOME_DEFAULT_SECTION);
 		this.syncContextGatheringUi();
 		this.updateUiProjectName();
 	}
@@ -13896,8 +13903,12 @@ class ModeShellContribution extends Disposable {
 		const surfaceChanged = this.selectedSurfaceId !== surface.id;
 		this.selectedSurfaceId = surface.id;
 		this.storageService.store(STORAGE_SELECTED_GOAL_SURFACE, surface.id, StorageScope.WORKSPACE, StorageTarget.USER);
-		// Show static section cards immediately — do not wait for plan/Ix load.
-		this.applyImmediateSurfaceRailCards(surface, { focusDefaultSection: surfaceChanged });
+		// Show static section cards immediately on switch — do not wait for plan/Ix load.
+		// Same-surface reselect must not wipe hydrated badges back to "—".
+		this.applyImmediateSurfaceRailCards(surface, {
+			focusDefaultSection: surfaceChanged,
+			forcePlaceholders: surfaceChanged,
+		});
 		// On surface switch, mark unreachable and re-route — do NOT hop through about:blank
 		// (Electron aborts the in-flight load and the preview flashes black).
 		if (surfaceChanged) {
@@ -13910,10 +13921,14 @@ class ModeShellContribution extends Disposable {
 		this.maybeAutoStartSelectedSurfacePreview();
 	}
 
-	/** Paint Proposed Graph / Real Graph / Preview / Plan / Rules cards before async load finishes. */
+	/**
+	 * Paint Proposed Graph / Real Graph / Preview / Plan / Rules cards before async load finishes.
+	 * Do not clobber already-hydrated badges (plan.md / CLAUDE.md / graph counts) with static "—" —
+	 * re-open / refresh churn + load() coalesce was leaving those placeholders stuck.
+	 */
 	private applyImmediateSurfaceRailCards(
 		surface: WorkspaceSurface,
-		options?: { focusDefaultSection?: boolean },
+		options?: { focusDefaultSection?: boolean; forcePlaceholders?: boolean },
 	): void {
 		const next = this.toSurfaceRailSectionCards(staticSurfaceProposalTreeCards({
 			localUrl: surface.localUrl,
@@ -13921,7 +13936,10 @@ class ModeShellContribution extends Disposable {
 			purposeValue: surface.purpose,
 		}));
 		this.surfaceRailCardsLoading = false;
-		if (!cardRailItemsEqual(this.surfaceRailCards, next)) {
+		const replace = options?.forcePlaceholders === true
+			|| this.surfaceRailCards.length === 0
+			|| this.surfaceRailCardsLookLikePlaceholders();
+		if (replace && !cardRailItemsEqual(this.surfaceRailCards, next)) {
 			this.surfaceRailCards = next;
 		}
 		this.syncWorkspaceHomeView();
@@ -13930,16 +13948,42 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
+	/** True when rail badges still look like staticSurfaceProposalTreeCards placeholders. */
+	private surfaceRailCardsLookLikePlaceholders(): boolean {
+		if (!this.surfaceRailCards.length) {
+			return true;
+		}
+		// Loaded path hardcodes Rules → CLAUDE.md; static paint leaves "—".
+		const rules = this.surfaceRailCards.find(card => card.id === 'surfaceSection:rules');
+		return !rules || rules.value.trim() === SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE;
+	}
+
 	/** Pin Preview (when complete) or the Plan Steps current-step section to the front of the rail. */
 	private toSurfaceRailSectionCards(cards: readonly SurfaceProposalTreeCardItem[]): CardRailItem[] {
 		const available = cards.map(card => card.id);
 		const preferred = this.resolvePreferredSurfaceRailSectionId(available);
-		return orderSurfaceProposalTreeCards(cards, preferred).map(card => ({
-			id: `surfaceSection:${card.id}`,
-			key: card.key,
-			value: card.value,
-			title: localize('customMode.surfaceRailSectionTitle', 'Show {0}', card.key),
-		}));
+		const surface = this.getSelectedSurface();
+		return orderSurfaceProposalTreeCards(cards, preferred).map(card => {
+			const href = card.id === 'preview'
+				? surface?.localUrl?.trim() || undefined
+				: card.id === 'deployed'
+					? surface?.productionUrl?.trim() || undefined
+					: undefined;
+			return {
+				id: `surfaceSection:${card.id}`,
+				key: card.key,
+				value: card.value,
+				href,
+				title: href
+					? localize(
+						'customMode.surfaceRailSectionUrlTitle',
+						'Show {0} — click URL to open {1}',
+						card.key,
+						href,
+					)
+					: localize('customMode.surfaceRailSectionTitle', 'Show {0}', card.key),
+			};
+		});
 	}
 
 	private resolvePreferredSurfaceRailSectionId(available: readonly string[]): string | undefined {
@@ -14388,7 +14432,7 @@ class ModeShellContribution extends Disposable {
 	}
 
 	/** Production URL is treated as live once loaded into the embedded pane (no local server gate). */
-	private isSelectedSurfacePublishedReachable(): boolean {
+	private isSelectedSurfaceDeployedReachable(): boolean {
 		const surface = this.getSelectedSurface();
 		const url = surface?.productionUrl?.trim();
 		if (!url) {
@@ -14438,10 +14482,10 @@ class ModeShellContribution extends Disposable {
 		// Waiting Start-preview chrome fills the card-rail content host; only the live webview
 		// takes over as a sibling column beside the cards (preview-visible).
 		const showPlan = showToggle && !showLivePane;
-		const publishedSelected = this.isPublishedSectionSelected();
+		const deployedSelected = this.isDeployedSectionSelected();
 		const previewLive = showLivePane && (
-			publishedSelected
-				? this.isSelectedSurfacePublishedReachable()
+			deployedSelected
+				? this.isSelectedSurfaceDeployedReachable()
 				: this.isSelectedSurfacePreviewReachable()
 		);
 		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-preview-visible', previewLive);
@@ -15333,6 +15377,74 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
+	/** Open the GitHub repository for this workspace in the browser. */
+	private async showPublishedGitHub(): Promise<void> {
+		const actionLabel = localize('customMode.surfaceActions.showGitHub', 'Show GitHub');
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder) {
+			const message = localize(
+				'customMode.surfaceActions.showGitHubNoWorkspace',
+				'Open a workspace folder before showing GitHub.',
+			);
+			this.notificationService.warn(message);
+			void this.submitActionsClaudePrompt(formatActionsCommonOutcomePrompt({
+				actionId: 'show-github',
+				actionLabel,
+				ok: false,
+				detail: message,
+			}));
+			return;
+		}
+		const surface = this.getSelectedSurface();
+		try {
+			const gitConfig = joinPath(workspaceFolder, '.git', 'config');
+			const remoteUrl = (await this.fileService.exists(gitConfig))
+				? originRemoteUrlFromGitConfig((await this.fileService.readFile(gitConfig)).value.toString())
+				: undefined;
+			const browseUrl = remoteUrl ? githubBrowseUrlFromRemote(remoteUrl) : undefined;
+			if (!browseUrl) {
+				const message = localize(
+					'customMode.surfaceActions.showGitHubNotLinked',
+					'No GitHub origin remote found. Publish to GitHub first.',
+				);
+				this.notificationService.warn(message);
+				void this.submitActionsClaudePrompt(formatActionsCommonOutcomePrompt({
+					actionId: 'show-github',
+					actionLabel,
+					ok: false,
+					detail: message,
+					surfaceId: surface?.id,
+					surfaceName: surface?.name,
+				}));
+				return;
+			}
+			await this.openerService.open(URI.parse(browseUrl), { openExternal: true });
+			void this.submitActionsClaudePrompt(formatActionsCommonOutcomePrompt({
+				actionId: 'show-github',
+				actionLabel,
+				ok: true,
+				detail: `Opened ${browseUrl} in the browser.`,
+				surfaceId: surface?.id,
+				surfaceName: surface?.name,
+			}));
+		} catch (error: unknown) {
+			const message = String((error as Error)?.message ?? error);
+			this.notificationService.error(localize(
+				'customMode.surfaceActions.showGitHubFailed',
+				'Could not open GitHub: {0}',
+				message,
+			));
+			void this.submitActionsClaudePrompt(formatActionsCommonOutcomePrompt({
+				actionId: 'show-github',
+				actionLabel,
+				ok: false,
+				detail: message,
+				surfaceId: surface?.id,
+				surfaceName: surface?.name,
+			}));
+		}
+	}
+
 	/** Open the Vercel deployment for the selected surface (or workspace) in the browser. */
 	private async showPublishedVercel(): Promise<void> {
 		const actionLabel = localize('customMode.surfaceActions.showVercel', 'Show Vercel');
@@ -15882,11 +15994,11 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 
-		if (this.isPublishedSectionSelected()) {
+		if (this.isDeployedSectionSelected()) {
 			this.setSurfaceEmptyState({
-				title: localize('customMode.surfaceMissingPublishedUrlTitle', '{0} is not published yet', surface.name),
+				title: localize('customMode.surfaceMissingDeployedUrlTitle', '{0} is not deployed yet', surface.name),
 				subtitle: localize(
-					'customMode.surfaceMissingPublishedUrlSubtitle',
+					'customMode.surfaceMissingDeployedUrlSubtitle',
 					'Publish to Vercel (Actions), then set productionUrl on this surface in workspace.goal.json.',
 				),
 			});

@@ -17,7 +17,6 @@ import {
 	orderSurfaceProposalTreeCards,
 	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
 	SURFACE_PROPOSAL_TREE_SECTION_ORDER,
-	surfaceDescriptionCardValue,
 	surfaceProposalTreeCardsFromDocument,
 	type SurfaceProposalTreeCardItem,
 	type SurfaceProposalTreeGraphRegion,
@@ -102,6 +101,9 @@ export interface SurfaceProposalTreeToggleRepoRequest {
 export class SurfaceProposalTreeView extends Disposable {
 	private readonly webview: IWebviewElement;
 	private lastDocument: SurfaceProposalTreeDocumentOptions | undefined;
+	/** False until the webview script posts ready — postMessage before that is dropped. */
+	private webviewReady = false;
+	private pendingSelectSectionId: string | undefined;
 
 	private readonly _onDidToggleRepo = this._register(new Emitter<SurfaceProposalTreeToggleRepoRequest>());
 	readonly onDidToggleRepo: Event<SurfaceProposalTreeToggleRepoRequest> = this._onDidToggleRepo.event;
@@ -135,7 +137,13 @@ export class SurfaceProposalTreeView extends Disposable {
 		this._register(this.webview.onMessage(event => {
 			const message = event.message;
 			if (message?.type === 'surfaceProposalTree.ready') {
+				this.webviewReady = true;
 				onReady();
+				const pendingSection = this.pendingSelectSectionId;
+				this.pendingSelectSectionId = undefined;
+				if (pendingSection) {
+					this.selectSection(pendingSection);
+				}
 				return;
 			}
 			if (message?.type === 'surfaceProposalTree.toggleRepo'
@@ -223,6 +231,11 @@ export class SurfaceProposalTreeView extends Disposable {
 				: undefined,
 			contextCardValue: totalRepos > 0 ? `${selectedRepos}/${totalRepos}` : undefined,
 		}));
+		// Rail cards update on the host even when the webview is not ready yet. Defer the
+		// document payload until ready — otherwise the pane stays on "Loading proposal…".
+		if (!this.webviewReady) {
+			return;
+		}
 		void this.webview.postMessage({
 			type: 'surfaceProposalTree.setDocument',
 			...options,
@@ -241,6 +254,10 @@ export class SurfaceProposalTreeView extends Disposable {
 
 	/** Scroll the given section into view — driven by the host-owned card rail. */
 	selectSection(id: string): void {
+		if (!this.webviewReady) {
+			this.pendingSelectSectionId = id;
+			return;
+		}
 		void this.webview.postMessage({ type: 'surfaceProposalTree.selectSection', id });
 	}
 
@@ -2194,8 +2211,12 @@ export class SurfaceProposalTreeView extends Disposable {
 
 				cards.push(metaCard('proposed', 'Proposed Graph', proposedGraph.cardValue || '—'));
 				cards.push(metaCard('graph', 'Real Graph', codeGraph.cardValue || '—'));
-				cards.push(metaCard('preview', 'Preview', previewInfo?.localUrl ? 'URL' : '—'));
-				cards.push(metaCard('deployed', 'Deployed', previewInfo?.productionUrl ? 'Vercel' : '—'));
+				cards.push(metaCard('preview', 'Preview', previewInfo?.localUrl
+					? String(previewInfo.localUrl).replace(/^https?:\/\//i, '').replace(/\/$/, '') || '—'
+					: '—'));
+				cards.push(metaCard('deployed', 'Deployed', previewInfo?.productionUrl
+					? String(previewInfo.productionUrl).replace(/^https?:\/\//i, '').replace(/\/$/, '') || '—'
+					: '—'));
 
 				const intentFromPlan = (() => {
 					if (!planMarkdown || !planMarkdown.trim()) {
@@ -2451,7 +2472,13 @@ export class SurfaceProposalTreeView extends Disposable {
 			window.addEventListener('message', event => {
 				const message = event.data;
 				if (message?.type === 'surfaceProposalTree.setDocument') {
-					render(message);
+					try {
+						render(message);
+					} catch (error) {
+						content.replaceChildren();
+						content.append(el('div', 'empty',
+							'Failed to render proposal: ' + (error && error.message ? error.message : String(error))));
+					}
 					return;
 				}
 				if (message?.type === 'surfaceProposalTree.selectSection' && typeof message.id === 'string') {

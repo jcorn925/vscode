@@ -55,6 +55,29 @@ suite('cardRailLayout', () => {
 		layout.dispose();
 	});
 
+	test('href value opens via onOpenHref without selecting the card', () => {
+		const selected: string[] = [];
+		const opened: string[] = [];
+		const layout = createCardRailLayout({
+			activeId: 'preview',
+			cards: [
+				{ id: 'preview', key: 'Preview', value: 'localhost:3000', href: 'http://localhost:3000' },
+				{ id: 'deployed', key: 'Deployed', value: 'cadre.vercel.app', href: 'https://cadre.vercel.app' },
+			],
+			onSelect: id => selected.push(id),
+			onOpenHref: url => opened.push(url),
+		});
+		const link = layout.rail.querySelector(
+			'button[data-card-id="deployed"] .custom-mode-card-rail-card-value.is-link',
+		) as HTMLElement;
+		assert.ok(link);
+		assert.strictEqual(link.dataset.href, 'https://cadre.vercel.app');
+		link.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+		assert.deepStrictEqual(opened, ['https://cadre.vercel.app']);
+		assert.deepStrictEqual(selected, []);
+		layout.dispose();
+	});
+
 	test('revealLabel renders a labeled left-edge tab when collapsed', () => {
 		const layout = createCardRailLayout({
 			activeId: 'plan',

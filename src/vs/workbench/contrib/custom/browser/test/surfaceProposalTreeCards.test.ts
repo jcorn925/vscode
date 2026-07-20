@@ -12,6 +12,7 @@ import {
 	surfaceGraphRegionsCardValue,
 	surfaceProposedGraphCardValue,
 	surfaceProposalTreeCardsFromDocument,
+	surfaceUrlCardValue,
 	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
 	SURFACE_PROPOSAL_TREE_SECTION_ORDER,
 	type SurfaceProposalTreeCardItem,
@@ -26,17 +27,26 @@ suite('orderSurfaceProposalTreeCards', () => {
 			purposeValue: 'Acquire clients.',
 		});
 		assert.deepStrictEqual(cards.map(c => c.id), ['proposed', 'graph', 'preview', 'deployed', 'description', 'plan', 'rules']);
-		assert.strictEqual(cards.find(c => c.id === 'preview')?.value, 'URL');
+		assert.strictEqual(cards.find(c => c.id === 'preview')?.value, 'localhost:3000');
 		assert.strictEqual(cards.find(c => c.id === 'deployed')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(cards.find(c => c.id === 'graph')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(cards.find(c => c.id === 'description')?.value, 'Acquire clients.');
 		assert.strictEqual(
 			staticSurfaceProposalTreeCards({ productionUrl: 'https://cadre.vercel.app' }).find(c => c.id === 'deployed')?.value,
-			'Vercel',
+			'cadre.vercel.app',
 		);
 		assert.strictEqual(
 			staticSurfaceProposalTreeCards().find(c => c.id === 'description')?.value,
 			SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+		);
+	});
+
+	test('surfaceUrlCardValue strips protocol and truncates', () => {
+		assert.strictEqual(surfaceUrlCardValue(undefined), SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
+		assert.strictEqual(surfaceUrlCardValue('https://cadre-bot.vercel.app/'), 'cadre-bot.vercel.app');
+		assert.strictEqual(
+			surfaceUrlCardValue('https://very-long-subdomain.example.com/path', 20),
+			'very-long-subdomain.…',
 		);
 	});
 
@@ -65,7 +75,7 @@ suite('orderSurfaceProposalTreeCards', () => {
 		});
 		assert.strictEqual(cards.find(c => c.id === 'proposed')?.value, '39·11');
 		assert.strictEqual(cards.find(c => c.id === 'graph')?.value, '2·0');
-		assert.strictEqual(cards.find(c => c.id === 'preview')?.value, 'URL');
+		assert.strictEqual(cards.find(c => c.id === 'preview')?.value, 'localhost:4173');
 		assert.strictEqual(cards.find(c => c.id === 'plan')?.value, 'plan.md');
 		assert.strictEqual(cards.find(c => c.id === 'rules')?.value, 'CLAUDE.md');
 		assert.strictEqual(cards.find(c => c.id === 'phases')?.value, '3/3');
@@ -89,7 +99,7 @@ suite('orderSurfaceProposalTreeCards', () => {
 		);
 		assert.deepStrictEqual(
 			[...SURFACE_PROPOSAL_TREE_SECTION_ORDER].filter(id => id !== 'removals'),
-			['phases', 'proposed', 'graph', 'preview', 'published', 'description', 'context', 'plan', 'rules'],
+			['phases', 'proposed', 'graph', 'preview', 'deployed', 'description', 'context', 'plan', 'rules'],
 		);
 	});
 

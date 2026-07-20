@@ -21,6 +21,20 @@ export interface SurfaceProposalTreeGraphRegion {
 export const SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE = '—';
 
 /**
+ * True when rail badges still look like {@link staticSurfaceProposalTreeCards} placeholders.
+ * Loaded path hardcodes Rules → CLAUDE.md; static paint leaves "—".
+ */
+export function surfaceRailCardsLookLikePlaceholders(
+	cards: readonly { readonly id: string; readonly value: string }[],
+): boolean {
+	if (!cards.length) {
+		return true;
+	}
+	const rules = cards.find(card => card.id === 'rules' || card.id === 'surfaceSection:rules');
+	return !rules || rules.value.trim() === SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE;
+}
+
+/**
  * Canonical Canvas rail + Workspace section order.
  * Build / graph views first; docs trail. Preferred step card (or Preview when
  * the surface is 100% complete) may still pin to front.
@@ -67,6 +81,22 @@ export function surfaceDescriptionCardValue(purpose?: string): string {
 	return `${firstLine.slice(0, 27).trimEnd()}…`;
 }
 
+/** Compact host/path badge for Preview / Deployed cards (full URL opens on click). */
+export function surfaceUrlCardValue(url?: string, maxLen = 28): string {
+	const trimmed = url?.trim();
+	if (!trimmed) {
+		return SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE;
+	}
+	let display = trimmed.replace(/^https?:\/\//i, '');
+	if (display.endsWith('/') && display.length > 1) {
+		display = display.slice(0, -1);
+	}
+	if (display.length <= maxLen) {
+		return display;
+	}
+	return `${display.slice(0, maxLen - 1).trimEnd()}…`;
+}
+
 export function staticSurfaceProposalTreeCards(options?: {
 	readonly localUrl?: string;
 	readonly productionUrl?: string;
@@ -90,12 +120,12 @@ export function staticSurfaceProposalTreeCards(options?: {
 		{
 			id: 'preview',
 			key: 'Preview',
-			value: options?.localUrl?.trim() ? 'URL' : SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+			value: surfaceUrlCardValue(options?.localUrl),
 		},
 		{
 			id: 'deployed',
 			key: 'Deployed',
-			value: options?.productionUrl?.trim() ? 'Vercel' : SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+			value: surfaceUrlCardValue(options?.productionUrl),
 		},
 		{
 			id: 'description',

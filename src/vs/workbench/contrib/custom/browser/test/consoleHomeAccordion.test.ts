@@ -6,6 +6,7 @@
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import {
+	CONSOLE_HOME_DEFAULT_SECTION,
 	CONSOLE_HOME_SECTION_ORDER,
 	exclusiveConsoleHomeOpenStates,
 } from '../../../../../../custom/goalWorkspace/consoleHomeAccordion.js';
@@ -23,10 +24,11 @@ suite('consoleHomeAccordion', () => {
 		}
 	});
 
-	test('CONSOLE_HOME_SECTION_ORDER matches rail stack order', () => {
+	test('CONSOLE_HOME_SECTION_ORDER puts Surfaces first as Workspace default', () => {
+		assert.strictEqual(CONSOLE_HOME_DEFAULT_SECTION, 'surfaces');
 		assert.deepStrictEqual([...CONSOLE_HOME_SECTION_ORDER], [
-			'workspacePlan',
 			'surfaces',
+			'workspacePlan',
 			'claudeMd',
 			'howItWorks',
 			'branding',
