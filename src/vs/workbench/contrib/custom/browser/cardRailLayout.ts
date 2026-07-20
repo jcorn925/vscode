@@ -471,7 +471,7 @@ export const CARD_RAIL_STYLESHEET = `
 }
 .custom-mode-card-rail-group-label {
 	grid-column: 1 / -1;
-	margin: 12px 0 0;
+	margin: 8px 0 0;
 	padding: 0 2px;
 	font: 700 10px/1.3 var(--vscode-font-family);
 	letter-spacing: 0.02em;
@@ -480,6 +480,10 @@ export const CARD_RAIL_STYLESHEET = `
 	user-select: none;
 	overflow-wrap: anywhere;
 	word-break: break-word;
+}
+/* Extra air between Console/Code and Surfaces (and later rail groups). */
+.custom-mode-card-rail-group-label:not(:first-child) {
+	margin-top: 28px;
 }
 .custom-mode-card-rail-assoc {
 	grid-column: 1 / -1;
