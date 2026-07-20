@@ -17,6 +17,30 @@ export interface SurfaceGraphRegionsCacheDocument {
 	readonly message?: string;
 }
 
+/** How long cached Real Graph regions stay trusted before the background `ix map` re-runs. */
+export const SURFACE_GRAPH_REGIONS_CACHE_TTL_MS = 5 * 60_000;
+
+/**
+ * True when `updatedAt` is recent enough that the background Ix remap can be skipped.
+ * Timestamps further than one TTL in the future are treated as stale (clock skew / bad writes
+ * must not pin the cache fresh forever).
+ */
+export function isSurfaceGraphRegionsCacheFresh(
+	updatedAt: string | undefined,
+	nowMs: number,
+	ttlMs: number = SURFACE_GRAPH_REGIONS_CACHE_TTL_MS,
+): boolean {
+	if (!updatedAt) {
+		return false;
+	}
+	const stamp = Date.parse(updatedAt);
+	if (!Number.isFinite(stamp)) {
+		return false;
+	}
+	const age = nowMs - stamp;
+	return age < ttlMs && age > -ttlMs;
+}
+
 export function surfaceGraphRegionsCacheResource(workspaceFolder: URI, surfaceId: string): URI {
 	return joinPath(workspaceFolder, '.agent', 'surfaces', `${surfaceId}.graph-regions.json`);
 }

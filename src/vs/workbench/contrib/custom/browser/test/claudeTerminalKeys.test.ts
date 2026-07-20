@@ -14,6 +14,7 @@ import {
 	isClaudeTerminalTitle,
 	isReservedClaudeKey,
 	LEGACY_CLAUDE_TERMINAL_TITLE,
+	listLiveClaudeTerminalKeys,
 	parseClaudeTerminalKey,
 	parseClaudeWorkstreamKey,
 	surfaceIdFromClaudeKey,
@@ -83,5 +84,25 @@ suite('claudeTerminalKeys', () => {
 			['cadre-admin-console::ws-42', 'cadre-admin-console::serialize'],
 		);
 		assert.deepStrictEqual(workstreamClaudeKeysForSurface('', ['a::ws-1']), []);
+	});
+
+	test('listLiveClaudeTerminalKeys sorts Workspace / Actions / surfaces / workstreams', () => {
+		const keys = listLiveClaudeTerminalKeys([
+			['cadre-b::ws-1', {}],
+			['cadre-a', {}],
+			[ACTIONS_CLAUDE_KEY, {}],
+			['cadre-b', { isDisposed: true }],
+			[WORKSPACE_CLAUDE_KEY, {}],
+			['cadre-a::serialize', {}],
+			['cadre-b', {}],
+		]);
+		assert.deepStrictEqual(keys, [
+			WORKSPACE_CLAUDE_KEY,
+			ACTIONS_CLAUDE_KEY,
+			'cadre-a',
+			'cadre-a::serialize',
+			'cadre-b',
+			'cadre-b::ws-1',
+		]);
 	});
 });

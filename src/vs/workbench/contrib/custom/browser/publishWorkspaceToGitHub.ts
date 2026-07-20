@@ -5,12 +5,29 @@
 
 /** Match extensions/github publish sanitization for repo names. */
 export function sanitizeGitHubRepositoryName(value: string): string {
-	return value.trim().replace(/[^a-z0-9_.]/ig, '-');
+	return value.trim().replace(/[^a-z0-9_.]/ig, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Default GitHub repo name for Publish to GitHub.
+ * Prefer the workspace goal name; fall back to the folder basename.
+ */
+export function defaultGitHubRepositoryName(options: {
+	readonly workspaceName?: string;
+	readonly folderBasename?: string;
+}): string {
+	const fromWorkspace = sanitizeGitHubRepositoryName(options.workspaceName ?? '');
+	if (fromWorkspace) {
+		return fromWorkspace;
+	}
+	const fromFolder = sanitizeGitHubRepositoryName(options.folderBasename ?? '');
+	return fromFolder || 'workspace';
 }
 
 /**
  * Build a bash one-liner that creates a GitHub repo from the cwd via `gh`,
- * initializing git when needed. Used when vscode.github is disabled (e.g. code.sh).
+ * initializing git when needed. Used when vscode.github is disabled (e.g. code.sh)
+ * and there is no existing GitHub `origin` remote.
  */
 export function buildGhPublishWorkspaceCommand(repoName: string, visibility: 'private' | 'public'): string {
 	const name = sanitizeGitHubRepositoryName(repoName);
@@ -23,6 +40,26 @@ export function buildGhPublishWorkspaceCommand(repoName: string, visibility: 'pr
 		'(git rev-parse --is-inside-work-tree >/dev/null 2>&1 || git init)',
 		`&& gh repo create ${name} --source=. ${visibilityFlag} --remote=origin --push`,
 	].join(' ');
+}
+
+/**
+ * Push the current branch to an existing `origin` remote (no `gh repo create`).
+ * Used when Publish to GitHub runs against a workspace already linked to GitHub.
+ */
+export function buildGitPushOriginCommand(): string {
+	return [
+		'git rev-parse --is-inside-work-tree >/dev/null 2>&1',
+		'&& git push -u origin HEAD',
+	].join(' ');
+}
+
+/** True when `origin` already points at a GitHub repository (create would be wrong). */
+export function hasGitHubOriginRemote(configText: string | undefined): boolean {
+	if (!configText?.trim()) {
+		return false;
+	}
+	const remoteUrl = originRemoteUrlFromGitConfig(configText);
+	return Boolean(remoteUrl && githubBrowseUrlFromRemote(remoteUrl));
 }
 
 export function isGithubPublishCommandMissingError(error: unknown): boolean {

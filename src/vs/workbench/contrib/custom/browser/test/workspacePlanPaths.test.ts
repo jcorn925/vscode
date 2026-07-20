@@ -13,6 +13,7 @@ import {
 	withSuggestedSurfaceSelection,
 	withSuggestedSurfacesStatus,
 	workspaceAttachmentsDir,
+	workspacePlanAnalysisResource,
 	workspacePlanResource,
 	workspaceSuggestedSurfacesResource,
 } from '../../../../../../custom/goalWorkspace/workspacePlanPaths.js';
@@ -23,6 +24,7 @@ suite('workspacePlanPaths', () => {
 	test('paths live under .agent/', () => {
 		const root = URI.file('/tmp/ws');
 		assert.ok(workspacePlanResource(root).path.endsWith('/.agent/workspace.plan.md'));
+		assert.ok(workspacePlanAnalysisResource(root).path.endsWith('/.agent/workspace.plan-analysis.md'));
 		assert.ok(workspaceSuggestedSurfacesResource(root).path.endsWith('/.agent/workspace.surfaces.suggested.json'));
 		assert.ok(workspaceAttachmentsDir(root).path.endsWith('/.agent/workspace/attachments'));
 	});

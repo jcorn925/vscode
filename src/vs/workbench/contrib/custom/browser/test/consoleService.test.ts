@@ -85,6 +85,7 @@ suite('ConsoleService', () => {
 			devCommand: 'npm run dev --workspace apps/booking',
 			localUrl: 'http://localhost:3001',
 			purpose: 'Let leads book intro calls and training sessions',
+			// schema omitted when absent
 			capabilities: ['booking'],
 			events: ['booking.started', 'booking.completed'],
 			entities: ['Lead', 'Booking'],
@@ -95,6 +96,36 @@ suite('ConsoleService', () => {
 				tags: ['frontend'],
 				notes: 'Maps the booking product surface to Ix frontend regions.'
 			}
+		});
+	});
+
+	test('parses surfaces[].schema when present', () => {
+		const state = parseWorkspaceManifest({
+			goal: { id: 'g', name: 'G' },
+			surfaces: [{
+				id: 'booking',
+				name: 'Booking',
+				schema: {
+					dbKind: 'sql',
+					engine: 'postgres',
+					entities: [{
+						name: 'bookings',
+						kind: 'table',
+						fields: [{ name: 'id', type: 'uuid', pk: true }],
+					}],
+				},
+			}],
+		}, workspaceFolder, manifestResource);
+		assert.strictEqual(state.status, 'loaded');
+		assert.deepStrictEqual(state.diagnostics, []);
+		assert.deepStrictEqual(state.workspace?.surfaces[0]?.schema, {
+			dbKind: 'sql',
+			engine: 'postgres',
+			entities: [{
+				name: 'bookings',
+				kind: 'table',
+				fields: [{ name: 'id', type: 'uuid', pk: true }],
+			}],
 		});
 	});
 

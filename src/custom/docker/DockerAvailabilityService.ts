@@ -19,6 +19,26 @@ export const enum DockerAvailabilityStatus {
 
 export const DOCKER_DESKTOP_URL = 'https://www.docker.com/products/docker-desktop/';
 
+/** Compact rail-card value for Docker Console section. */
+export function dockerAvailabilityCardValue(status: DockerAvailabilityStatus): string {
+	switch (status) {
+		case DockerAvailabilityStatus.Available:
+			return 'OK';
+		case DockerAvailabilityStatus.Missing:
+			return 'Off';
+		case DockerAvailabilityStatus.McpToolkitMissing:
+			return 'MCP';
+		case DockerAvailabilityStatus.Unknown:
+		default:
+			return '…';
+	}
+}
+
+/** Whether Docker is ready enough for Console workflow / Ix. */
+export function isDockerAvailabilityReady(status: DockerAvailabilityStatus): boolean {
+	return status === DockerAvailabilityStatus.Available;
+}
+
 export interface IDockerAvailabilityService {
 	readonly _serviceBrand: undefined;
 	readonly onDidChangeStatus: Event<DockerAvailabilityStatus>;

@@ -78,6 +78,48 @@ suite('cardRailLayout', () => {
 		layout.dispose();
 	});
 
+	test('sash drag updates width live and notifies only on pointerup', () => {
+		assert.match(
+			CARD_RAIL_STYLESHEET,
+			/\.custom-mode-card-rail\.resizing\s*>\s*\.custom-mode-card-rail-cards[\s\S]*?transition:\s*none\s*!important/s,
+		);
+		const widths: number[] = [];
+		const layout = createCardRailLayout({
+			activeId: 'plan',
+			width: CARD_RAIL_DEFAULT_WIDTH,
+			cards: [
+				{ id: 'plan', key: 'Plan', value: 'plan.md' },
+				{ id: 'rules', key: 'Rules', value: 'CLAUDE.md' },
+			],
+			onSelect: () => { },
+			onWidthChange: width => widths.push(width),
+		});
+		const sash = layout.root.querySelector('.custom-mode-card-rail-sash') as HTMLElement;
+		assert.ok(sash);
+		sash.dispatchEvent(new PointerEvent('pointerdown', {
+			button: 0,
+			clientX: 200,
+			pointerId: 1,
+			bubbles: true,
+		}));
+		assert.ok(layout.root.classList.contains('resizing'));
+		window.dispatchEvent(new PointerEvent('pointermove', {
+			clientX: 260,
+			pointerId: 1,
+			bubbles: true,
+		}));
+		assert.strictEqual(layout.getWidth(), clampCardRailWidth(CARD_RAIL_DEFAULT_WIDTH + 60));
+		assert.deepStrictEqual(widths, [], 'onWidthChange should wait until drag ends');
+		window.dispatchEvent(new PointerEvent('pointerup', {
+			clientX: 260,
+			pointerId: 1,
+			bubbles: true,
+		}));
+		assert.ok(!layout.root.classList.contains('resizing'));
+		assert.deepStrictEqual(widths, [layout.getWidth()]);
+		layout.dispose();
+	});
+
 	test('revealLabel renders a labeled left-edge tab when collapsed', () => {
 		const layout = createCardRailLayout({
 			activeId: 'plan',
@@ -354,6 +396,58 @@ suite('cardRailLayout', () => {
 		assert.ok(layout.root.classList.contains('collapsed'));
 		layout.rail.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
 		assert.ok(!layout.root.classList.contains('collapsed'));
+		layout.dispose();
+	});
+
+	test('onHoverParent fires for surface/console parents and clears on leave', () => {
+		const hovered: Array<string | undefined> = [];
+		const layout = createCardRailLayout({
+			activeId: 'surfaceSection:plan',
+			cards: [
+				{ id: 'console', key: 'Console', value: '' },
+				{ id: 'surface:a', key: 'A', value: '' },
+				{ id: 'surface:b', key: 'B', value: '' },
+				{ id: 'surfaceSection:plan', key: 'Plan', value: '', groupStart: true, assocGroup: 'surface:a' },
+				{ id: 'surfaceSection:preview', key: 'Preview', value: '', assocGroup: 'surface:a' },
+			],
+			onSelect: () => { },
+			onHoverParent: id => hovered.push(id),
+		});
+		const surfaceB = layout.rail.querySelector('button[data-card-id="surface:b"]') as HTMLButtonElement;
+		surfaceB.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+		assert.deepStrictEqual(hovered, ['surface:b']);
+		surfaceB.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }));
+		assert.deepStrictEqual(hovered, ['surface:b', undefined]);
+		layout.dispose();
+	});
+
+	test('entering assoc group after parent does not clear hover', () => {
+		const hovered: Array<string | undefined> = [];
+		const layout = createCardRailLayout({
+			activeId: 'surface:a',
+			cards: [
+				{ id: 'surface:a', key: 'A', value: '' },
+				{ id: 'surfaceSection:plan', key: 'Plan', value: '', groupStart: true, assocGroup: 'surface:a' },
+			],
+			onSelect: () => { },
+			onHoverParent: id => hovered.push(id),
+		});
+		const parent = layout.rail.querySelector('button[data-card-id="surface:a"]') as HTMLButtonElement;
+		const assoc = layout.rail.querySelector('.custom-mode-card-rail-assoc[data-assoc-group="surface:a"]') as HTMLElement;
+		assert.ok(assoc);
+		parent.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+		assert.deepStrictEqual(hovered, ['surface:a']);
+		// Leave parent into its assoc children — should not fire clear.
+		parent.dispatchEvent(new PointerEvent('pointerleave', {
+			bubbles: true,
+			relatedTarget: assoc,
+		}));
+		assert.deepStrictEqual(hovered, ['surface:a']);
+		assoc.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+		assert.deepStrictEqual(hovered, ['surface:a', 'surface:a']);
+		layout.setPreviewAssocGroup('surface:a');
+		assert.ok(assoc.classList.contains('is-preview'));
+		assert.match(CARD_RAIL_STYLESHEET, /\.custom-mode-card-rail-assoc\.is-preview/);
 		layout.dispose();
 	});
 });

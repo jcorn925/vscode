@@ -8,6 +8,8 @@ import type { ConsoleHomeSection } from './consoleWorkflowStatus.js';
 /** Console home content sections in rail / stack order. Surfaces is the Workspace default. */
 export const CONSOLE_HOME_SECTION_ORDER: readonly ConsoleHomeSection[] = [
 	'surfaces',
+	'description',
+	'docker',
 	'workspacePlan',
 	'claudeMd',
 	'howItWorks',

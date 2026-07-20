@@ -11,6 +11,15 @@ import { InstantiationType, registerSingleton } from '../../vs/platform/instanti
 import { createDecorator } from '../../vs/platform/instantiation/common/instantiation.js';
 import { FileChangeType, IFileService } from '../../vs/platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../vs/platform/workspace/common/workspace.js';
+import { parseSurfaceSchema, type SurfaceSchema } from './surfaceSchema.js';
+
+export type {
+	SurfaceDbKind,
+	SurfaceSchema,
+	SurfaceSchemaEntity,
+	SurfaceSchemaField,
+} from './surfaceSchema.js';
+export { surfaceSchemaCardValue, isSurfaceDbKind, parseSurfaceSchema } from './surfaceSchema.js';
 
 export const WORKSPACE_MANIFEST = 'workspace.goal.json';
 export const AGENT_CONTEXT_FOLDER = '.agent';
@@ -48,6 +57,8 @@ export interface WorkspaceSurface {
 	/** Public production URL after deploy (e.g. https://….vercel.app). */
 	readonly productionUrl?: string;
 	readonly purpose?: string;
+	/** Structured data model (SQL/NoSQL/none) — see `surfaces[].schema`. */
+	readonly schema?: SurfaceSchema;
 	readonly capabilities: readonly string[];
 	readonly events: readonly string[];
 	readonly entities: readonly string[];
@@ -1068,6 +1079,7 @@ function parseSurface(raw: unknown, index: number, diagnostics: WorkspaceDiagnos
 	}
 	const ix = parseSurfaceIxMetadata(raw.ix, `${basePath}.ix`, diagnostics);
 	const legacyIxSubsystems = optionalStringArray(raw, 'ixSubsystems', `${basePath}.ixSubsystems`, diagnostics);
+	const schema = parseSurfaceSchema(raw.schema, `${basePath}.schema`, diagnostics);
 
 	return {
 		id,
@@ -1078,6 +1090,7 @@ function parseSurface(raw: unknown, index: number, diagnostics: WorkspaceDiagnos
 		localUrl: optionalLocalPreviewUrl(raw, 'localUrl', `${basePath}.localUrl`, diagnostics),
 		productionUrl: optionalProductionUrl(raw, 'productionUrl', `${basePath}.productionUrl`, diagnostics),
 		purpose: optionalString(raw, 'purpose', `${basePath}.purpose`, diagnostics),
+		...(schema ? { schema } : {}),
 		capabilities: optionalStringArray(raw, 'capabilities', `${basePath}.capabilities`, diagnostics),
 		events: optionalStringArray(raw, 'events', `${basePath}.events`, diagnostics),
 		entities: optionalStringArray(raw, 'entities', `${basePath}.entities`, diagnostics),

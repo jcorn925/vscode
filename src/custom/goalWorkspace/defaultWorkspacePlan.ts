@@ -79,7 +79,7 @@ export const DEFAULT_WORKSPACE_SUGGESTED_SURFACES_JSON = `{
 		{
 			"id": "cadre-support-bot",
 			"name": "Cadre AI Support Chatbot",
-			"purpose": "Deployed customer support chatbot that answers common Cadre AI inquiries from a curated knowledge base, points users to booking and the client portal, and escalates questions it can't answer.",
+			"purpose": "Public Cadre AI support chatbot: grounded Q&A, booking/portal redirects, and human escalation when the KB can't answer.\n\nHow it works: the browser streams chat against POST /api/chat. The route zod-validates the turn, loads curated Markdown from lib/knowledge/content into the system prompt (prompt-stuffed KB — no vector RAG), and streams Claude via @anthropic-ai/sdk. Out-of-scope turns hit POST /api/escalate (name/email/question capture).\n\nStack & systems: Next.js App Router + TypeScript + Tailwind; Anthropic Claude (server-side API key); zod; public Vercel deploy. No database — conversation history is client state.",
 			"primaryUsers": [
 				"Prospective Cadre AI clients",
 				"Existing Cadre AI clients",

@@ -7,6 +7,10 @@ import * as assert from 'assert';
 import {
 	buildCadreClaudeMcpJson,
 	buildSurfacePlanKickoffPrompt,
+	buildSurfacePurposeRegenPrompt,
+	buildSurfaceSchemaRegenPrompt,
+	buildWorkspaceDescriptionRegenPrompt,
+	buildWorkspacePlanAnalysisPrompt,
 	buildWorkspacePlanKickoffPrompt,
 	CADRE_CLAUDE_SETTINGS_JSON,
 	CADRE_SURFACE_CLAUDE_MD,
@@ -23,8 +27,12 @@ suite('cadreSurfaceClaudeTemplate', () => {
 
 	test('CADRE_SURFACE_CLAUDE_MD includes workspace planning section', () => {
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Workspace planning (Console home)'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Workspace plan analysis (Console home)'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Description regen (Console + surface)'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Schema regen (surface Plan)'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('workspace.surfaces.suggested.json'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('.agent/workspace/attachments/'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('workspace.plan-analysis.md'));
 	});
 
 	test('buildWorkspacePlanKickoffPrompt embeds brief paths and stop rule', () => {
@@ -40,6 +48,64 @@ suite('cadreSurfaceClaudeTemplate', () => {
 		assert.ok(prompt.includes('.agent/workspace/attachments/brief.pdf'));
 		assert.ok(prompt.includes('Do NOT create apps/'));
 		assert.ok(prompt.includes('Workspace planning'));
+	});
+
+	test('buildWorkspacePlanAnalysisPrompt grades repo against plan and writes report path', () => {
+		const prompt = buildWorkspacePlanAnalysisPrompt({
+			businessName: 'Cadre AI Support Bot',
+			intent: 'Support chatbot take-home MVP',
+		});
+		assert.ok(prompt.includes('Workspace plan analysis'));
+		assert.ok(prompt.includes('Cadre AI Support Bot'));
+		assert.ok(prompt.includes('Support chatbot take-home MVP'));
+		assert.ok(prompt.includes('workspace.goal.json'));
+		assert.ok(prompt.includes('.agent/workspace.plan.md'));
+		assert.ok(prompt.includes('.agent/workspace.plan-analysis.md'));
+		assert.ok(prompt.includes('Do NOT rewrite'));
+	});
+
+	test('buildSurfacePurposeRegenPrompt targets purpose with three-block contract', () => {
+		const prompt = buildSurfacePurposeRegenPrompt({
+			surfaceId: 'cadre-support-bot',
+			surfaceName: 'Cadre AI Support Chatbot',
+		});
+		assert.ok(prompt.includes('Description regen'));
+		assert.ok(prompt.includes('cadre-support-bot'));
+		assert.ok(prompt.includes('Cadre AI Support Chatbot'));
+		assert.ok(prompt.includes('workspace.goal.json'));
+		assert.ok(prompt.includes('apps/cadre-support-bot/'));
+		assert.ok(prompt.includes('How it works:'));
+		assert.ok(prompt.includes('Stack & systems:'));
+		assert.ok(prompt.includes('purpose'));
+		assert.ok(prompt.includes('Do NOT edit other surfaces'));
+	});
+
+	test('buildWorkspaceDescriptionRegenPrompt targets goal.description with three-block contract', () => {
+		const prompt = buildWorkspaceDescriptionRegenPrompt({
+			businessName: 'Cadre AI Support Bot',
+		});
+		assert.ok(prompt.includes('Description regen'));
+		assert.ok(prompt.includes('Cadre AI Support Bot'));
+		assert.ok(prompt.includes('workspace.goal.json'));
+		assert.ok(prompt.includes('goal.description'));
+		assert.ok(prompt.includes('How it works:'));
+		assert.ok(prompt.includes('Stack & systems:'));
+		assert.ok(prompt.includes('Do NOT edit surface purposes'));
+	});
+
+	test('buildSurfaceSchemaRegenPrompt targets surfaces[].schema with dbKind contract', () => {
+		const prompt = buildSurfaceSchemaRegenPrompt({
+			surfaceId: 'cadre-support-bot',
+			surfaceName: 'Cadre AI Support Chatbot',
+		});
+		assert.ok(prompt.includes('Schema regen'));
+		assert.ok(prompt.includes('cadre-support-bot'));
+		assert.ok(prompt.includes('Cadre AI Support Chatbot'));
+		assert.ok(prompt.includes('workspace.goal.json'));
+		assert.ok(prompt.includes('apps/cadre-support-bot/'));
+		assert.ok(prompt.includes('dbKind'));
+		assert.ok(prompt.includes('nosql'));
+		assert.ok(prompt.includes('Do NOT edit purpose'));
 	});
 
 	test('buildSurfacePlanKickoffPrompt embeds intent and artifact paths', () => {

@@ -17,7 +17,13 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { applyWheelToHorizontalScroll } from './horizontalWheelScroll.js';
 import { graphProposalResource } from '../../../../../custom/agentTaskTree/agentTaskTreeGraphProposal.js';
 import { taskTreesFolder } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
-import { resolveSurfacePlanResource, surfaceGraphProposalDraftResource, surfacePlanResource } from '../../../../../custom/goalWorkspace/surfacePlanPaths.js';
+import {
+	graphCompareDir,
+	resolveProposalCompareSnapshotResource,
+	resolveSurfacePlanResource,
+	surfaceGraphProposalDraftResource,
+	surfacePlanResource,
+} from '../../../../../custom/goalWorkspace/surfacePlanPaths.js';
 import {
 	parseSurfaceReferenceCandidates,
 	resolveReferenceRepoReason,
@@ -100,16 +106,12 @@ import type { GraphProposalDocument, ProposalCompareSnapshot } from './proposalG
 import { computeSurfaceProposalProgress } from './surfaceProposalProgress.js';
 import { phaseIdsToCompleteFromStructuralPass } from './surfaceStepsStructuralReconcile.js';
 import {
+	isSurfaceGraphRegionsCacheFresh,
 	readSurfaceGraphRegionsCache,
 	writeSurfaceGraphRegionsCache,
 	type SurfaceGraphRegionsCacheDocument,
 } from './surfaceGraphRegionsCache.js';
 import { SurfaceProposalTreeView, type SurfaceProposalTreeCardItem, type SurfaceProposalTreeDocumentOptions, type SurfaceProposalTreeGraphRegion, type SurfaceProposalTreePreviewInfo } from './surfaceProposalTreeView.js';
-
-/** Latest ix compare_proposal snapshot used for Files/Relationships/Workstreams card progress. */
-function proposalCompareSnapshotResource(workspaceFolder: URI): URI {
-	return joinPath(workspaceFolder, '.ix-scaffold', 'graph-compare', 'latest-proposal.json');
-}
 
 export interface SurfacePlanPanelLoadOptions {
 	readonly surfaceId: string;
@@ -198,6 +200,33 @@ export class SurfacePlanPanel extends Disposable {
 		readonly stepLabel?: string;
 	}> = this._onDidRequestRunWorkstreams.event;
 
+	private readonly _onDidRequestRegenerateRealGraph = this._register(new Emitter<{
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+	}>());
+	readonly onDidRequestRegenerateRealGraph: Event<{
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+	}> = this._onDidRequestRegenerateRealGraph.event;
+
+	private readonly _onDidRequestRegenerateDescription = this._register(new Emitter<{
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+	}>());
+	readonly onDidRequestRegenerateDescription: Event<{
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+	}> = this._onDidRequestRegenerateDescription.event;
+
+	private readonly _onDidRequestRegenerateSchema = this._register(new Emitter<{
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+	}>());
+	readonly onDidRequestRegenerateSchema: Event<{
+		readonly surfaceId: string;
+		readonly surfaceName: string;
+	}> = this._onDidRequestRegenerateSchema.event;
+
 	/** Fired when all parallel/serialize Claude workstreams for a surface report completed. */
 	private readonly _onDidWorkstreamsComplete = this._register(new Emitter<{
 		readonly surfaceId: string;
@@ -243,6 +272,8 @@ export class SurfacePlanPanel extends Disposable {
 	private readonly graphRegionsBySurfaceId = new Map<string, {
 		readonly regions: readonly SurfaceProposalTreeGraphRegion[];
 		readonly message?: string;
+		/** When these regions were produced — fresh entries skip the background Ix remap. */
+		readonly updatedAt?: string;
 	}>();
 	private workflowDocument: SurfacePlanWorkflowDocument | undefined;
 	private phaseProgressDocument: SurfacePhaseProgressDocument | undefined;
@@ -254,6 +285,15 @@ export class SurfacePlanPanel extends Disposable {
 	private loadRecoveryAttempts = 0;
 	/** Re-runs load() when a superseded/failed load ended without any terminal render. */
 	private readonly loadRecovery = this._register(new RunOnceScheduler(() => this.recoverDroppedLoad(), 250));
+	/** If a load never settles (hung await / endless supersede), force recovery. */
+	private readonly loadWatchdog = this._register(new RunOnceScheduler(() => this.recoverDroppedLoad(), 1500));
+	/** Coalesce plan/proposal file-watch force reloads so Claude .agent writes don't thrash generations. */
+	private readonly reloadFromWatch = this._register(new RunOnceScheduler(() => {
+		if (!this.lastOptions) {
+			return;
+		}
+		void this.load({ ...this.lastOptions }, { force: true }).catch(() => { /* finally handles recovery */ });
+	}, 200));
 	private candidates: SurfaceReferenceCandidates | undefined;
 	private candidatesWriteInFlight = false;
 	private workflowWriteInFlight = false;
@@ -357,7 +397,35 @@ export class SurfacePlanPanel extends Disposable {
 			});
 		}));
 		this._register(this.treeView.onDidRequestRegenerateRealGraph(() => {
-			void this.regenerateRealGraph();
+			const options = this.lastOptions;
+			if (!options?.surfaceId) {
+				return;
+			}
+			// Mode Shell owns Actions Claude handoff (same path as the Actions panel button).
+			this._onDidRequestRegenerateRealGraph.fire({
+				surfaceId: options.surfaceId,
+				surfaceName: options.surfaceName?.trim() || options.surfaceId,
+			});
+		}));
+		this._register(this.treeView.onDidRequestRegenerateDescription(() => {
+			const options = this.lastOptions;
+			if (!options?.surfaceId) {
+				return;
+			}
+			this._onDidRequestRegenerateDescription.fire({
+				surfaceId: options.surfaceId,
+				surfaceName: options.surfaceName?.trim() || options.surfaceId,
+			});
+		}));
+		this._register(this.treeView.onDidRequestRegenerateSchema(() => {
+			const options = this.lastOptions;
+			if (!options?.surfaceId) {
+				return;
+			}
+			this._onDidRequestRegenerateSchema.fire({
+				surfaceId: options.surfaceId,
+				surfaceName: options.surfaceName?.trim() || options.surfaceId,
+			});
 		}));
 
 		this._register(addDisposableListener(this.refreshButton, 'click', () => {
@@ -419,6 +487,9 @@ export class SurfacePlanPanel extends Disposable {
 	/** Drop Steps ownership when the SURFACE card is collapsed / home is shown. */
 	clear(): void {
 		this.loadGeneration++;
+		this.loadRecovery.cancel();
+		this.loadWatchdog.cancel();
+		this.reloadFromWatch.cancel();
 		this.watcher.clear();
 		this.lastOptions = undefined;
 		this.lastTreeDocument = undefined;
@@ -485,6 +556,7 @@ export class SurfacePlanPanel extends Disposable {
 		this.signalsHydrated = false;
 		this.loadInFlightSignature = signature;
 		const generation = ++this.loadGeneration;
+		this.loadWatchdog.schedule();
 		const { surfaceId, surfaceName, surfacePath, treeId, workspaceFolder } = options;
 		this.titleEl.textContent = localize('surfacePlan.title', '{0} plan', surfaceName?.trim() || surfaceId);
 		this.pathEl.textContent = '';
@@ -656,7 +728,11 @@ export class SurfacePlanPanel extends Disposable {
 			return;
 		}
 
-		const snapshot = await this.loadProposalCompareSnapshot(workspaceFolder);
+		const snapshot = await this.loadProposalCompareSnapshot(workspaceFolder, {
+			surfaceId,
+			treeId,
+			proposalResource,
+		});
 		if (generation !== this.loadGeneration) {
 			return;
 		}
@@ -749,6 +825,7 @@ export class SurfacePlanPanel extends Disposable {
 		this.settledGeneration = generation;
 		this.loadRecoveryAttempts = 0;
 		this.loadRecovery.cancel();
+		this.loadWatchdog.cancel();
 	}
 
 	/**
@@ -762,7 +839,8 @@ export class SurfacePlanPanel extends Disposable {
 			return;
 		}
 		if (this.loadInFlightSignature !== undefined) {
-			// A newer load is mid-hydrate — its own finally re-schedules recovery if it drops too.
+			// Still mid-hydrate — keep polling; bare-return left placeholders stuck under watcher thrash.
+			this.loadRecovery.schedule();
 			return;
 		}
 		if (this.loadRecoveryAttempts >= 2) {
@@ -774,6 +852,7 @@ export class SurfacePlanPanel extends Disposable {
 			}
 			this.statusEl.textContent = localize('surfacePlan.loadDroppedStatus', 'Load interrupted — Refresh to retry');
 			this.settledGeneration = this.loadGeneration;
+			this.loadWatchdog.cancel();
 			return;
 		}
 		this.loadRecoveryAttempts++;
@@ -800,7 +879,7 @@ export class SurfacePlanPanel extends Disposable {
 				if (!cached) {
 					const fromDisk = await readSurfaceGraphRegionsCache(this.fileService, workspaceFolder, surfaceId);
 					if (fromDisk) {
-						cached = { regions: fromDisk.regions, message: fromDisk.message };
+						cached = { regions: fromDisk.regions, message: fromDisk.message, updatedAt: fromDisk.updatedAt };
 						this.graphRegionsBySurfaceId.set(surfaceId, cached);
 					}
 				}
@@ -850,6 +929,9 @@ export class SurfacePlanPanel extends Disposable {
 				? undefined
 				: localize('surfacePlan.loadingContent', 'Loading plan…'),
 		});
+		// First disk paint is enough to clear static "—" rail cards — settle so watcher
+		// supersedes do not treat this generation as a dropped load.
+		this.markLoadSettled(generation);
 	}
 
 	private async readPlanMarkdownForImmediatePaint(
@@ -891,16 +973,26 @@ export class SurfacePlanPanel extends Disposable {
 		surface: WorkspaceSurface | undefined,
 		surfaceId: string,
 		generation: number,
+		options?: { readonly force?: boolean },
 	): Promise<void> {
+		if (!options?.force) {
+			// Non-empty regions inside the TTL are already painted — skip the expensive
+			// `ix map` re-ingest. Empty/error results never count as fresh so retries still run.
+			const cached = this.graphRegionsBySurfaceId.get(surfaceId);
+			if (cached?.regions.length && isSurfaceGraphRegionsCacheFresh(cached.updatedAt, Date.now())) {
+				return;
+			}
+		}
 		const graphRegions = await this.loadGraphRegions(workspaceFolder, surface);
 		if (generation !== this.loadGeneration) {
 			return;
 		}
-		this.graphRegionsBySurfaceId.set(surfaceId, graphRegions);
+		const updatedAt = new Date().toISOString();
+		this.graphRegionsBySurfaceId.set(surfaceId, { ...graphRegions, updatedAt });
 		const cacheDoc: SurfaceGraphRegionsCacheDocument = {
 			version: 1,
 			surfaceId,
-			updatedAt: new Date().toISOString(),
+			updatedAt,
 			regions: graphRegions.regions,
 			message: graphRegions.message,
 		};
@@ -945,18 +1037,25 @@ export class SurfacePlanPanel extends Disposable {
 				});
 			}
 			this.treeView.selectSection('graph');
-			await this.refreshGraphRegionsInBackground(workspaceFolder, options.surface, surfaceId, generation);
+			await this.refreshGraphRegionsInBackground(workspaceFolder, options.surface, surfaceId, generation, { force: true });
 		} finally {
 			this.realGraphRegenerateInFlight = false;
 		}
 	}
 
-	private async loadProposalCompareSnapshot(workspaceFolder: URI): Promise<ProposalCompareSnapshot | undefined> {
-		const resource = proposalCompareSnapshotResource(workspaceFolder);
+	private async loadProposalCompareSnapshot(
+		workspaceFolder: URI,
+		options: {
+			readonly surfaceId: string;
+			readonly treeId?: string;
+			readonly proposalResource?: URI;
+		},
+	): Promise<ProposalCompareSnapshot | undefined> {
+		const resource = await resolveProposalCompareSnapshotResource(this.fileService, workspaceFolder, options);
+		if (!resource) {
+			return undefined;
+		}
 		try {
-			if (!(await this.fileService.exists(resource))) {
-				return undefined;
-			}
 			const content = await this.fileService.readFile(resource);
 			return JSON.parse(content.value.toString()) as ProposalCompareSnapshot;
 		} catch {
@@ -1200,10 +1299,11 @@ export class SurfacePlanPanel extends Disposable {
 					});
 					return;
 				}
-				// Reload so load() can reconcile Steps from a newly written full pass.
-				const compareSnapshotUri = proposalCompareSnapshotResource(workspaceFolder);
-				if (e.affects(compareSnapshotUri) || e.contains(compareSnapshotUri)) {
-					void this.load(this.lastOptions, { force: true });
+				// Reload so load() can reconcile Steps from a newly written full pass
+				// (named proposal_<surface>_vs_*.json or latest-proposal.json).
+				const compareDir = graphCompareDir(workspaceFolder);
+				if (e.affects(compareDir) || e.contains(compareDir)) {
+					this.reloadFromWatch.schedule();
 					return;
 				}
 				const planCandidates = [
@@ -1221,7 +1321,7 @@ export class SurfacePlanPanel extends Disposable {
 					surfaceGraphProposalDraftResource(workspaceFolder, surfaceId),
 				];
 				if (planCandidates.some(uri => e.affects(uri)) || proposalCandidates.some(uri => e.contains(uri) || e.affects(uri))) {
-					void this.load(this.lastOptions, { force: true });
+					this.reloadFromWatch.schedule();
 				}
 			}));
 		} catch {
@@ -2101,9 +2201,11 @@ export class SurfacePlanPanel extends Disposable {
 			? (progressDoc.error?.trim() || progressDoc.message?.trim() || undefined)
 			: undefined;
 		const surfacePurpose = (options.surfacePurpose ?? this.lastOptions?.surface?.purpose)?.trim() || undefined;
+		const surfaceSchema = options.surfaceSchema ?? this.lastOptions?.surface?.schema;
 		const merged: SurfaceProposalTreeDocumentOptions = {
 			...options,
 			surfacePurpose,
+			surfaceSchema,
 			hideRunWorkstreamsButton,
 			parallelClaudeWorkstreamsEnabled: this.parallelClaudeWorkstreamsEnabled,
 			currentStepId,

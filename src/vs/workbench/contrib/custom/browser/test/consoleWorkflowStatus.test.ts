@@ -23,6 +23,29 @@ suite('consoleWorkflowStatus', () => {
 		}), 'idle');
 	});
 
+	test('docker stage when dockerReady is explicitly false', () => {
+		const status = resolveConsoleWorkflowStatus({
+			dockerReady: false,
+			hasWorkspacePlan: false,
+			hasSuggestedSurfaces: false,
+			surfaceCount: 0,
+		});
+		assert.strictEqual(status.stageId, 'docker');
+		assert.strictEqual(status.steps.find(step => step.id === 'docker')?.status, 'current');
+		assert.strictEqual(status.steps.find(step => step.id === 'planning')?.status, 'pending');
+	});
+
+	test('idle marks docker completed when ready', () => {
+		const status = resolveConsoleWorkflowStatus({
+			dockerReady: true,
+			hasWorkspacePlan: false,
+			hasSuggestedSurfaces: false,
+			surfaceCount: 0,
+		});
+		assert.strictEqual(status.stageId, 'idle');
+		assert.strictEqual(status.steps.find(step => step.id === 'docker')?.status, 'completed');
+	});
+
 	test('planning while kickoff or session active', () => {
 		const status = resolveConsoleWorkflowStatus({
 			sessionActive: true,
@@ -31,6 +54,7 @@ suite('consoleWorkflowStatus', () => {
 			surfaceCount: 0,
 		});
 		assert.strictEqual(status.stageId, 'planning');
+		assert.strictEqual(status.steps.find(step => step.id === 'docker')?.status, 'completed');
 		assert.strictEqual(status.steps.find(step => step.id === 'planning')?.status, 'current');
 	});
 
@@ -137,6 +161,8 @@ suite('consoleWorkflowStatus', () => {
 	test('isConsoleHomeSection', () => {
 		assert.ok(isConsoleHomeSection('workspacePlan'));
 		assert.ok(isConsoleHomeSection('surfaces'));
+		assert.ok(isConsoleHomeSection('description'));
+		assert.ok(isConsoleHomeSection('docker'));
 		assert.ok(isConsoleHomeSection('claudeMd'));
 		assert.ok(isConsoleHomeSection('howItWorks'));
 		assert.ok(isConsoleHomeSection('branding'));

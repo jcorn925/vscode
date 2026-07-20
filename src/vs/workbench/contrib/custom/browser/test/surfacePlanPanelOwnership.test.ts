@@ -165,4 +165,96 @@ suite('surfacePlanPanel ownership', () => {
 
 		panel.dispose();
 	});
+
+	test('hydrated load coalesce re-emits cards so static placeholders can be replaced', async () => {
+		const root = document.createElement('div');
+		const workspaceFolder = URI.file('/tmp/ws-coalesce');
+		const surfaceId = 'cadre-support-bot';
+		const planUri = URI.joinPath(workspaceFolder, '.agent', 'surfaces', `${surfaceId}.plan.md`);
+		const proposalUri = URI.joinPath(workspaceFolder, '.agent', 'task-trees', `${surfaceId}.graph-proposal.json`);
+		const proposal = {
+			add_nodes: ['apps/bot/a.ts'],
+			add_edges: [],
+			phases: [{ id: 'phase-1', title: 'Scaffold' }],
+		};
+		const files = new Map<string, string>([
+			[planUri.toString(), '# Plan\n\nReady.\n'],
+			[proposalUri.toString(), JSON.stringify(proposal)],
+		]);
+		const fileService = {
+			onDidFilesChange: new Emitter().event,
+			watch: () => ({ dispose: () => { } }),
+			exists: async (resource: URI) => files.has(resource.toString()),
+			readFile: async (resource: URI) => {
+				const text = files.get(resource.toString());
+				if (text === undefined) {
+					throw new Error(`missing ${resource.path}`);
+				}
+				return { value: VSBuffer.fromString(text) };
+			},
+			stat: async (resource: URI) => {
+				if (!files.has(resource.toString())) {
+					throw new Error('missing');
+				}
+				return { isFile: true, isDirectory: false };
+			},
+			writeFile: async () => { },
+			createFolder: async () => { },
+		} as unknown as IFileService;
+		const onMessage = new Emitter<{ message: unknown }>();
+		const webview = {
+			onMessage: onMessage.event,
+			postMessage: async () => true,
+			claim: () => { },
+			layout: () => { },
+			setHtml: () => { },
+			mountTo: () => { },
+			dispose: () => onMessage.dispose(),
+		};
+		const panel = new SurfacePlanPanel(
+			root,
+			fileService,
+			{ createWebviewElement: () => webview } as unknown as IWebviewService,
+			{
+				onDidChangeState: new Emitter().event,
+				getState: () => ({}),
+				mapPath: async () => { },
+				runSubsystems: async () => [],
+			} as unknown as IIxIntegrationService,
+		);
+
+		const cardEvents: Array<readonly { id: string; value: string }[]> = [];
+		const cardsSub = panel.onDidChangeCards(cards => cardEvents.push(cards));
+
+		const loadOptions = {
+			surfaceId,
+			surfaceName: 'Cadre AI Support Chatbot',
+			workspaceFolder,
+			surface: {
+				id: surfaceId,
+				name: 'Cadre AI Support Chatbot',
+				path: `apps/${surfaceId}`,
+				capabilities: [],
+				events: [],
+				entities: [],
+				ixSubsystems: [],
+			},
+		};
+		await panel.load(loadOptions);
+		const afterFirst = cardEvents.length;
+		assert.ok(afterFirst >= 1, 'expected cards from first load');
+		assert.ok(
+			cardEvents.some(cards => cards.some(c => c.id === 'plan' && c.value === 'plan.md')),
+			'expected plan.md badge after first load',
+		);
+
+		await panel.load(loadOptions);
+		assert.ok(cardEvents.length > afterFirst, 'expected coalesced load to re-emit cards');
+		const last = cardEvents[cardEvents.length - 1]!;
+		assert.strictEqual(last.find(c => c.id === 'rules')?.value, 'CLAUDE.md');
+		assert.strictEqual(last.find(c => c.id === 'plan')?.value, 'plan.md');
+
+		cardsSub.dispose();
+		panel.dispose();
+	});
 });

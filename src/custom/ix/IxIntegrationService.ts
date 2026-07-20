@@ -122,6 +122,8 @@ const IX_BACKEND_READY_RETRY_DELAY_MS = 10_000;
 const IX_BACKEND_RESTART_TIMEOUT_MS = 120_000;
 const IX_BACKEND_POST_RESTART_RETRY_COUNT = 6;
 const IX_BACKEND_POST_RESTART_RETRY_DELAY_MS = 5_000;
+/** A confirmed-ready backend is trusted this long — skips docker + port probes on every load. */
+const IX_BACKEND_READY_CACHE_TTL_MS = 5 * 60_000;
 
 function mapStepId(uri: URI): string {
 	return `map:${uri.toString()}`;
@@ -316,6 +318,8 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 	private readonly startScheduler = this._register(new RunOnceScheduler(() => void this.runAutoStartPipeline(), 900));
 	private readonly pipelineOutputFlushScheduler = this._register(new RunOnceScheduler(() => this.fireState(), 120));
 	private dockerStartInFlight: Promise<boolean> | undefined;
+	/** Epoch ms until which {@link ensureIxBackendReady} may return true without re-probing. */
+	private backendReadyUntilMs = 0;
 
 	constructor(
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
@@ -701,6 +705,9 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		if (isWeb || !this.isIxAutomationEnabled()) {
 			return false;
 		}
+		if (Date.now() < this.backendReadyUntilMs) {
+			return true;
+		}
 		const ixBin = await this.resolveIxBinary(cwd);
 		if (!ixBin) {
 			return false;
@@ -709,6 +716,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			return false;
 		}
 		if (await this.probeIxBackendReachable(cwd, ixBin)) {
+			this.markBackendReady();
 			return true;
 		}
 		// Common wedge: Docker reports containers healthy but Arango/Memory Layer
@@ -718,6 +726,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			for (let attempt = 0; attempt < IX_BACKEND_POST_RESTART_RETRY_COUNT; attempt++) {
 				if (await this.probeIxBackendReachable(cwd, ixBin)) {
 					this.logService.info('[Ix] Backend reachable after docker restart recovery');
+					this.markBackendReady();
 					return true;
 				}
 				await new Promise<void>(resolve => setTimeout(resolve, IX_BACKEND_POST_RESTART_RETRY_DELAY_MS));
@@ -729,6 +738,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 		for (let attempt = 0; attempt < IX_BACKEND_READY_RETRY_COUNT; attempt++) {
 			if (await this.probeIxBackendReachable(cwd, ixBin)) {
+				this.markBackendReady();
 				return true;
 			}
 			await new Promise<void>(resolve => setTimeout(resolve, IX_BACKEND_READY_RETRY_DELAY_MS));
@@ -736,8 +746,13 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		return false;
 	}
 
+	private markBackendReady(): void {
+		this.backendReadyUntilMs = Date.now() + IX_BACKEND_READY_CACHE_TTL_MS;
+	}
+
 	/** Restart Ix Arango + Memory Layer containers (clears false-healthy stuck-lock). */
 	private async restartIxDockerBackend(cwd: URI, ixBin: string): Promise<boolean> {
+		this.backendReadyUntilMs = 0;
 		this.logService.warn('[Ix] Backend unreachable while Docker is up — running `ix docker restart`');
 		try {
 			const restarted = await this.runCommand(
@@ -899,9 +914,17 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 		const { exitCode, output } = await this.runCommand(cwd, command, timeoutMs, { ui: 'none' });
 		if (exitCode !== 0) {
+			this.invalidateBackendReadyCacheOnConnectionFailure(output);
 			return { ok: false, error: tailOutput(output) || `ix exited with code ${exitCode}`, raw: output, command, exitCode };
 		}
 		return { ok: true, raw: output, command };
+	}
+
+	/** A cached-ready backend that refuses connections must re-probe on the next call. */
+	private invalidateBackendReadyCacheOnConnectionFailure(output: string): void {
+		if (/fetch failed|ECONNREFUSED|connection refused|backend.*not reachable/i.test(stripAnsi(output))) {
+			this.backendReadyUntilMs = 0;
+		}
 	}
 
 	async runJsonQuery(args: readonly string[], cwd?: URI, timeoutMs: number = 60_000): Promise<{ ok: true; value: unknown; raw: string } | { ok: false; error: string; raw: string; exitCode: number }> {
@@ -933,6 +956,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		const cmd = `${this.quoteIx(ixBin)} ${args.map(a => this.quoteShellArg(a)).join(' ')}`;
 		const { exitCode, output } = await this.runCommand(folder, cmd, timeoutMs, { ui: 'none' });
 		if (exitCode !== 0) {
+			this.invalidateBackendReadyCacheOnConnectionFailure(output);
 			const stripped = stripAnsi(output).trim();
 			const tail = tailOutput(output);
 			const notable = stripped.split(/\r?\n/).find(l =>

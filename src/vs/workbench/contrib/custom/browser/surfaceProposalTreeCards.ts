@@ -3,12 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { surfaceSchemaCardValue, type SurfaceSchema } from '../../../../../custom/goalWorkspace/surfaceSchema.js';
+
 /** One section card for the host-owned shared card rail (see cardRailLayout.ts). */
 export interface SurfaceProposalTreeCardItem {
 	readonly id: string;
 	readonly key: string;
 	readonly value: string;
 }
+
+export { surfaceSchemaCardValue };
 
 export interface SurfaceProposalTreeGraphRegion {
 	readonly name: string;
@@ -36,8 +40,8 @@ export function surfaceRailCardsLookLikePlaceholders(
 
 /**
  * Canonical Canvas rail + Workspace section order.
- * Build / graph views first; docs trail. Preferred step card (or Preview when
- * the surface is 100% complete) may still pin to front.
+ * Build / graph views first; docs trail. Preferred step card (or Deployed / Preview
+ * when the surface is 100% complete) may still pin to front.
  */
 export const SURFACE_PROPOSAL_TREE_SECTION_ORDER = [
 	'phases',
@@ -46,13 +50,14 @@ export const SURFACE_PROPOSAL_TREE_SECTION_ORDER = [
 	'preview',
 	'deployed',
 	'description',
+	'schema',
 	'context',
 	'plan',
 	'rules',
 	'removals',
 ] as const;
 
-/** Build-rail sections we may auto-replace with Preview once the surface is complete. */
+/** Build-rail sections we may auto-replace with Deployed/Preview once the surface is complete. */
 export const SURFACE_RAIL_BUILD_SECTION_IDS = new Set([
 	'phases',
 	'proposed',
@@ -97,10 +102,31 @@ export function surfaceUrlCardValue(url?: string, maxLen = 28): string {
 	return `${display.slice(0, maxLen - 1).trimEnd()}…`;
 }
 
+/**
+ * When a Preview/Deployed card has a clickable URL but a placeholder value, show the
+ * host badge instead of a link-styled "—" (which reads as a blue "=" in the rail).
+ */
+export function resolveSurfaceUrlRailCardValue(options: {
+	readonly value: string;
+	readonly href?: string;
+}): string {
+	const href = options.href?.trim();
+	if (!href) {
+		return options.value;
+	}
+	const trimmed = options.value.trim();
+	if (!trimmed || trimmed === SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE) {
+		return surfaceUrlCardValue(href);
+	}
+	return options.value;
+}
+
 export function staticSurfaceProposalTreeCards(options?: {
 	readonly localUrl?: string;
 	readonly productionUrl?: string;
 	readonly purposeValue?: string;
+	readonly schema?: SurfaceSchema;
+	readonly schemaValue?: string;
 	readonly proposedValue?: string;
 	readonly graphValue?: string;
 	readonly planValue?: string;
@@ -133,6 +159,13 @@ export function staticSurfaceProposalTreeCards(options?: {
 			value: surfaceDescriptionCardValue(options?.purposeValue),
 		},
 		{
+			id: 'schema',
+			key: 'Schema',
+			value: options?.schemaValue?.trim()
+				|| surfaceSchemaCardValue(options?.schema)
+				|| SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+		},
+		{
 			id: 'plan',
 			key: 'Plan',
 			value: options?.planValue?.trim() || SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
@@ -148,6 +181,7 @@ export function staticSurfaceProposalTreeCards(options?: {
 /** Rough Real Graph card badge from cached Ix member files (edges filled in after proposal load). */
 export function surfaceGraphRegionsCardValue(regions: readonly SurfaceProposalTreeGraphRegion[]): string {
 	const files = new Set<string>();
+	let fileCountFallback = 0;
 	for (const region of regions) {
 		for (const file of region.memberFiles ?? []) {
 			if (file) {
@@ -157,8 +191,13 @@ export function surfaceGraphRegionsCardValue(regions: readonly SurfaceProposalTr
 		if (region.entryPath && /\.[a-z0-9]+$/i.test(region.entryPath)) {
 			files.add(region.entryPath);
 		}
+		// Ix region cache often has fileCount without memberFiles — still show a badge.
+		if (typeof region.fileCount === 'number' && Number.isFinite(region.fileCount) && region.fileCount > 0) {
+			fileCountFallback += Math.floor(region.fileCount);
+		}
 	}
-	return files.size ? `${files.size}·0` : SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE;
+	const count = files.size || fileCountFallback;
+	return count ? `${count}·0` : SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE;
 }
 
 /** Proposed Graph badge from proposal add_nodes / add_edges (host-side; no webview round-trip). */
@@ -183,6 +222,7 @@ export function surfaceProposalTreeCardsFromDocument(options: {
 	readonly localUrl?: string;
 	readonly productionUrl?: string;
 	readonly purposeValue?: string;
+	readonly schema?: SurfaceSchema;
 	readonly planMarkdown?: string;
 	readonly claudeMdMarkdown?: string;
 	readonly proposedNodeCount?: number;
@@ -196,6 +236,7 @@ export function surfaceProposalTreeCardsFromDocument(options: {
 			localUrl: options.localUrl,
 			productionUrl: options.productionUrl,
 			purposeValue: options.purposeValue,
+			schema: options.schema,
 			proposedValue: surfaceProposedGraphCardValue({
 				nodeCount: options.proposedNodeCount,
 				edgeCount: options.proposedEdgeCount,

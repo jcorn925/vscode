@@ -62,6 +62,22 @@ suite('surfaceStepsStructuralReconcile', () => {
 		assert.strictEqual(isFullStructuralProposalPass(proposal, fullPassSnapshot), true);
 	});
 
+	test('isFullStructuralProposalPass rejects snapshot owned by another surface', () => {
+		const ownedProposal: GraphProposalDocument = {
+			...proposal,
+			tree_id: 'cadre-admin-console',
+			surface_id: 'cadre-admin-console',
+		};
+		assert.strictEqual(isFullStructuralProposalPass(ownedProposal, {
+			...fullPassSnapshot,
+			proposal: { tree_id: 'cadre-eval-harness' },
+		}), false);
+		assert.strictEqual(isFullStructuralProposalPass(ownedProposal, {
+			...fullPassSnapshot,
+			proposal: { tree_id: 'cadre-admin-console' },
+		}), true);
+	});
+
 	test('isFullStructuralProposalPass fails when a structural edge is missing', () => {
 		assert.strictEqual(isFullStructuralProposalPass(proposal, {
 			passed: true,

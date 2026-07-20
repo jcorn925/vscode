@@ -7,7 +7,10 @@ import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import {
 	buildGhPublishWorkspaceCommand,
+	buildGitPushOriginCommand,
+	defaultGitHubRepositoryName,
 	githubBrowseUrlFromRemote,
+	hasGitHubOriginRemote,
 	isGithubPublishCommandMissingError,
 	originRemoteUrlFromGitConfig,
 	sanitizeGitHubRepositoryName,
@@ -17,8 +20,26 @@ suite('publishWorkspaceToGitHub', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
 	test('sanitizeGitHubRepositoryName strips unsafe characters', () => {
-		assert.strictEqual(sanitizeGitHubRepositoryName('  My App!! '), 'My-App--');
+		assert.strictEqual(sanitizeGitHubRepositoryName('  My App!! '), 'My-App');
 		assert.strictEqual(sanitizeGitHubRepositoryName('console_v1.0'), 'console_v1.0');
+	});
+
+	test('defaultGitHubRepositoryName prefers workspace goal name over folder basename', () => {
+		assert.strictEqual(
+			defaultGitHubRepositoryName({
+				workspaceName: 'Cadre AI Support Bot',
+				folderBasename: 'Console',
+			}),
+			'Cadre-AI-Support-Bot',
+		);
+		assert.strictEqual(
+			defaultGitHubRepositoryName({
+				workspaceName: '  ',
+				folderBasename: 'cadre-support-bot',
+			}),
+			'cadre-support-bot',
+		);
+		assert.strictEqual(defaultGitHubRepositoryName({}), 'workspace');
 	});
 
 	test('buildGhPublishWorkspaceCommand uses private/public flags', () => {
@@ -26,6 +47,25 @@ suite('publishWorkspaceToGitHub', () => {
 		assert.ok(buildGhPublishWorkspaceCommand('Console', 'public').includes('--public'));
 		assert.ok(buildGhPublishWorkspaceCommand('Console', 'private').includes('gh repo create Console'));
 		assert.throws(() => buildGhPublishWorkspaceCommand('   ', 'private'));
+	});
+
+	test('buildGitPushOriginCommand pushes to existing origin without creating', () => {
+		const command = buildGitPushOriginCommand();
+		assert.ok(command.includes('git push -u origin HEAD'));
+		assert.ok(!command.includes('gh repo create'));
+	});
+
+	test('hasGitHubOriginRemote detects GitHub origin only', () => {
+		assert.strictEqual(hasGitHubOriginRemote([
+			'[remote "origin"]',
+			'\turl = git@github.com:acme/console.git',
+		].join('\n')), true);
+		assert.strictEqual(hasGitHubOriginRemote([
+			'[remote "origin"]',
+			'\turl = https://gitlab.com/acme/console.git',
+		].join('\n')), false);
+		assert.strictEqual(hasGitHubOriginRemote(undefined), false);
+		assert.strictEqual(hasGitHubOriginRemote(''), false);
 	});
 
 	test('isGithubPublishCommandMissingError detects missing command', () => {

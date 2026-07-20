@@ -31,6 +31,11 @@ export function workspacePlanResource(workspaceFolder: URI): URI {
 	return joinPath(workspaceFolder, '.agent', 'workspace.plan.md');
 }
 
+/** Plan-vs-repo analysis report written by Console Kickoff analysis. */
+export function workspacePlanAnalysisResource(workspaceFolder: URI): URI {
+	return joinPath(workspaceFolder, '.agent', 'workspace.plan-analysis.md');
+}
+
 /** Structured suggested surfaces for the Console UI. */
 export function workspaceSuggestedSurfacesResource(workspaceFolder: URI): URI {
 	return joinPath(workspaceFolder, '.agent', 'workspace.surfaces.suggested.json');

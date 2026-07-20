@@ -12,6 +12,8 @@ import {
 	surfaceGraphRegionsCardValue,
 	surfaceProposedGraphCardValue,
 	surfaceProposalTreeCardsFromDocument,
+	surfaceRailCardsLookLikePlaceholders,
+	resolveSurfaceUrlRailCardValue,
 	surfaceUrlCardValue,
 	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
 	SURFACE_PROPOSAL_TREE_SECTION_ORDER,
@@ -26,11 +28,12 @@ suite('orderSurfaceProposalTreeCards', () => {
 			localUrl: 'http://localhost:3000',
 			purposeValue: 'Acquire clients.',
 		});
-		assert.deepStrictEqual(cards.map(c => c.id), ['proposed', 'graph', 'preview', 'deployed', 'description', 'plan', 'rules']);
+		assert.deepStrictEqual(cards.map(c => c.id), ['proposed', 'graph', 'preview', 'deployed', 'description', 'schema', 'plan', 'rules']);
 		assert.strictEqual(cards.find(c => c.id === 'preview')?.value, 'localhost:3000');
 		assert.strictEqual(cards.find(c => c.id === 'deployed')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(cards.find(c => c.id === 'graph')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(cards.find(c => c.id === 'description')?.value, 'Acquire clients.');
+		assert.strictEqual(cards.find(c => c.id === 'schema')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(
 			staticSurfaceProposalTreeCards({ productionUrl: 'https://cadre.vercel.app' }).find(c => c.id === 'deployed')?.value,
 			'cadre.vercel.app',
@@ -41,12 +44,73 @@ suite('orderSurfaceProposalTreeCards', () => {
 		);
 	});
 
+	test('resolveSurfaceUrlRailCardValue upgrades placeholder when href exists', () => {
+		assert.strictEqual(
+			resolveSurfaceUrlRailCardValue({
+				value: SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+				href: 'https://cadre.vercel.app',
+			}),
+			'cadre.vercel.app',
+		);
+		assert.strictEqual(
+			resolveSurfaceUrlRailCardValue({ value: 'localhost:3000', href: 'http://localhost:3000' }),
+			'localhost:3000',
+		);
+		assert.strictEqual(
+			resolveSurfaceUrlRailCardValue({ value: SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE }),
+			SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+		);
+	});
+
+	test('staticSurfaceProposalTreeCards paints schema badge from surface schema', () => {
+		const cards = staticSurfaceProposalTreeCards({
+			schema: {
+				dbKind: 'sql',
+				engine: 'postgres',
+				entities: [
+					{ name: 'users', kind: 'table', fields: [] },
+					{ name: 'sessions', kind: 'table', fields: [] },
+				],
+			},
+		});
+		assert.strictEqual(cards.find(c => c.id === 'schema')?.value, 'postgres · 2 tables');
+		assert.strictEqual(
+			staticSurfaceProposalTreeCards({ schema: { dbKind: 'none', entities: [] } }).find(c => c.id === 'schema')?.value,
+			'No database',
+		);
+	});
+
 	test('surfaceUrlCardValue strips protocol and truncates', () => {
 		assert.strictEqual(surfaceUrlCardValue(undefined), SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(surfaceUrlCardValue('https://cadre-bot.vercel.app/'), 'cadre-bot.vercel.app');
 		assert.strictEqual(
 			surfaceUrlCardValue('https://very-long-subdomain.example.com/path', 20),
-			'very-long-subdomain.…',
+			'very-long-subdomain…',
+		);
+	});
+
+	test('surfaceRailCardsLookLikePlaceholders detects static vs hydrated Rules badge', () => {
+		assert.strictEqual(surfaceRailCardsLookLikePlaceholders([]), true);
+		assert.strictEqual(
+			surfaceRailCardsLookLikePlaceholders(staticSurfaceProposalTreeCards({ localUrl: 'http://localhost:3000' })),
+			true,
+		);
+		assert.strictEqual(
+			surfaceRailCardsLookLikePlaceholders(
+				surfaceProposalTreeCardsFromDocument({
+					localUrl: 'http://localhost:3000',
+					planMarkdown: '# Plan',
+					proposedNodeCount: 2,
+					proposedEdgeCount: 1,
+				}),
+			),
+			false,
+		);
+		assert.strictEqual(
+			surfaceRailCardsLookLikePlaceholders([
+				{ id: 'surfaceSection:rules', value: 'CLAUDE.md' },
+			]),
+			false,
 		);
 	});
 
@@ -54,6 +118,16 @@ suite('orderSurfaceProposalTreeCards', () => {
 		assert.strictEqual(surfaceGraphRegionsCardValue([]), SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(surfaceGraphRegionsCardValue([
 			{ name: 'A', memberFiles: ['a.ts', 'b.ts'], entryPath: 'a.ts' },
+		]), '2·0');
+	});
+
+	test('surfaceGraphRegionsCardValue falls back to fileCount when memberFiles missing', () => {
+		assert.strictEqual(surfaceGraphRegionsCardValue([
+			{ name: 'Cadre Eval Harness', fileCount: 4 },
+		]), '4·0');
+		assert.strictEqual(surfaceGraphRegionsCardValue([
+			{ name: 'A', fileCount: 4 },
+			{ name: 'B', memberFiles: ['a.ts', 'b.ts'] },
 		]), '2·0');
 	});
 
@@ -99,7 +173,7 @@ suite('orderSurfaceProposalTreeCards', () => {
 		);
 		assert.deepStrictEqual(
 			[...SURFACE_PROPOSAL_TREE_SECTION_ORDER].filter(id => id !== 'removals'),
-			['phases', 'proposed', 'graph', 'preview', 'deployed', 'description', 'context', 'plan', 'rules'],
+			['phases', 'proposed', 'graph', 'preview', 'deployed', 'description', 'schema', 'context', 'plan', 'rules'],
 		);
 	});
 
@@ -109,6 +183,7 @@ suite('orderSurfaceProposalTreeCards', () => {
 			{ id: 'graph', key: 'Real Graph', value: '14·0' },
 			{ id: 'preview', key: 'Preview', value: 'URL' },
 			{ id: 'description', key: 'Description', value: 'Purpose' },
+			{ id: 'schema', key: 'Schema', value: 'SQL' },
 			{ id: 'context', key: 'Repo Context', value: '2/5' },
 			{ id: 'phases', key: 'Build phases', value: '4' },
 			{ id: 'plan', key: 'Plan', value: 'plan.md' },
@@ -116,19 +191,27 @@ suite('orderSurfaceProposalTreeCards', () => {
 		];
 		assert.deepStrictEqual(
 			orderSurfaceProposalTreeCards(cards, 'phases').map(c => c.id),
-			['phases', 'proposed', 'graph', 'preview', 'description', 'context', 'plan', 'rules'],
+			['phases', 'proposed', 'graph', 'preview', 'description', 'schema', 'context', 'plan', 'rules'],
 		);
 		assert.deepStrictEqual(
 			orderSurfaceProposalTreeCards(cards, 'graph').map(c => c.id),
-			['graph', 'phases', 'proposed', 'preview', 'description', 'context', 'plan', 'rules'],
+			['graph', 'phases', 'proposed', 'preview', 'description', 'schema', 'context', 'plan', 'rules'],
 		);
 		assert.deepStrictEqual(
 			orderSurfaceProposalTreeCards(cards, 'missing').map(c => c.id),
-			['phases', 'proposed', 'graph', 'preview', 'description', 'context', 'plan', 'rules'],
+			['phases', 'proposed', 'graph', 'preview', 'description', 'schema', 'context', 'plan', 'rules'],
 		);
 		assert.deepStrictEqual(
 			orderSurfaceProposalTreeCards(cards, 'preview').map(c => c.id),
-			['preview', 'phases', 'proposed', 'graph', 'description', 'context', 'plan', 'rules'],
+			['preview', 'phases', 'proposed', 'graph', 'description', 'schema', 'context', 'plan', 'rules'],
+		);
+		const withDeployed: SurfaceProposalTreeCardItem[] = [
+			...cards,
+			{ id: 'deployed', key: 'Deployed', value: 'app.vercel.app' },
+		];
+		assert.deepStrictEqual(
+			orderSurfaceProposalTreeCards(withDeployed, 'deployed').map(c => c.id),
+			['deployed', 'phases', 'proposed', 'graph', 'preview', 'description', 'schema', 'context', 'plan', 'rules'],
 		);
 	});
 

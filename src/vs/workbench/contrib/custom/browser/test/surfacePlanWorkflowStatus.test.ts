@@ -16,8 +16,10 @@ import {
 	isSurfacePreviewWired,
 	markSurfacePlanLocked,
 	resolveSurfacePlanWorkflowStatus,
+	resolvePreferredCompleteSurfaceSectionId,
 	resolveSurfaceSectionIdForStep,
 	shouldPreferPreviewSurfaceSection,
+	shouldPromoteCompleteSurfaceSectionOnTransition,
 	summarizeSurfacePlanWorkflowProgress,
 } from '../../../../../../custom/goalWorkspace/surfacePlanWorkflowStatus.js';
 import {
@@ -617,6 +619,31 @@ suite('resolveSurfaceSectionIdForStep', () => {
 			percent: 100,
 			inProgress: true,
 		}), false);
+		assert.strictEqual(resolvePreferredCompleteSurfaceSectionId({
+			progress: complete,
+			availableSectionIds: ['preview', 'deployed', 'plan'],
+			deployedWired: true,
+		}), 'deployed');
+		assert.strictEqual(resolvePreferredCompleteSurfaceSectionId({
+			progress: complete,
+			availableSectionIds: ['preview', 'deployed', 'plan'],
+			deployedWired: false,
+		}), 'preview');
+		assert.strictEqual(resolvePreferredCompleteSurfaceSectionId({
+			progress: complete,
+			availableSectionIds: ['deployed', 'plan'],
+			deployedWired: true,
+		}), 'deployed');
+		assert.strictEqual(resolvePreferredCompleteSurfaceSectionId({
+			progress: running,
+			availableSectionIds: ['preview', 'deployed'],
+			deployedWired: true,
+		}), undefined);
+		assert.strictEqual(shouldPromoteCompleteSurfaceSectionOnTransition(undefined, true), false);
+		assert.strictEqual(shouldPromoteCompleteSurfaceSectionOnTransition(false, true), true);
+		assert.strictEqual(shouldPromoteCompleteSurfaceSectionOnTransition(true, true), false);
+		assert.strictEqual(shouldPromoteCompleteSurfaceSectionOnTransition(false, false), false);
+		assert.strictEqual(shouldPromoteCompleteSurfaceSectionOnTransition(true, false), false);
 	});
 });
 

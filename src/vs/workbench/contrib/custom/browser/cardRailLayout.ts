@@ -27,6 +27,12 @@ export const CARD_RAIL_MIN_WIDTH = 160;
 export const CARD_RAIL_MAX_WIDTH = 480;
 /** Below this width the rail collapses to a single card column. */
 export const CARD_RAIL_NARROW_WIDTH = 200;
+
+/** Console / surface parent cards that own an assoc child group. */
+export function isCardRailParentId(id: string): boolean {
+	return id === 'console' || id.startsWith('surface:');
+}
+
 /** Shared idle delay for Console / Steps / Claude / AI chat auto-hide (exactly 750ms). */
 export const CARD_RAIL_AUTO_HIDE_MS = 750;
 /** Pointer distance from the panel's left edge that re-shows a collapsed rail. */
@@ -61,6 +67,11 @@ export interface CardRailLayoutOptions {
 	readonly cards: readonly CardRailItem[];
 	readonly activeId?: string;
 	readonly onSelect: (id: string) => void;
+	/**
+	 * Parent card hover preview (`console` / `surface:…`). Fires `undefined` when
+	 * the pointer leaves that parent and its assoc child group.
+	 */
+	readonly onHoverParent?: (id: string | undefined) => void;
 	/** Open an external URL from a card value link (Preview / Deployed). */
 	readonly onOpenHref?: (url: string) => void;
 	readonly content?: HTMLElement | readonly HTMLElement[];
@@ -91,6 +102,8 @@ export interface CardRailLayout {
 	 * while a section card (Rules / Plan / …) is the focused selection.
 	 */
 	setActiveId(id: string | undefined, alsoSelected?: readonly string[]): void;
+	/** Mark an assoc child group as hover-preview (non-committed expand). */
+	setPreviewAssocGroup(assocGroup: string | undefined): void;
 	/** Show a full-width loading row under the cards (e.g. surface section cards still loading). */
 	setLoading(loading: boolean, label?: string): void;
 	/** Expand a collapsed auto-hide rail (e.g. left-edge hover over a full-bleed preview). */
@@ -245,6 +258,11 @@ export const CARD_RAIL_STYLESHEET = `
 .custom-mode-card-rail.resizing {
 	cursor: ew-resize;
 	user-select: none;
+}
+/* Width transitions are for collapse/expand — during drag they lag the cursor and feel glitchy. */
+.custom-mode-card-rail.resizing > .custom-mode-card-rail-cards,
+.custom-mode-card-rail.resizing > .custom-mode-card-rail-sash {
+	transition: none !important;
 }
 .custom-mode-card-rail.resizing .custom-mode-card-rail-content {
 	pointer-events: none;
@@ -476,6 +494,11 @@ export const CARD_RAIL_STYLESHEET = `
 	background: color-mix(in srgb, var(--vscode-focusBorder, #3794ff) 7%, transparent);
 	box-sizing: border-box;
 }
+.custom-mode-card-rail-assoc.is-preview {
+	border-style: dashed;
+	opacity: 0.92;
+	background: color-mix(in srgb, var(--vscode-focusBorder, #3794ff) 4%, transparent);
+}
 .custom-mode-card-rail-cards.narrow .custom-mode-card-rail-assoc {
 	grid-template-columns: 1fr;
 }
@@ -595,6 +618,7 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 	listeners.add(dragListeners);
 	let cards = [...options.cards];
 	let activeIds = new Set<string>(options.activeId ? [options.activeId] : []);
+	let previewAssocGroup: string | undefined;
 	let loading = false;
 	let loadingLabel = 'Loading…';
 	let width = clampCardRailWidth(options.width ?? CARD_RAIL_DEFAULT_WIDTH);
@@ -637,10 +661,13 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 		root.classList.add(...options.className.split(/\s+/).filter(Boolean));
 	}
 
-	const applyWidth = (next: number, notify: boolean): void => {
+	const applyWidth = (next: number, notify: boolean, applyOptions?: { deferNarrow?: boolean }): void => {
 		width = clampCardRailWidth(next);
 		root.style.setProperty('--custom-mode-card-rail-width', `${width}px`);
-		rail.classList.toggle('narrow', width < CARD_RAIL_NARROW_WIDTH);
+		// Avoid 2↔1 column flips mid-drag — they jump the layout under the cursor.
+		if (!applyOptions?.deferNarrow) {
+			rail.classList.toggle('narrow', width < CARD_RAIL_NARROW_WIDTH);
+		}
 		sash.setAttribute('aria-valuenow', String(width));
 		if (notify) {
 			options.onWidthChange?.(width);
@@ -795,8 +822,17 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 	};
 
 	const scheduleAssocConnectors = (): void => {
+		// Skip while dragging — ResizeObserver fires every frame and re-layout fights the sash.
+		if (root.classList.contains('resizing')) {
+			return;
+		}
 		const win = getWindow(rail);
-		win.requestAnimationFrame(() => layoutAssocConnectors());
+		win.requestAnimationFrame(() => {
+			if (root.classList.contains('resizing')) {
+				return;
+			}
+			layoutAssocConnectors();
+		});
 	};
 
 	const renderRail = (): void => {
@@ -862,6 +898,24 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 				event.preventDefault();
 				options.onSelect(card.id);
 			}));
+			if (options.onHoverParent && isCardRailParentId(card.id)) {
+				const parentId = card.id;
+				cardListeners.add(addDisposableListener(button, 'pointerenter', () => {
+					options.onHoverParent?.(parentId);
+				}));
+				cardListeners.add(addDisposableListener(button, 'pointerleave', (event: PointerEvent) => {
+					const related = event.relatedTarget;
+					if (related instanceof Node) {
+						const relatedEl = related instanceof Element ? related : related.parentElement;
+						const intoAssoc = relatedEl?.closest?.(`.custom-mode-card-rail-assoc[data-assoc-group="${CSS.escape(parentId)}"]`);
+						const intoParent = relatedEl?.closest?.(`button[data-card-id="${CSS.escape(parentId)}"]`);
+						if (intoAssoc || intoParent) {
+							return;
+						}
+					}
+					options.onHoverParent?.(undefined);
+				}));
+			}
 			host.appendChild(button);
 		};
 		for (const card of cards) {
@@ -885,6 +939,27 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 						'data-assoc-group': nextAssoc,
 						'aria-hidden': 'false',
 					});
+					if (previewAssocGroup && previewAssocGroup === nextAssoc) {
+						assocHost.classList.add('is-preview');
+					}
+					if (options.onHoverParent) {
+						const groupId = nextAssoc;
+						cardListeners.add(addDisposableListener(assocHost, 'pointerenter', () => {
+							options.onHoverParent?.(groupId);
+						}));
+						cardListeners.add(addDisposableListener(assocHost, 'pointerleave', (event: PointerEvent) => {
+							const related = event.relatedTarget;
+							if (related instanceof Node) {
+								const relatedEl = related instanceof Element ? related : related.parentElement;
+								const intoAssoc = relatedEl?.closest?.(`.custom-mode-card-rail-assoc[data-assoc-group="${CSS.escape(groupId)}"]`);
+								const intoParent = relatedEl?.closest?.(`button[data-card-id="${CSS.escape(groupId)}"]`);
+								if (intoAssoc || intoParent) {
+									return;
+								}
+							}
+							options.onHoverParent?.(undefined);
+						}));
+					}
 					rail.appendChild(assocHost);
 				}
 				appendCard(card, assocHost);
@@ -915,26 +990,41 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 	let onResizeStart: (() => void) | undefined;
 	let onResizeEnd: (() => void) | undefined;
 
-	const endResize = (): void => {
+	const endResize = (pointerId?: number): void => {
+		if (typeof pointerId === 'number') {
+			try {
+				sash.releasePointerCapture(pointerId);
+			} catch {
+				// Already released / never captured.
+			}
+		}
 		dragListeners.clear();
 		root.classList.remove('resizing');
+		rail.classList.toggle('narrow', width < CARD_RAIL_NARROW_WIDTH);
 		options.onWidthChange?.(width);
 		scheduleAssocConnectors();
 		onResizeEnd?.();
 	};
 
-	const startResize = (clientX: number): void => {
+	const startResize = (clientX: number, pointerId?: number): void => {
 		const startX = clientX;
 		const startWidth = width;
 		root.classList.add('resizing');
 		onResizeStart?.();
 		dragListeners.clear();
+		if (typeof pointerId === 'number') {
+			try {
+				sash.setPointerCapture(pointerId);
+			} catch {
+				// Some hosts reject capture; window listeners still work.
+			}
+		}
 		const win = getWindow(root);
 		dragListeners.add(addDisposableListener(win, 'pointermove', (event: PointerEvent) => {
-			applyWidth(startWidth + (event.clientX - startX), false);
+			applyWidth(startWidth + (event.clientX - startX), false, { deferNarrow: true });
 		}));
-		dragListeners.add(addDisposableListener(win, 'pointerup', () => endResize()));
-		dragListeners.add(addDisposableListener(win, 'pointercancel', () => endResize()));
+		dragListeners.add(addDisposableListener(win, 'pointerup', (event: PointerEvent) => endResize(event.pointerId)));
+		dragListeners.add(addDisposableListener(win, 'pointercancel', (event: PointerEvent) => endResize(event.pointerId)));
 	};
 
 	listeners.add(addDisposableListener(sash, 'pointerdown', (event: PointerEvent) => {
@@ -943,7 +1033,7 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 		}
 		event.preventDefault();
 		event.stopPropagation();
-		startResize(event.clientX);
+		startResize(event.clientX, event.pointerId);
 	}));
 	listeners.add(addDisposableListener(sash, 'keydown', (event: KeyboardEvent) => {
 		const step = event.shiftKey ? 24 : 12;
@@ -1089,6 +1179,20 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 			}
 			activeIds = next;
 			applyActiveClasses();
+		},
+		setPreviewAssocGroup(assocGroup) {
+			const next = assocGroup?.trim() || undefined;
+			if (previewAssocGroup === next) {
+				return;
+			}
+			previewAssocGroup = next;
+			for (const assoc of rail.querySelectorAll('.custom-mode-card-rail-assoc')) {
+				if (!(assoc instanceof HTMLElement)) {
+					continue;
+				}
+				const group = assoc.dataset.assocGroup?.trim();
+				assoc.classList.toggle('is-preview', Boolean(next && group === next));
+			}
 		},
 		setLoading(next, label) {
 			const nextLabel = label?.trim() || 'Loading…';

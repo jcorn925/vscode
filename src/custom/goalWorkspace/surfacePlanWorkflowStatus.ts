@@ -330,13 +330,46 @@ export function summarizeSurfacePlanWorkflowProgress(
 }
 
 /**
- * When a surface is fully done and Claude is not mid-edit, Preview is the default
- * surface rail card (pinned first + selected on open).
+ * When a surface is fully done and Claude is not mid-edit, prefer a live rail card
+ * (Deployed when wired, else Preview) as the default (pinned first + selected on open).
  */
 export function shouldPreferPreviewSurfaceSection(
 	progress: Pick<SurfacePlanWorkflowProgress, 'complete' | 'percent' | 'inProgress'> | undefined,
 ): boolean {
 	return Boolean(progress?.complete && !progress.inProgress && (progress.percent ?? 0) >= 100);
+}
+
+/**
+ * Prefer Deployed when the surface is complete and production is wired; otherwise Preview.
+ * Returns undefined when the surface is still in progress or neither live card is available.
+ */
+export function resolvePreferredCompleteSurfaceSectionId(input: {
+	readonly progress: Pick<SurfacePlanWorkflowProgress, 'complete' | 'percent' | 'inProgress'> | undefined;
+	readonly availableSectionIds: readonly string[];
+	readonly deployedWired?: boolean;
+}): 'deployed' | 'preview' | undefined {
+	if (!shouldPreferPreviewSurfaceSection(input.progress)) {
+		return undefined;
+	}
+	const available = new Set(input.availableSectionIds);
+	if (input.deployedWired && available.has('deployed')) {
+		return 'deployed';
+	}
+	if (available.has('preview')) {
+		return 'preview';
+	}
+	return undefined;
+}
+
+/**
+ * One-shot promote when a surface first hits complete.
+ * `previousComplete === undefined` means first observation (seed — do not promote).
+ */
+export function shouldPromoteCompleteSurfaceSectionOnTransition(
+	previousComplete: boolean | undefined,
+	nextComplete: boolean,
+): boolean {
+	return nextComplete && previousComplete === false;
 }
 
 function resolveNextAction(

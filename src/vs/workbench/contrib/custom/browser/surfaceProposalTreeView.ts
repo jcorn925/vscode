@@ -4,10 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { mainWindow } from '../../../../base/browser/window.js';
+import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
 import type { SurfaceReferenceCandidates } from '../../../../../custom/goalWorkspace/surfaceReferenceCandidates.js';
+import type { SurfaceSchema } from '../../../../../custom/goalWorkspace/surfaceSchema.js';
 import { IWebviewElement, IWebviewService, WebviewContentPurpose } from '../../webview/browser/webview.js';
 import { webviewGenericCspSource } from '../../webview/common/webview.js';
 import type { GraphProposalDocument, ProposalDiffGraph } from './proposalGraphDiff/proposalGraphDiffTypes.js';
@@ -66,6 +68,8 @@ export interface SurfaceProposalTreeDocumentOptions {
 	readonly previewInfo?: SurfaceProposalTreePreviewInfo;
 	/** Surface purpose from workspace.goal.json — Description card / section body. */
 	readonly surfacePurpose?: string;
+	/** Surface data schema from workspace.goal.json — Schema card / section body. */
+	readonly surfaceSchema?: SurfaceSchema;
 	readonly referenceCandidates?: SurfaceReferenceCandidates;
 	readonly storageKey?: string;
 	readonly proposalMissingMessage?: string;
@@ -104,6 +108,12 @@ export class SurfaceProposalTreeView extends Disposable {
 	/** False until the webview script posts ready — postMessage before that is dropped. */
 	private webviewReady = false;
 	private pendingSelectSectionId: string | undefined;
+	/** Monotonic id stamped on each posted document; the webview echoes it back after render. */
+	private documentSeq = 0;
+	private lastRenderedSeq = 0;
+	private redeliverAttempts = 0;
+	/** Re-posts the latest document when the webview never acked it (iframe reload / dropped message). */
+	private readonly redeliver = this._register(new RunOnceScheduler(() => this.redeliverLastDocument(), 1000));
 
 	private readonly _onDidToggleRepo = this._register(new Emitter<SurfaceProposalTreeToggleRepoRequest>());
 	readonly onDidToggleRepo: Event<SurfaceProposalTreeToggleRepoRequest> = this._onDidToggleRepo.event;
@@ -122,6 +132,12 @@ export class SurfaceProposalTreeView extends Disposable {
 
 	private readonly _onDidRequestRegenerateRealGraph = this._register(new Emitter<void>());
 	readonly onDidRequestRegenerateRealGraph: Event<void> = this._onDidRequestRegenerateRealGraph.event;
+
+	private readonly _onDidRequestRegenerateDescription = this._register(new Emitter<void>());
+	readonly onDidRequestRegenerateDescription: Event<void> = this._onDidRequestRegenerateDescription.event;
+
+	private readonly _onDidRequestRegenerateSchema = this._register(new Emitter<void>());
+	readonly onDidRequestRegenerateSchema: Event<void> = this._onDidRequestRegenerateSchema.event;
 
 	constructor(webviewService: IWebviewService, onReady: () => void) {
 		super();
@@ -143,6 +159,14 @@ export class SurfaceProposalTreeView extends Disposable {
 				this.pendingSelectSectionId = undefined;
 				if (pendingSection) {
 					this.selectSection(pendingSection);
+				}
+				return;
+			}
+			if (message?.type === 'surfaceProposalTree.rendered' && typeof message.seq === 'number') {
+				this.lastRenderedSeq = Math.max(this.lastRenderedSeq, message.seq);
+				if (this.lastRenderedSeq >= this.documentSeq) {
+					this.redeliverAttempts = 0;
+					this.redeliver.cancel();
 				}
 				return;
 			}
@@ -185,6 +209,14 @@ export class SurfaceProposalTreeView extends Disposable {
 			}
 			if (message?.type === 'surfaceProposalTree.regenerateRealGraph') {
 				this._onDidRequestRegenerateRealGraph.fire();
+				return;
+			}
+			if (message?.type === 'surfaceProposalTree.regenerateDescription') {
+				this._onDidRequestRegenerateDescription.fire();
+				return;
+			}
+			if (message?.type === 'surfaceProposalTree.regenerateSchema') {
+				this._onDidRequestRegenerateSchema.fire();
 			}
 		}));
 		this.setHtml();
@@ -196,6 +228,11 @@ export class SurfaceProposalTreeView extends Disposable {
 
 	setDocument(options: SurfaceProposalTreeDocumentOptions): void {
 		this.lastDocument = options;
+		this.redeliverAttempts = 0;
+		this.postDocument(options);
+	}
+
+	private postDocument(options: SurfaceProposalTreeDocumentOptions): void {
 		const parallelStreamCount = options.partition?.workstreams?.length ?? 0;
 		const serializeCount = options.partition?.serializeGroups?.length ?? 0;
 		const workstreamExecution: WorkstreamExecutionPresentation | undefined =
@@ -221,6 +258,7 @@ export class SurfaceProposalTreeView extends Disposable {
 			localUrl: options.previewInfo?.localUrl,
 			productionUrl: options.previewInfo?.productionUrl,
 			purposeValue: options.surfacePurpose,
+			schema: options.surfaceSchema,
 			planMarkdown: options.planMarkdown,
 			claudeMdMarkdown: options.claudeMdMarkdown,
 			proposedNodeCount: options.proposal?.add_nodes?.length,
@@ -236,14 +274,31 @@ export class SurfaceProposalTreeView extends Disposable {
 		if (!this.webviewReady) {
 			return;
 		}
+		const documentSeq = ++this.documentSeq;
+		// The webview acks with `rendered`; if that never comes (iframe reloaded mid-post,
+		// message dropped), redeliver the latest document instead of staying on the placeholder.
+		this.redeliver.schedule();
 		void this.webview.postMessage({
 			type: 'surfaceProposalTree.setDocument',
+			documentSeq,
 			...options,
 			workstreamExecution,
 			currentPhaseIndex,
 			phaseRowStatuses,
 			phasesProgressBadge,
 		});
+	}
+
+	private redeliverLastDocument(): void {
+		if (this.lastRenderedSeq >= this.documentSeq) {
+			return;
+		}
+		const doc = this.lastDocument;
+		if (!doc || !this.webviewReady || this.redeliverAttempts >= 5) {
+			return;
+		}
+		this.redeliverAttempts++;
+		this.postDocument(doc);
 	}
 
 	republish(): void {
@@ -458,6 +513,111 @@ export class SurfaceProposalTreeView extends Disposable {
 			color: var(--vscode-descriptionForeground); text-transform: uppercase; letter-spacing: 0.04em;
 		}
 		.description-body .description-text { margin: 0; }
+		.schema-body {
+			padding: 12px 14px;
+			font: 13px/1.45 var(--vscode-font-family);
+			color: var(--vscode-foreground);
+			display: flex;
+			flex-direction: column;
+			gap: 14px;
+		}
+		.schema-kind-row {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 8px;
+		}
+		.schema-kind-chip {
+			display: inline-flex;
+			align-items: center;
+			padding: 2px 8px;
+			border-radius: 999px;
+			font-size: 11px;
+			font-weight: 700;
+			letter-spacing: 0.04em;
+			text-transform: uppercase;
+			border: 1px solid var(--vscode-panel-border);
+			background: color-mix(in srgb, var(--vscode-badge-background, var(--vscode-button-secondaryBackground)) 55%, transparent);
+			color: var(--vscode-foreground);
+		}
+		.schema-engine {
+			font-size: 12px;
+			color: var(--vscode-descriptionForeground);
+		}
+		.schema-summary {
+			margin: 0;
+			color: var(--vscode-foreground);
+			white-space: pre-wrap;
+		}
+		.schema-entity {
+			display: flex;
+			flex-direction: column;
+			gap: 6px;
+		}
+		.schema-entity-head {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: baseline;
+			gap: 8px;
+		}
+		.schema-entity-name {
+			margin: 0;
+			font-size: 13px;
+			font-weight: 700;
+		}
+		.schema-entity-kind {
+			font-size: 11px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.04em;
+			color: var(--vscode-descriptionForeground);
+		}
+		.schema-entity-notes {
+			margin: 0;
+			font-size: 12px;
+			color: var(--vscode-descriptionForeground);
+		}
+		.schema-fields {
+			margin: 0;
+			padding: 0;
+			list-style: none;
+			display: flex;
+			flex-direction: column;
+			gap: 4px;
+			border-left: 2px solid var(--vscode-panel-border);
+			padding-left: 10px;
+		}
+		.schema-field {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: baseline;
+			gap: 6px 10px;
+			font-size: 12px;
+		}
+		.schema-field-name {
+			font-weight: 600;
+			font-family: var(--vscode-editor-font-family);
+		}
+		.schema-field-type {
+			color: var(--vscode-descriptionForeground);
+			font-family: var(--vscode-editor-font-family);
+		}
+		.schema-field-pk {
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: 0.04em;
+			text-transform: uppercase;
+			color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+		}
+		.schema-field-notes {
+			color: var(--vscode-descriptionForeground);
+			font-size: 11px;
+		}
+		.schema-empty-entities {
+			margin: 0;
+			font-size: 12px;
+			color: var(--vscode-descriptionForeground);
+		}
 		.sections {
 			min-width: 0;
 			min-height: 0;
@@ -480,6 +640,10 @@ export class SurfaceProposalTreeView extends Disposable {
 			background: var(--vscode-sideBar-background); border-bottom: 1px solid transparent;
 		}
 		.section[open] > summary { border-bottom-color: var(--vscode-panel-border); }
+		.section-header-actions {
+			display: flex; align-items: center; justify-content: flex-end;
+			gap: 8px; margin-left: auto; flex: 0 0 auto;
+		}
 		.count {
 			padding: 1px 7px; border-radius: 10px; color: var(--vscode-badge-foreground);
 			background: var(--vscode-badge-background); font-size: 11px; font-weight: 600;
@@ -678,10 +842,6 @@ export class SurfaceProposalTreeView extends Disposable {
 		}
 		.parallel-run-btn:not(:disabled):hover {
 			background: var(--vscode-button-hoverBackground);
-		}
-		.graph-section-toolbar {
-			display: flex; justify-content: flex-end; align-items: center;
-			gap: 8px; padding: 8px 12px 0;
 		}
 		.graph-help-btn {
 			appearance: none; width: 24px; height: 24px; padding: 0;
@@ -1134,6 +1294,26 @@ export class SurfaceProposalTreeView extends Disposable {
 				return details;
 			}
 
+			/** Pin action buttons to the section summary (top-right, across from the title). */
+			function setSectionHeaderActions(sectionEl, ...buttons) {
+				const summary = sectionEl.querySelector(':scope > summary');
+				if (!summary) {
+					return;
+				}
+				let actions = summary.querySelector(':scope > .section-header-actions');
+				if (!actions) {
+					actions = el('div', 'section-header-actions');
+					summary.append(actions);
+				} else {
+					actions.replaceChildren();
+				}
+				for (const button of buttons) {
+					if (button) {
+						actions.append(button);
+					}
+				}
+			}
+
 			/** Section cards render in the host card rail — this only records the data to post up. */
 			function metaCard(id, label, value) {
 				return { id, key: label, value: text(value) };
@@ -1318,7 +1498,7 @@ export class SurfaceProposalTreeView extends Disposable {
 							memberFiles.push(file);
 						}
 					}
-					if (region.entryPath && /\.[a-z0-9]+$/i.test(region.entryPath)) {
+					if (region.entryPath && /\\.[a-z0-9]+$/i.test(region.entryPath)) {
 						memberFiles.push(region.entryPath);
 					}
 				}
@@ -1442,7 +1622,6 @@ export class SurfaceProposalTreeView extends Disposable {
 				const hasLists = files.length > 0 || relationships.length > 0;
 				const graphSection = section(id, title, drawable.cardValue || '—', false);
 
-				const toolbar = el('div', 'graph-section-toolbar');
 				const helpBtn = el('button', 'graph-help-btn', '?');
 				helpBtn.type = 'button';
 				helpBtn.title = 'How graphs are generated';
@@ -1455,19 +1634,20 @@ export class SurfaceProposalTreeView extends Disposable {
 					const open = helpPanel.classList.toggle('hidden') === false;
 					helpBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
 				});
-				toolbar.append(helpBtn);
+				const headerButtons = [helpBtn];
 				if (id === 'graph') {
 					const regen = el('button', 'graph-regenerate-btn', 'Regenerate');
 					regen.type = 'button';
-					regen.title = 'Re-run Ix map and rebuild Real Graph from on-disk files';
+					regen.title = 'Re-run Ix map and rebuild Real Graph, then hand off to Actions Claude to verify';
 					regen.addEventListener('click', (event) => {
 						event.preventDefault();
 						event.stopPropagation();
 						vscode.postMessage({ type: 'surfaceProposalTree.regenerateRealGraph' });
 					});
-					toolbar.append(regen);
+					headerButtons.push(regen);
 				}
-				graphSection.append(toolbar, helpPanel);
+				setSectionHeaderActions(graphSection, ...headerButtons);
+				graphSection.append(helpPanel);
 
 				if (hasLists) {
 					const tabs = el('div', 'graph-view-tabs');
@@ -2004,6 +2184,9 @@ export class SurfaceProposalTreeView extends Disposable {
 				);
 				const previewInfo = options.previewInfo;
 				const surfacePurpose = (options.surfacePurpose || '').trim();
+				const surfaceSchema = options.surfaceSchema && typeof options.surfaceSchema === 'object'
+					? options.surfaceSchema
+					: undefined;
 				const referenceCandidates = options.referenceCandidates;
 				const proposalMissingMessage = options.proposalMissingMessage;
 				const hideRunWorkstreamsButton = !!options.hideRunWorkstreamsButton;
@@ -2212,23 +2395,23 @@ export class SurfaceProposalTreeView extends Disposable {
 				cards.push(metaCard('proposed', 'Proposed Graph', proposedGraph.cardValue || '—'));
 				cards.push(metaCard('graph', 'Real Graph', codeGraph.cardValue || '—'));
 				cards.push(metaCard('preview', 'Preview', previewInfo?.localUrl
-					? String(previewInfo.localUrl).replace(/^https?:\/\//i, '').replace(/\/$/, '') || '—'
+					? String(previewInfo.localUrl).replace(/^https?:\\/\\//i, '').replace(/\\/$/, '') || '—'
 					: '—'));
 				cards.push(metaCard('deployed', 'Deployed', previewInfo?.productionUrl
-					? String(previewInfo.productionUrl).replace(/^https?:\/\//i, '').replace(/\/$/, '') || '—'
+					? String(previewInfo.productionUrl).replace(/^https?:\\/\\//i, '').replace(/\\/$/, '') || '—'
 					: '—'));
 
 				const intentFromPlan = (() => {
 					if (!planMarkdown || !planMarkdown.trim()) {
 						return '';
 					}
-					const match = /##\s*Intent\s*\n([\s\S]*?)(?=\n##\s|$)/i.exec(planMarkdown);
+					const match = /##\\s*Intent\\s*\\n([\\s\\S]*?)(?=\\n##\\s|$)/i.exec(planMarkdown);
 					return (match && match[1] ? match[1] : '').trim();
 				})();
 				const descriptionBodyText = surfacePurpose || intentFromPlan;
 				let descriptionBadge = '—';
 				if (surfacePurpose) {
-					const firstLine = surfacePurpose.split(/\r?\n/, 1)[0].trim();
+					const firstLine = surfacePurpose.split(/\\r?\\n/, 1)[0].trim();
 					descriptionBadge = firstLine.length <= 28
 						? firstLine
 						: firstLine.slice(0, 27).trimEnd() + '…';
@@ -2307,6 +2490,15 @@ export class SurfaceProposalTreeView extends Disposable {
 				sectionById.deployed = deployedSection;
 
 				const descriptionSection = section('description', 'Description', descriptionBadge, false);
+				const descriptionRegen = el('button', 'graph-regenerate-btn', 'Regen Description');
+				descriptionRegen.type = 'button';
+				descriptionRegen.title = 'Regenerate surface purpose via Actions Claude';
+				descriptionRegen.addEventListener('click', (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					vscode.postMessage({ type: 'surfaceProposalTree.regenerateDescription' });
+				});
+				setSectionHeaderActions(descriptionSection, descriptionRegen);
 				if (descriptionBodyText) {
 					const descriptionBody = el('div', 'description-body');
 					descriptionBody.append(el(
@@ -2324,6 +2516,121 @@ export class SurfaceProposalTreeView extends Disposable {
 					));
 				}
 				sectionById.description = descriptionSection;
+
+				const schemaBadge = (() => {
+					if (!surfaceSchema || !surfaceSchema.dbKind) {
+						return '—';
+					}
+					if (surfaceSchema.dbKind === 'none') {
+						return 'No database';
+					}
+					const entities = Array.isArray(surfaceSchema.entities) ? surfaceSchema.entities : [];
+					const noun = surfaceSchema.dbKind === 'nosql' ? 'collection' : 'table';
+					const countLabel = entities.length === 1
+						? ('1 ' + noun)
+						: (entities.length + ' ' + noun + 's');
+					const engine = (surfaceSchema.engine || '').trim();
+					if (engine) {
+						return entities.length ? (engine + ' · ' + countLabel) : engine;
+					}
+					const kindLabel = surfaceSchema.dbKind === 'nosql' ? 'NoSQL' : 'SQL';
+					return entities.length ? (kindLabel + ' · ' + countLabel) : kindLabel;
+				})();
+				cards.push(metaCard('schema', 'Schema', schemaBadge));
+
+				const schemaSection = section('schema', 'Schema', schemaBadge, false);
+				const schemaRegen = el('button', 'graph-regenerate-btn', 'Regen Schema');
+				schemaRegen.type = 'button';
+				schemaRegen.title = 'Regenerate surfaces[].schema in workspace.goal.json via Claude';
+				schemaRegen.addEventListener('click', (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					vscode.postMessage({ type: 'surfaceProposalTree.regenerateSchema' });
+				});
+				setSectionHeaderActions(schemaSection, schemaRegen);
+				if (surfaceSchema && surfaceSchema.dbKind) {
+					const schemaBody = el('div', 'schema-body');
+					const kindRow = el('div', 'schema-kind-row');
+					const kindLabel = surfaceSchema.dbKind === 'sql'
+						? 'SQL'
+						: surfaceSchema.dbKind === 'nosql'
+							? 'NoSQL'
+							: 'No database';
+					kindRow.append(el('span', 'schema-kind-chip', kindLabel));
+					const engine = (surfaceSchema.engine || '').trim();
+					if (engine) {
+						kindRow.append(el('span', 'schema-engine', engine));
+					}
+					schemaBody.append(kindRow);
+					const summary = (surfaceSchema.summary || '').trim();
+					if (summary) {
+						schemaBody.append(el('p', 'schema-summary', summary));
+					}
+					const entities = Array.isArray(surfaceSchema.entities) ? surfaceSchema.entities : [];
+					if (surfaceSchema.dbKind === 'none') {
+						schemaBody.append(el(
+							'p',
+							'schema-empty-entities',
+							'This surface does not persist data in a database.',
+						));
+					} else if (!entities.length) {
+						schemaBody.append(el(
+							'p',
+							'schema-empty-entities',
+							'No tables or collections listed yet. Use Regen Schema after the data model is known.',
+						));
+					} else {
+						for (const entity of entities) {
+							if (!entity || !(entity.name || '').trim()) {
+								continue;
+							}
+							const block = el('div', 'schema-entity');
+							const head = el('div', 'schema-entity-head');
+							head.append(el('p', 'schema-entity-name', entity.name));
+							head.append(el(
+								'span',
+								'schema-entity-kind',
+								entity.kind === 'collection' ? 'Collection' : 'Table',
+							));
+							block.append(head);
+							const notes = (entity.notes || '').trim();
+							if (notes) {
+								block.append(el('p', 'schema-entity-notes', notes));
+							}
+							const fields = Array.isArray(entity.fields) ? entity.fields : [];
+							if (fields.length) {
+								const list = el('ul', 'schema-fields');
+								for (const field of fields) {
+									if (!field || !(field.name || '').trim()) {
+										continue;
+									}
+									const row = el('li', 'schema-field');
+									row.append(el('span', 'schema-field-name', field.name));
+									if ((field.type || '').trim()) {
+										row.append(el('span', 'schema-field-type', field.type));
+									}
+									if (field.pk) {
+										row.append(el('span', 'schema-field-pk', 'PK'));
+									}
+									if ((field.notes || '').trim()) {
+										row.append(el('span', 'schema-field-notes', field.notes));
+									}
+									list.append(row);
+								}
+								block.append(list);
+							}
+							schemaBody.append(block);
+						}
+					}
+					schemaSection.append(schemaBody);
+				} else {
+					schemaSection.append(el(
+						'div',
+						'empty',
+						'No schema yet. Use Regen Schema to inspect the app and write surfaces[].schema (SQL / NoSQL / none) in workspace.goal.json.',
+					));
+				}
+				sectionById.schema = schemaSection;
 
 				if (referenceCandidates?.repos?.length) {
 					const selectedCount = referenceCandidates.repos.filter(r => r.selected).length;
@@ -2469,9 +2776,11 @@ export class SurfaceProposalTreeView extends Disposable {
 				}
 			}
 
+			let receivedDocument = false;
 			window.addEventListener('message', event => {
 				const message = event.data;
 				if (message?.type === 'surfaceProposalTree.setDocument') {
+					receivedDocument = true;
 					try {
 						render(message);
 					} catch (error) {
@@ -2479,13 +2788,32 @@ export class SurfaceProposalTreeView extends Disposable {
 						content.append(el('div', 'empty',
 							'Failed to render proposal: ' + (error && error.message ? error.message : String(error))));
 					}
+					// Ack even on render failure — the error panel is a terminal render and
+					// redelivering the same document would not change the outcome.
+					if (typeof message.documentSeq === 'number') {
+						vscode.postMessage({ type: 'surfaceProposalTree.rendered', seq: message.documentSeq });
+					}
 					return;
 				}
 				if (message?.type === 'surfaceProposalTree.selectSection' && typeof message.id === 'string') {
 					focusSection(message.id);
 				}
 			});
+			// A one-shot ready can be dropped while the host message channel is still wiring
+			// up, and the host only ever posts the document after seeing ready — so keep
+			// announcing (with backoff) until the first document actually arrives. Each ready
+			// the host receives triggers a republish, which also resets its redeliver budget.
+			let readyDelay = 500;
+			const announceReady = () => {
+				if (receivedDocument) {
+					return;
+				}
+				vscode.postMessage({ type: 'surfaceProposalTree.ready' });
+				readyDelay = Math.min(readyDelay * 2, 4000);
+				setTimeout(announceReady, readyDelay);
+			};
 			vscode.postMessage({ type: 'surfaceProposalTree.ready' });
+			setTimeout(announceReady, readyDelay);
 		})();
 	</script>
 </body>

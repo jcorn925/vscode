@@ -7,8 +7,10 @@ import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { URI } from '../../../../../base/common/uri.js';
 import {
+	isSurfaceGraphRegionsCacheFresh,
 	parseSurfaceGraphRegionsCache,
 	surfaceGraphRegionsCacheResource,
+	SURFACE_GRAPH_REGIONS_CACHE_TTL_MS,
 } from '../surfaceGraphRegionsCache.js';
 
 suite('surfaceGraphRegionsCache', () => {
@@ -49,5 +51,36 @@ suite('surfaceGraphRegionsCache', () => {
 			surfaceId: 'x',
 			regions: [],
 		})), undefined);
+	});
+
+	test('isSurfaceGraphRegionsCacheFresh within TTL', () => {
+		const now = Date.parse('2026-07-20T12:00:00.000Z');
+		assert.strictEqual(isSurfaceGraphRegionsCacheFresh('2026-07-20T11:59:00.000Z', now), true);
+		assert.strictEqual(isSurfaceGraphRegionsCacheFresh(
+			new Date(now - SURFACE_GRAPH_REGIONS_CACHE_TTL_MS + 1_000).toISOString(),
+			now,
+		), true);
+	});
+
+	test('isSurfaceGraphRegionsCacheFresh stale past TTL', () => {
+		const now = Date.parse('2026-07-20T12:00:00.000Z');
+		assert.strictEqual(isSurfaceGraphRegionsCacheFresh(
+			new Date(now - SURFACE_GRAPH_REGIONS_CACHE_TTL_MS).toISOString(),
+			now,
+		), false);
+		assert.strictEqual(isSurfaceGraphRegionsCacheFresh('2026-07-19T12:00:00.000Z', now), false);
+	});
+
+	test('isSurfaceGraphRegionsCacheFresh rejects missing, invalid, and far-future stamps', () => {
+		const now = Date.parse('2026-07-20T12:00:00.000Z');
+		assert.strictEqual(isSurfaceGraphRegionsCacheFresh(undefined, now), false);
+		assert.strictEqual(isSurfaceGraphRegionsCacheFresh('not-a-date', now), false);
+		assert.strictEqual(isSurfaceGraphRegionsCacheFresh('2027-01-01T00:00:00.000Z', now), false);
+	});
+
+	test('isSurfaceGraphRegionsCacheFresh honors custom TTL', () => {
+		const now = Date.parse('2026-07-20T12:00:00.000Z');
+		assert.strictEqual(isSurfaceGraphRegionsCacheFresh('2026-07-20T11:59:00.000Z', now, 30_000), false);
+		assert.strictEqual(isSurfaceGraphRegionsCacheFresh('2026-07-20T11:59:45.000Z', now, 30_000), true);
 	});
 });

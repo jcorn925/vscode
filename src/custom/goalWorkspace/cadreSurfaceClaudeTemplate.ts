@@ -82,6 +82,59 @@ brief / PDF, not a single named surface):
    do **not** invent \`.workflow.json\` step completions. Wait for the Console
    kickoff prompt, then do Research / build work only.
 
+## Workspace plan analysis (Console home)
+
+When Console kicks **Kickoff analysis** (plan already exists; grade the repo):
+
+1. Read \`workspace.goal.json\`, \`.agent/workspace.plan.md\`, suggested surfaces
+   if present, and on-disk apps under \`apps/\`.
+2. Use Ix (\`ix map\` / subsystems / inventory as needed) to compare intended
+   surfaces and capabilities against what exists in the repo.
+3. Write \`.agent/workspace.plan-analysis.md\` with: coverage summary, per-surface
+   gaps, shared-package notes, and a short scorecard (matches / missing /
+   overbuilt).
+4. **Stop.** Do not rewrite the workspace plan, suggested surfaces, or
+   \`workspace.goal.json\` unless the human explicitly asks.
+
+## Description regen (Console + surface)
+
+When Console or a surface Plan UI kicks **Regen Description**:
+
+**Shared format** — write a single JSON string with exactly three blocks separated
+by blank lines (plain text, no markdown headings):
+
+1. Lead (1–2 sentences) — what this is and who it serves.
+2. \`How it works:\` — runtime/product path (routes, data/KB, handoffs, modules).
+3. \`Stack & systems:\` — frameworks, AI/providers, deploy, persistence, siblings /
+   verify commands when relevant.
+
+**Workspace (Console Description):** only replace \`goal.description\` in
+\`workspace.goal.json\`. Inspect goal + all surfaces, \`.agent/workspace.plan.md\`,
+and \`apps/*\` READMEs as needed. Do not edit surface purposes, plan.md, or brand.
+
+**Surface (Plan Description):** only replace that surface's \`purpose\` in
+\`workspace.goal.json\`. Inspect that surface + siblings, \`apps/<id>/\`, and
+\`.agent/surfaces/<id>.plan.md\` if present. Do not edit other surfaces or plan.md.
+
+Stop when the target field is written.
+
+## Schema regen (surface Plan)
+
+When a surface Plan UI kicks **Regen Schema**:
+
+1. Inspect that surface in \`workspace.goal.json\`, \`apps/<id>/\` (ORM schemas,
+   migrations, models, package.json deps), and \`.agent/surfaces/<id>.plan.md\`
+   if present.
+2. Write only \`surfaces[id].schema\` as a JSON object with:
+   - \`dbKind\`: \`"sql"\` | \`"nosql"\` | \`"none"\`
+   - \`engine\` (optional): e.g. postgres, sqlite, mongodb, supabase
+   - \`summary\` (optional): 1–2 sentences on persistence
+   - \`entities\`: array of \`{ name, kind: "table"|"collection", fields: [{ name, type?, pk?, notes? }], notes? }\`
+3. Use \`dbKind: "none"\` and empty \`entities\` when the surface has no database
+   (client state, prompt-stuffed KB, files only, etc.).
+4. Do NOT edit purpose, plan.md, proposals, or other surfaces. Stop when schema
+   is written.
+
 ## Phase progress contract (generate)
 
 Console starts each generate phase by writing
@@ -381,6 +434,91 @@ export function buildWorkspacePlanKickoffPrompt(options: {
 		`Do not set suggested surfaces status to confirmed and do not upsert workspace.goal.json for confirm — the Console owns that Steps gate when the user clicks a card.`,
 	];
 	return parts.filter(Boolean).join(' ');
+}
+
+/**
+ * Console Surfaces home: grade how well the current repo implements the
+ * workspace plan. Writes `.agent/workspace.plan-analysis.md` only.
+ */
+export function buildWorkspacePlanAnalysisPrompt(options: {
+	readonly businessName?: string;
+	readonly intent?: string;
+}): string {
+	const business = options.businessName?.trim();
+	const trimmed = options.intent?.trim();
+	const parts = [
+		`Read CLAUDE.md and follow the Workspace plan analysis section.`,
+		business ? `Business / workspace name: ${business}.` : '',
+		trimmed ? `Current planning intent from Console (may refine the on-disk plan): ${trimmed}` : '',
+		`Read workspace.goal.json, .agent/workspace.plan.md, and .agent/workspace.surfaces.suggested.json if present.`,
+		`Inspect apps/ and use Ix (ix map / subsystems / inventory as needed) to compare intended surfaces and capabilities against what exists in this repo.`,
+		`Write .agent/workspace.plan-analysis.md with: (1) coverage summary, (2) per-surface gaps, (3) shared-package notes, (4) a short scorecard of what matches / is missing / is overbuilt.`,
+		`Do NOT rewrite .agent/workspace.plan.md, suggested surfaces, or workspace.goal.json. Do not scaffold new apps. Stop when the analysis file exists.`,
+	];
+	return parts.filter(Boolean).join(' ');
+}
+
+/** Shared three-block Description string contract (purpose / goal.description). */
+const DESCRIPTION_FORMAT_CONTRACT = [
+	`Write a single JSON string with exactly three blocks separated by blank lines (plain text, no markdown headings):`,
+	`(1) Lead — 1–2 sentences on what this is and who it serves.`,
+	`(2) A block starting with "How it works:" — runtime/product path (routes, data/KB, handoffs, key modules).`,
+	`(3) A block starting with "Stack & systems:" — frameworks, AI/providers, deploy, persistence, siblings / verify commands when relevant.`,
+].join(' ');
+
+/**
+ * Surface Plan Description: rewrite `surfaces[<id>].purpose` only.
+ */
+export function buildSurfacePurposeRegenPrompt(options: {
+	readonly surfaceId: string;
+	readonly surfaceName: string;
+}): string {
+	const { surfaceId, surfaceName } = options;
+	return [
+		`Read CLAUDE.md and follow the Description regen section.`,
+		`Console asked to regenerate the Description for surface "${surfaceName}" (id: ${surfaceId}).`,
+		`Inspect workspace.goal.json (this surface and siblings), apps/${surfaceId}/ (README, package.json, routes), and .agent/surfaces/${surfaceId}.plan.md if present.`,
+		DESCRIPTION_FORMAT_CONTRACT,
+		`Update only surfaces[id=${surfaceId}].purpose in workspace.goal.json with that string.`,
+		`Do NOT edit other surfaces, goal.description, plan.md, proposals, or scaffold code. Stop when purpose is written.`,
+	].join(' ');
+}
+
+/**
+ * Console Description: rewrite `goal.description` only.
+ */
+export function buildWorkspaceDescriptionRegenPrompt(options: {
+	readonly businessName?: string;
+}): string {
+	const business = options.businessName?.trim();
+	return [
+		`Read CLAUDE.md and follow the Description regen section.`,
+		`Console asked to regenerate the workspace Description (goal.description).`,
+		business ? `Business / workspace name: ${business}.` : '',
+		`Inspect workspace.goal.json (goal + all surfaces), .agent/workspace.plan.md, and apps/*/README.md or package.json as needed.`,
+		DESCRIPTION_FORMAT_CONTRACT,
+		`Update only goal.description in workspace.goal.json with that string.`,
+		`Do NOT edit surface purposes, brand fields, plan.md, or scaffold code. Stop when goal.description is written.`,
+	].filter(Boolean).join(' ');
+}
+
+/**
+ * Surface Plan Schema: rewrite `surfaces[<id>].schema` only.
+ */
+export function buildSurfaceSchemaRegenPrompt(options: {
+	readonly surfaceId: string;
+	readonly surfaceName: string;
+}): string {
+	const { surfaceId, surfaceName } = options;
+	return [
+		`Read CLAUDE.md and follow the Schema regen section.`,
+		`Console asked to regenerate the Schema for surface "${surfaceName}" (id: ${surfaceId}).`,
+		`Inspect workspace.goal.json (this surface), apps/${surfaceId}/ (README, package.json, ORM/migrations/models), and .agent/surfaces/${surfaceId}.plan.md if present.`,
+		`Write only surfaces[id=${surfaceId}].schema as a JSON object:`,
+		`{ "dbKind": "sql"|"nosql"|"none", "engine"?: string, "summary"?: string, "entities": [{ "name": string, "kind": "table"|"collection", "fields": [{ "name": string, "type"?: string, "pk"?: boolean, "notes"?: string }], "notes"?: string }] }.`,
+		`Use dbKind "none" and entities [] when there is no database.`,
+		`Do NOT edit purpose, other surfaces, plan.md, or scaffold code. Stop when schema is written.`,
+	].join(' ');
 }
 
 /**

@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { proposalCompareSnapshotBelongsToSurface } from '../../../../../custom/goalWorkspace/surfacePlanPaths.js';
 import type {
 	GraphProposalDocument,
 	GraphProposalEdgeDocument,
@@ -26,6 +27,14 @@ export function isFullStructuralProposalPass(
 ): boolean {
 	if (!snapshot?.passed) {
 		return false;
+	}
+	// When the snapshot carries ownership metadata, reject another surface's compare.
+	if (snapshot.proposal?.tree_id || snapshot.proposal?.path) {
+		const surfaceId = proposal.surface_id?.trim() || proposal.tree_id?.trim() || '';
+		const treeId = proposal.tree_id?.trim() || undefined;
+		if (surfaceId && !proposalCompareSnapshotBelongsToSurface(snapshot, { surfaceId, treeId })) {
+			return false;
+		}
 	}
 	const addNodes = proposal.add_nodes ?? [];
 	if (addNodes.length === 0) {

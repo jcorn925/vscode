@@ -26,8 +26,11 @@ suite('consoleHomeAccordion', () => {
 
 	test('CONSOLE_HOME_SECTION_ORDER puts Surfaces first as Workspace default', () => {
 		assert.strictEqual(CONSOLE_HOME_DEFAULT_SECTION, 'surfaces');
+		assert.notStrictEqual(CONSOLE_HOME_DEFAULT_SECTION, 'workspacePlan');
 		assert.deepStrictEqual([...CONSOLE_HOME_SECTION_ORDER], [
 			'surfaces',
+			'description',
+			'docker',
 			'workspacePlan',
 			'claudeMd',
 			'howItWorks',

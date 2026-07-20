@@ -5,6 +5,7 @@
 
 export type ConsoleWorkflowStageId =
 	| 'idle'
+	| 'docker'
 	| 'planning'
 	| 'review_surfaces'
 	| 'create_surfaces'
@@ -16,6 +17,12 @@ export type ConsoleWorkflowStepStatus = 'pending' | 'current' | 'completed' | 's
 export interface ConsoleWorkflowSignals {
 	readonly kickoffInFlight?: boolean;
 	readonly sessionActive?: boolean;
+	/**
+	 * Docker Desktop + MCP Toolkit ready for Ix.
+	 * When explicitly `false`, workflow stays on the Docker step.
+	 * When omitted, treat as ready (does not block lifecycle).
+	 */
+	readonly dockerReady?: boolean;
 	readonly hasWorkspacePlan: boolean;
 	readonly hasSuggestedSurfaces: boolean;
 	readonly suggestedStatus?: 'draft' | 'confirmed' | string;
@@ -52,6 +59,7 @@ export interface ConsoleWorkflowStatus {
 }
 
 const STAGES: readonly { readonly id: Exclude<ConsoleWorkflowStageId, 'idle'>; readonly label: string }[] = [
+	{ id: 'docker', label: 'Docker ready' },
 	{ id: 'planning', label: 'Kick off workspace planning' },
 	{ id: 'review_surfaces', label: 'Draft plan + propose surfaces' },
 	{ id: 'create_surfaces', label: 'Review / create suggested surfaces' },
@@ -60,6 +68,9 @@ const STAGES: readonly { readonly id: Exclude<ConsoleWorkflowStageId, 'idle'>; r
 ];
 
 export function inferConsoleWorkflowStage(signals: ConsoleWorkflowSignals): ConsoleWorkflowStageId {
+	if (signals.dockerReady === false) {
+		return 'docker';
+	}
 	if (signals.anySurfaceRunning) {
 		return 'running';
 	}
@@ -84,7 +95,23 @@ export function resolveConsoleWorkflowStatus(signals: ConsoleWorkflowSignals): C
 	if (stageId === 'idle') {
 		return {
 			stageId,
-			steps: STAGES.map(stage => ({ ...stage, status: 'pending' as const })),
+			steps: STAGES.map(stage => ({
+				...stage,
+				status: stage.id === 'docker' && signals.dockerReady !== false
+					? 'completed' as const
+					: 'pending' as const,
+			})),
+			nextAction: undefined,
+		};
+	}
+
+	if (stageId === 'docker') {
+		return {
+			stageId,
+			steps: STAGES.map((stage, index) => ({
+				...stage,
+				status: index === 0 ? 'current' as const : 'pending' as const,
+			})),
 			nextAction: undefined,
 		};
 	}
@@ -116,7 +143,7 @@ export function resolveConsoleWorkflowNextAction(
 	signals: ConsoleWorkflowSignals,
 	steps: readonly ConsoleWorkflowStepState[],
 ): ConsoleWorkflowAction | undefined {
-	if (stageId === 'idle' || stageId === 'running') {
+	if (stageId === 'idle' || stageId === 'docker' || stageId === 'running') {
 		return undefined;
 	}
 	if (signals.surfaceCount <= 0) {
@@ -137,11 +164,21 @@ export function resolveConsoleWorkflowNextAction(
 	};
 }
 
-export type ConsoleHomeSection = 'workspacePlan' | 'surfaces' | 'claudeMd' | 'howItWorks' | 'branding' | 'settings';
+export type ConsoleHomeSection =
+	| 'workspacePlan'
+	| 'surfaces'
+	| 'description'
+	| 'docker'
+	| 'claudeMd'
+	| 'howItWorks'
+	| 'branding'
+	| 'settings';
 
 export function isConsoleHomeSection(value: string | undefined): value is ConsoleHomeSection {
 	return value === 'workspacePlan'
 		|| value === 'surfaces'
+		|| value === 'description'
+		|| value === 'docker'
 		|| value === 'claudeMd'
 		|| value === 'howItWorks'
 		|| value === 'branding'

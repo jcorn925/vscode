@@ -108,6 +108,56 @@ export function isClaudeKeyForSurface(key: string, surfaceId: string): boolean {
 }
 
 /**
+ * Stable tab order for live Claude sessions: Workspace → Actions → surfaces
+ * (plain surface before its workstreams) → everything else.
+ */
+export function compareClaudeTerminalTabKeys(a: string, b: string): number {
+	const rank = (key: string): number => {
+		if (key === WORKSPACE_CLAUDE_KEY) {
+			return 0;
+		}
+		if (key === ACTIONS_CLAUDE_KEY) {
+			return 1;
+		}
+		return 2;
+	};
+	const ra = rank(a);
+	const rb = rank(b);
+	if (ra !== rb) {
+		return ra - rb;
+	}
+	const sa = surfaceIdFromClaudeKey(a) ?? a;
+	const sb = surfaceIdFromClaudeKey(b) ?? b;
+	const bySurface = sa.localeCompare(sb);
+	if (bySurface !== 0) {
+		return bySurface;
+	}
+	const wa = parseClaudeWorkstreamKey(a);
+	const wb = parseClaudeWorkstreamKey(b);
+	if (!wa && wb) {
+		return -1;
+	}
+	if (wa && !wb) {
+		return 1;
+	}
+	return a.localeCompare(b);
+}
+
+/** Live (non-disposed) Claude session keys, sorted for the header tab strip. */
+export function listLiveClaudeTerminalKeys(
+	entries: Iterable<readonly [string, { readonly isDisposed?: boolean } | undefined]>,
+): string[] {
+	const out: string[] = [];
+	for (const [key, terminal] of entries) {
+		if (!key || terminal?.isDisposed) {
+			continue;
+		}
+		out.push(key);
+	}
+	return out.sort(compareClaudeTerminalTabKeys);
+}
+
+/**
  * Workstream / serialize Claude keys for `surfaceId` among `keys`.
  * Ignores the plain surface key and reserved workspace/actions keys.
  */
