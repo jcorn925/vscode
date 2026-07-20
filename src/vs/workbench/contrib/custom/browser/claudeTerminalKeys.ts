@@ -158,6 +158,47 @@ export function listLiveClaudeTerminalKeys(
 }
 
 /**
+ * Whether incidental `terminalService.onDidChangeInstances` should force-show the
+ * selection-preferred Claude session. False while the UI is switching/closing tabs,
+ * when the preferred session is already attached, or when another tab is visible.
+ */
+export function shouldRebindClaudeTerminalToSelection(options: {
+	readonly uiMutationDepth: number;
+	readonly selectionKey: string | undefined;
+	readonly visibleKey: string | undefined;
+	readonly selectionTerminalAvailable: boolean;
+	readonly visibleIsSelectionAttached: boolean;
+}): boolean {
+	if (options.uiMutationDepth > 0) {
+		return false;
+	}
+	if (!options.selectionKey || !options.selectionTerminalAvailable) {
+		return false;
+	}
+	if (options.visibleIsSelectionAttached) {
+		return false;
+	}
+	// User (or close-handler) already parked on a different live tab — don't snap back.
+	if (options.visibleKey && options.visibleKey !== options.selectionKey) {
+		return false;
+	}
+	return true;
+}
+
+/** True when two Claude tab key lists are identical (order-sensitive). */
+export function claudeTerminalTabKeysEqual(a: readonly string[], b: readonly string[]): boolean {
+	if (a.length !== b.length) {
+		return false;
+	}
+	for (let i = 0; i < a.length; i++) {
+		if (a[i] !== b[i]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
  * Workstream / serialize Claude keys for `surfaceId` among `keys`.
  * Ignores the plain surface key and reserved workspace/actions keys.
  */

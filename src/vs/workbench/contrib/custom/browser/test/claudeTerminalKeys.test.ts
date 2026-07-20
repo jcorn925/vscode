@@ -8,6 +8,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/tes
 import {
 	ACTIONS_CLAUDE_KEY,
 	CLAUDE_SERIALIZE_WORKSTREAM_ID,
+	claudeTerminalTabKeysEqual,
 	claudeTerminalTitleFor,
 	claudeWorkstreamKey,
 	isClaudeKeyForSurface,
@@ -17,6 +18,7 @@ import {
 	listLiveClaudeTerminalKeys,
 	parseClaudeTerminalKey,
 	parseClaudeWorkstreamKey,
+	shouldRebindClaudeTerminalToSelection,
 	surfaceIdFromClaudeKey,
 	workstreamClaudeKeysForSurface,
 	WORKSPACE_CLAUDE_KEY,
@@ -104,5 +106,42 @@ suite('claudeTerminalKeys', () => {
 			'cadre-b',
 			'cadre-b::ws-1',
 		]);
+	});
+
+	test('shouldRebindClaudeTerminalToSelection blocks mid-switch and other visible tabs', () => {
+		assert.strictEqual(shouldRebindClaudeTerminalToSelection({
+			uiMutationDepth: 1,
+			selectionKey: 'surface-a',
+			visibleKey: undefined,
+			selectionTerminalAvailable: true,
+			visibleIsSelectionAttached: false,
+		}), false);
+		assert.strictEqual(shouldRebindClaudeTerminalToSelection({
+			uiMutationDepth: 0,
+			selectionKey: 'surface-a',
+			visibleKey: 'surface-b',
+			selectionTerminalAvailable: true,
+			visibleIsSelectionAttached: false,
+		}), false);
+		assert.strictEqual(shouldRebindClaudeTerminalToSelection({
+			uiMutationDepth: 0,
+			selectionKey: 'surface-a',
+			visibleKey: 'surface-a',
+			selectionTerminalAvailable: true,
+			visibleIsSelectionAttached: true,
+		}), false);
+		assert.strictEqual(shouldRebindClaudeTerminalToSelection({
+			uiMutationDepth: 0,
+			selectionKey: 'surface-a',
+			visibleKey: undefined,
+			selectionTerminalAvailable: true,
+			visibleIsSelectionAttached: false,
+		}), true);
+	});
+
+	test('claudeTerminalTabKeysEqual is order-sensitive', () => {
+		assert.ok(claudeTerminalTabKeysEqual(['a', 'b'], ['a', 'b']));
+		assert.ok(!claudeTerminalTabKeysEqual(['a', 'b'], ['b', 'a']));
+		assert.ok(!claudeTerminalTabKeysEqual(['a'], ['a', 'b']));
 	});
 });

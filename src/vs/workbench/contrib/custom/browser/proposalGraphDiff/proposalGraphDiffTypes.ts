@@ -109,6 +109,9 @@ export interface ProposalCompareSnapshot {
 			readonly recall?: number;
 			readonly matched_in_clone?: readonly string[];
 			readonly missing_in_clone?: readonly string[];
+			/** Full match count — matched_in_clone may be truncated (gaps_truncated). */
+			readonly present_count?: number;
+			readonly proposed_count?: number;
 		};
 		readonly edges?: {
 			readonly structural?: {

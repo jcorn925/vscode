@@ -1195,6 +1195,7 @@ export class SurfacePlanPanel extends Disposable {
 	private buildPreviewInfo(options: SurfacePlanPanelLoadOptions): SurfaceProposalTreePreviewInfo {
 		const localUrl = options.localUrl?.trim() || options.surface?.localUrl?.trim();
 		const productionUrl = options.surface?.productionUrl?.trim();
+		const databaseUrl = options.surface?.databaseUrl?.trim();
 		const name = options.surfaceName?.trim() || options.surfaceId;
 		const deployedMessage = productionUrl
 			? localize(
@@ -1207,10 +1208,23 @@ export class SurfacePlanPanel extends Disposable {
 				'{0} has no productionUrl yet. Publish to Vercel (Actions), then write productionUrl on this surface in workspace.goal.json.',
 				name,
 			);
+		const databaseMessage = databaseUrl
+			? localize(
+				'surfacePlan.databaseHint',
+				'Database console at {0}. Select the Database card to show it in Console.',
+				databaseUrl,
+			)
+			: localize(
+				'surfacePlan.databaseMissingUrl',
+				'{0} has no databaseUrl yet. When the surface uses Supabase (or another browsable DB console), write databaseUrl on this surface in workspace.goal.json.',
+				name,
+			);
 		if (!localUrl) {
 			return {
 				productionUrl,
+				databaseUrl,
 				deployedMessage,
+				databaseMessage,
 				message: localize(
 					'surfacePlan.previewMissingUrl',
 					'{0} has no preview URL. Add localUrl to this surface in workspace.goal.json to route the preview.',
@@ -1221,7 +1235,9 @@ export class SurfacePlanPanel extends Disposable {
 		return {
 			localUrl,
 			productionUrl,
+			databaseUrl,
 			deployedMessage,
+			databaseMessage,
 			message: localize(
 				'surfacePlan.previewHint',
 				'Open {0} in a browser, or add a Start command in workspace.goal.json to launch the live app from Console.',

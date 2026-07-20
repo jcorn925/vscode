@@ -28,15 +28,20 @@ suite('orderSurfaceProposalTreeCards', () => {
 			localUrl: 'http://localhost:3000',
 			purposeValue: 'Acquire clients.',
 		});
-		assert.deepStrictEqual(cards.map(c => c.id), ['proposed', 'graph', 'preview', 'deployed', 'description', 'schema', 'plan', 'rules']);
+		assert.deepStrictEqual(cards.map(c => c.id), ['proposed', 'graph', 'preview', 'deployed', 'description', 'schema', 'database', 'plan', 'rules']);
 		assert.strictEqual(cards.find(c => c.id === 'preview')?.value, 'localhost:3000');
 		assert.strictEqual(cards.find(c => c.id === 'deployed')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
+		assert.strictEqual(cards.find(c => c.id === 'database')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(cards.find(c => c.id === 'graph')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(cards.find(c => c.id === 'description')?.value, 'Acquire clients.');
 		assert.strictEqual(cards.find(c => c.id === 'schema')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(
 			staticSurfaceProposalTreeCards({ productionUrl: 'https://cadre.vercel.app' }).find(c => c.id === 'deployed')?.value,
 			'cadre.vercel.app',
+		);
+		assert.strictEqual(
+			staticSurfaceProposalTreeCards({ databaseUrl: 'http://127.0.0.1:54323' }).find(c => c.id === 'database')?.value,
+			'127.0.0.1:54323',
 		);
 		assert.strictEqual(
 			staticSurfaceProposalTreeCards().find(c => c.id === 'description')?.value,
@@ -173,7 +178,7 @@ suite('orderSurfaceProposalTreeCards', () => {
 		);
 		assert.deepStrictEqual(
 			[...SURFACE_PROPOSAL_TREE_SECTION_ORDER].filter(id => id !== 'removals'),
-			['phases', 'proposed', 'graph', 'preview', 'deployed', 'description', 'schema', 'context', 'plan', 'rules'],
+			['phases', 'proposed', 'graph', 'preview', 'deployed', 'description', 'schema', 'database', 'context', 'plan', 'rules'],
 		);
 	});
 
@@ -184,6 +189,7 @@ suite('orderSurfaceProposalTreeCards', () => {
 			{ id: 'preview', key: 'Preview', value: 'URL' },
 			{ id: 'description', key: 'Description', value: 'Purpose' },
 			{ id: 'schema', key: 'Schema', value: 'SQL' },
+			{ id: 'database', key: 'Database', value: '127.0.0.1:54323' },
 			{ id: 'context', key: 'Repo Context', value: '2/5' },
 			{ id: 'phases', key: 'Build phases', value: '4' },
 			{ id: 'plan', key: 'Plan', value: 'plan.md' },
@@ -191,19 +197,19 @@ suite('orderSurfaceProposalTreeCards', () => {
 		];
 		assert.deepStrictEqual(
 			orderSurfaceProposalTreeCards(cards, 'phases').map(c => c.id),
-			['phases', 'proposed', 'graph', 'preview', 'description', 'schema', 'context', 'plan', 'rules'],
+			['phases', 'proposed', 'graph', 'preview', 'description', 'schema', 'database', 'context', 'plan', 'rules'],
 		);
 		assert.deepStrictEqual(
 			orderSurfaceProposalTreeCards(cards, 'graph').map(c => c.id),
-			['graph', 'phases', 'proposed', 'preview', 'description', 'schema', 'context', 'plan', 'rules'],
+			['graph', 'phases', 'proposed', 'preview', 'description', 'schema', 'database', 'context', 'plan', 'rules'],
 		);
 		assert.deepStrictEqual(
 			orderSurfaceProposalTreeCards(cards, 'missing').map(c => c.id),
-			['phases', 'proposed', 'graph', 'preview', 'description', 'schema', 'context', 'plan', 'rules'],
+			['phases', 'proposed', 'graph', 'preview', 'description', 'schema', 'database', 'context', 'plan', 'rules'],
 		);
 		assert.deepStrictEqual(
 			orderSurfaceProposalTreeCards(cards, 'preview').map(c => c.id),
-			['preview', 'phases', 'proposed', 'graph', 'description', 'schema', 'context', 'plan', 'rules'],
+			['preview', 'phases', 'proposed', 'graph', 'description', 'schema', 'database', 'context', 'plan', 'rules'],
 		);
 		const withDeployed: SurfaceProposalTreeCardItem[] = [
 			...cards,
@@ -211,7 +217,7 @@ suite('orderSurfaceProposalTreeCards', () => {
 		];
 		assert.deepStrictEqual(
 			orderSurfaceProposalTreeCards(withDeployed, 'deployed').map(c => c.id),
-			['deployed', 'phases', 'proposed', 'graph', 'preview', 'description', 'schema', 'context', 'plan', 'rules'],
+			['deployed', 'phases', 'proposed', 'graph', 'preview', 'description', 'schema', 'database', 'context', 'plan', 'rules'],
 		);
 	});
 

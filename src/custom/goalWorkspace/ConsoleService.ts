@@ -56,6 +56,11 @@ export interface WorkspaceSurface {
 	readonly localUrl?: string;
 	/** Public production URL after deploy (e.g. https://….vercel.app). */
 	readonly productionUrl?: string;
+	/**
+	 * Browser URL for a database console / Studio (e.g. local Supabase Studio
+	 * http://127.0.0.1:54323 or a hosted project dashboard). Powers the Database rail card.
+	 */
+	readonly databaseUrl?: string;
 	readonly purpose?: string;
 	/** Structured data model (SQL/NoSQL/none) — see `surfaces[].schema`. */
 	readonly schema?: SurfaceSchema;
@@ -1089,6 +1094,7 @@ function parseSurface(raw: unknown, index: number, diagnostics: WorkspaceDiagnos
 		devCommand: optionalString(raw, 'devCommand', `${basePath}.devCommand`, diagnostics),
 		localUrl: optionalLocalPreviewUrl(raw, 'localUrl', `${basePath}.localUrl`, diagnostics),
 		productionUrl: optionalProductionUrl(raw, 'productionUrl', `${basePath}.productionUrl`, diagnostics),
+		databaseUrl: optionalHttpUrl(raw, 'databaseUrl', `${basePath}.databaseUrl`, diagnostics),
 		purpose: optionalString(raw, 'purpose', `${basePath}.purpose`, diagnostics),
 		...(schema ? { schema } : {}),
 		capabilities: optionalStringArray(raw, 'capabilities', `${basePath}.capabilities`, diagnostics),
@@ -1258,6 +1264,26 @@ function optionalProductionUrl(raw: Record<string, unknown>, key: string, path: 
 	}
 	if (isLocalPreviewHostname(url.hostname)) {
 		diagnostics.push({ path, message: 'Expected a public production URL, not localhost.' });
+		return undefined;
+	}
+	return value;
+}
+
+/** Any http(s) URL — local Studio or hosted dashboard (Database card). */
+function optionalHttpUrl(raw: Record<string, unknown>, key: string, path: string, diagnostics: WorkspaceDiagnostic[]): string | undefined {
+	const value = optionalString(raw, key, path, diagnostics);
+	if (value === undefined) {
+		return undefined;
+	}
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		diagnostics.push({ path, message: 'Expected a valid http(s) URL.' });
+		return undefined;
+	}
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+		diagnostics.push({ path, message: 'Expected an http(s) URL.' });
 		return undefined;
 	}
 	return value;

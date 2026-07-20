@@ -58,7 +58,11 @@ function matchedNodeSet(proposal: GraphProposalDocument, snapshot: ProposalCompa
 	const addNodes = proposal.add_nodes ?? [];
 	const missing = new Set(snapshot.comparison?.nodes?.missing_in_clone ?? []);
 	const matchedFromSnap = snapshot.comparison?.nodes?.matched_in_clone;
-	if (matchedFromSnap) {
+	// matched_in_clone may be truncated (gaps_truncated) — only trust it when it
+	// covers present_count; otherwise derive matched = proposed − missing.
+	const presentCount = snapshot.comparison?.nodes?.present_count;
+	if (matchedFromSnap
+		&& (typeof presentCount !== 'number' || matchedFromSnap.length >= presentCount)) {
 		return new Set(matchedFromSnap.filter(id => addNodes.includes(id)));
 	}
 	return new Set(addNodes.filter(id => !missing.has(id)));

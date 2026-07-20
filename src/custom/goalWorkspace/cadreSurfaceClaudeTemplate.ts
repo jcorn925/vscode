@@ -134,6 +134,12 @@ When a surface Plan UI kicks **Regen Schema**:
    (client state, prompt-stuffed KB, files only, etc.).
 4. Do NOT edit purpose, plan.md, proposals, or other surfaces. Stop when schema
    is written.
+5. When the surface has a browsable database console (e.g. local Supabase Studio
+   at \`http://127.0.0.1:54323\`, or a hosted Supabase project dashboard), also
+   write \`databaseUrl\` on that surface in \`workspace.goal.json\` so the Console
+   **Database** rail card can open it. Leave \`databaseUrl\` unset when there is
+   no console URL. Schema (structured model) and Database (live webview) are
+   separate — do not put Studio URLs inside \`schema\`.
 
 ## Phase progress contract (generate)
 
@@ -299,7 +305,7 @@ it is machine-global for every ix client on this host.
 | \`.agent/surfaces/<id>.phase-progress.json\` | Claude↔Console phase handshake (\`running\` / \`completed\` / \`failed\`) |
 | \`.agent/surfaces/<id>.workflow.json\` | Console-owned Steps row (do not invent completions) |
 | \`.agent/surfaces/<id>.blockers.json\` | Operational blockers (env keys / agent-declared gaps) |
-| \`workspace.goal.json\` | Surface registry — Preview needs \`localUrl\` + \`devCommand\`; Deployed needs \`productionUrl\` |
+| \`workspace.goal.json\` | Surface registry — Preview needs \`localUrl\` + \`devCommand\`; Deployed needs \`productionUrl\`; Database console needs \`databaseUrl\` (optional) |
 | \`.agent/references/*\` | Shallow clones for planning maps only |
 
 ### Plan vs Proposal split
@@ -517,6 +523,7 @@ export function buildSurfaceSchemaRegenPrompt(options: {
 		`Write only surfaces[id=${surfaceId}].schema as a JSON object:`,
 		`{ "dbKind": "sql"|"nosql"|"none", "engine"?: string, "summary"?: string, "entities": [{ "name": string, "kind": "table"|"collection", "fields": [{ "name": string, "type"?: string, "pk"?: boolean, "notes"?: string }], "notes"?: string }] }.`,
 		`Use dbKind "none" and entities [] when there is no database.`,
+		`When a browsable console exists (e.g. local Supabase Studio http://127.0.0.1:54323), also write surfaces[id=${surfaceId}].databaseUrl; leave it unset when there is none.`,
 		`Do NOT edit purpose, other surfaces, plan.md, or scaffold code. Stop when schema is written.`,
 	].join(' ');
 }

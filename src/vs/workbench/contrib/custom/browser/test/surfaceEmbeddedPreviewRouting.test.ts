@@ -22,29 +22,45 @@ suite('surfaceEmbeddedPreviewRouting', () => {
 		}
 	};
 
-	test('only preview and deployed are live rail sections', () => {
+	test('preview, deployed, and database are live rail sections', () => {
 		assert.strictEqual(isLiveSurfaceRailSection('preview'), true);
 		assert.strictEqual(isLiveSurfaceRailSection('deployed'), true);
+		assert.strictEqual(isLiveSurfaceRailSection('database'), true);
 		assert.strictEqual(isLiveSurfaceRailSection('proposed'), false);
+		assert.strictEqual(isLiveSurfaceRailSection('schema'), false);
 		assert.strictEqual(isLiveSurfaceRailSection('plan'), false);
 		assert.strictEqual(isLiveSurfaceRailSection(undefined), false);
 	});
 
-	test('resolveLiveSurfaceEmbeddedUrl picks production only for deployed', () => {
+	test('resolveLiveSurfaceEmbeddedUrl picks the URL for each live section', () => {
 		assert.strictEqual(resolveLiveSurfaceEmbeddedUrl({
 			sectionId: 'deployed',
 			localUrl: 'http://localhost:3100',
 			productionUrl: 'https://cadre-support-bot-jade.vercel.app',
+			databaseUrl: 'http://127.0.0.1:54323',
 		}), 'https://cadre-support-bot-jade.vercel.app');
 		assert.strictEqual(resolveLiveSurfaceEmbeddedUrl({
 			sectionId: 'preview',
 			localUrl: 'http://localhost:3100',
 			productionUrl: 'https://cadre-support-bot-jade.vercel.app',
+			databaseUrl: 'http://127.0.0.1:54323',
 		}), 'http://localhost:3100');
+		assert.strictEqual(resolveLiveSurfaceEmbeddedUrl({
+			sectionId: 'database',
+			localUrl: 'http://localhost:3100',
+			productionUrl: 'https://cadre-support-bot-jade.vercel.app',
+			databaseUrl: 'http://127.0.0.1:54323',
+		}), 'http://127.0.0.1:54323');
+		assert.strictEqual(resolveLiveSurfaceEmbeddedUrl({
+			sectionId: 'database',
+			localUrl: 'http://localhost:3100',
+			productionUrl: 'https://cadre-support-bot-jade.vercel.app',
+		}), undefined);
 		assert.strictEqual(resolveLiveSurfaceEmbeddedUrl({
 			sectionId: 'proposed',
 			localUrl: 'http://localhost:3100',
 			productionUrl: 'https://cadre-support-bot-jade.vercel.app',
+			databaseUrl: 'http://127.0.0.1:54323',
 		}), undefined);
 	});
 
@@ -99,10 +115,17 @@ suite('surfaceEmbeddedPreviewRouting', () => {
 			urlsShareOrigin: shareOrigin,
 			previewReachable: true,
 		}), true);
-		// Deployed is unaffected by previewReachable.
+		// Deployed / Database are unaffected by previewReachable.
 		assert.strictEqual(shouldAssignEmbeddedUrlForRailSection({
 			sectionId: 'deployed',
 			targetUrl: 'https://cadre-eval-harness.vercel.app',
+			currentUrl: undefined,
+			urlsShareOrigin: shareOrigin,
+			previewReachable: false,
+		}), true);
+		assert.strictEqual(shouldAssignEmbeddedUrlForRailSection({
+			sectionId: 'database',
+			targetUrl: 'http://127.0.0.1:54323',
 			currentUrl: undefined,
 			urlsShareOrigin: shareOrigin,
 			previewReachable: false,

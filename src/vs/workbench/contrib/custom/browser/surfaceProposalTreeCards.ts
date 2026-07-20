@@ -51,6 +51,7 @@ export const SURFACE_PROPOSAL_TREE_SECTION_ORDER = [
 	'deployed',
 	'description',
 	'schema',
+	'database',
 	'context',
 	'plan',
 	'rules',
@@ -86,7 +87,7 @@ export function surfaceDescriptionCardValue(purpose?: string): string {
 	return `${firstLine.slice(0, 27).trimEnd()}…`;
 }
 
-/** Compact host/path badge for Preview / Deployed cards (full URL opens on click). */
+/** Compact host/path badge for Preview / Deployed / Database cards (full URL opens on click). */
 export function surfaceUrlCardValue(url?: string, maxLen = 28): string {
 	const trimmed = url?.trim();
 	if (!trimmed) {
@@ -103,7 +104,7 @@ export function surfaceUrlCardValue(url?: string, maxLen = 28): string {
 }
 
 /**
- * When a Preview/Deployed card has a clickable URL but a placeholder value, show the
+ * When a Preview/Deployed/Database card has a clickable URL but a placeholder value, show the
  * host badge instead of a link-styled "—" (which reads as a blue "=" in the rail).
  */
 export function resolveSurfaceUrlRailCardValue(options: {
@@ -124,6 +125,7 @@ export function resolveSurfaceUrlRailCardValue(options: {
 export function staticSurfaceProposalTreeCards(options?: {
 	readonly localUrl?: string;
 	readonly productionUrl?: string;
+	readonly databaseUrl?: string;
 	readonly purposeValue?: string;
 	readonly schema?: SurfaceSchema;
 	readonly schemaValue?: string;
@@ -164,6 +166,11 @@ export function staticSurfaceProposalTreeCards(options?: {
 			value: options?.schemaValue?.trim()
 				|| surfaceSchemaCardValue(options?.schema)
 				|| SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+		},
+		{
+			id: 'database',
+			key: 'Database',
+			value: surfaceUrlCardValue(options?.databaseUrl),
 		},
 		{
 			id: 'plan',
@@ -221,6 +228,7 @@ export function surfaceProposedGraphCardValue(options: {
 export function surfaceProposalTreeCardsFromDocument(options: {
 	readonly localUrl?: string;
 	readonly productionUrl?: string;
+	readonly databaseUrl?: string;
 	readonly purposeValue?: string;
 	readonly schema?: SurfaceSchema;
 	readonly planMarkdown?: string;
@@ -235,6 +243,7 @@ export function surfaceProposalTreeCardsFromDocument(options: {
 		...staticSurfaceProposalTreeCards({
 			localUrl: options.localUrl,
 			productionUrl: options.productionUrl,
+			databaseUrl: options.databaseUrl,
 			purposeValue: options.purposeValue,
 			schema: options.schema,
 			proposedValue: surfaceProposedGraphCardValue({

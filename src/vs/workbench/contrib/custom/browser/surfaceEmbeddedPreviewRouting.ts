@@ -4,25 +4,29 @@
  *--------------------------------------------------------------------------------------------*/
 
 /**
- * Preview / Deployed rail cards own the embedded Console webview URL.
- * Other section cards (Proposed, Plan, Graph, …) only change the plan column —
+ * Preview / Deployed / Database rail cards own the embedded Console webview URL.
+ * Other section cards (Proposed, Plan, Graph, Schema, …) only change the plan column —
  * keep the webview on its last URL so flipping rail cards does not reload Next.
  */
 export function isLiveSurfaceRailSection(sectionId: string | undefined): boolean {
-	return sectionId === 'preview' || sectionId === 'deployed';
+	return sectionId === 'preview' || sectionId === 'deployed' || sectionId === 'database';
 }
 
-/** Target URL for the focused live rail card (Deployed → production, Preview → local). */
+/** Target URL for the focused live rail card. */
 export function resolveLiveSurfaceEmbeddedUrl(input: {
 	readonly sectionId: string | undefined;
 	readonly localUrl?: string;
 	readonly productionUrl?: string;
+	readonly databaseUrl?: string;
 }): string | undefined {
 	if (input.sectionId === 'deployed') {
 		return input.productionUrl?.trim() || undefined;
 	}
 	if (input.sectionId === 'preview') {
 		return input.localUrl?.trim() || undefined;
+	}
+	if (input.sectionId === 'database') {
+		return input.databaseUrl?.trim() || undefined;
 	}
 	return undefined;
 }

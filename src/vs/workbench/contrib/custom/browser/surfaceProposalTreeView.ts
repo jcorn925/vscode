@@ -50,8 +50,11 @@ export interface SurfaceProposalTreePreviewInfo {
 	readonly localUrl?: string;
 	/** Public Vercel / production URL for the Deployed card. */
 	readonly productionUrl?: string;
+	/** Database console / Studio URL for the Database card. */
+	readonly databaseUrl?: string;
 	readonly message: string;
 	readonly deployedMessage?: string;
+	readonly databaseMessage?: string;
 }
 
 export interface SurfaceProposalTreeDocumentOptions {
@@ -257,6 +260,7 @@ export class SurfaceProposalTreeView extends Disposable {
 		this._onDidChangeCards.fire(surfaceProposalTreeCardsFromDocument({
 			localUrl: options.previewInfo?.localUrl,
 			productionUrl: options.previewInfo?.productionUrl,
+			databaseUrl: options.previewInfo?.databaseUrl,
 			purposeValue: options.surfacePurpose,
 			schema: options.surfaceSchema,
 			planMarkdown: options.planMarkdown,
@@ -2400,6 +2404,9 @@ export class SurfaceProposalTreeView extends Disposable {
 				cards.push(metaCard('deployed', 'Deployed', previewInfo?.productionUrl
 					? String(previewInfo.productionUrl).replace(/^https?:\\/\\//i, '').replace(/\\/$/, '') || '—'
 					: '—'));
+				cards.push(metaCard('database', 'Database', previewInfo?.databaseUrl
+					? String(previewInfo.databaseUrl).replace(/^https?:\\/\\//i, '').replace(/\\/$/, '') || '—'
+					: '—'));
 
 				const intentFromPlan = (() => {
 					if (!planMarkdown || !planMarkdown.trim()) {
@@ -2488,6 +2495,22 @@ export class SurfaceProposalTreeView extends Disposable {
 				));
 				deployedSection.append(deployedBody);
 				sectionById.deployed = deployedSection;
+
+				const databaseSection = section('database', 'Database console', previewInfo?.databaseUrl ? 'url' : '—', false);
+				const databaseBody = el('div', 'preview-body');
+				if (previewInfo?.databaseUrl) {
+					databaseBody.append(el('p', 'preview-url', previewInfo.databaseUrl));
+				}
+				databaseBody.append(el(
+					'p',
+					'preview-message',
+					previewInfo?.databaseMessage
+						|| (previewInfo?.databaseUrl
+							? 'Database console — shown in the Console pane when this card is selected.'
+							: 'No database console yet. When this surface uses Supabase (or another browsable DB), set databaseUrl on this surface in workspace.goal.json.'),
+				));
+				databaseSection.append(databaseBody);
+				sectionById.database = databaseSection;
 
 				const descriptionSection = section('description', 'Description', descriptionBadge, false);
 				const descriptionRegen = el('button', 'graph-regenerate-btn', 'Regen Description');

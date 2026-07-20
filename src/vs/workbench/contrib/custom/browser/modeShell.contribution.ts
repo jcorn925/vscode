@@ -263,6 +263,7 @@ import {
 	surfaceIdFromRailParentId,
 } from './workspaceHomeRailHover.js';
 import {
+	claudeTerminalTabKeysEqual,
 	claudeTerminalTitleFor,
 	isClaudeKeyForSurface,
 	ACTIONS_CLAUDE_KEY,
@@ -272,6 +273,7 @@ import {
 	listLiveClaudeTerminalKeys,
 	parseClaudeTerminalKey,
 	parseClaudeWorkstreamKey,
+	shouldRebindClaudeTerminalToSelection,
 	surfaceIdFromClaudeKey,
 	workstreamClaudeKeysForSurface,
 	WORKSPACE_CLAUDE_KEY,
@@ -449,8 +451,13 @@ class ModeShellContribution extends Disposable {
 	 */
 	private claudeTerminalSyncDepth = 0;
 	private pendingClaudeWorkstreamActiveKey: string | undefined;
+	/** Last rendered Claude header tab keys — skip full rebuild when only active changes. */
+	private lastClaudeTerminalTabKeys: string[] = [];
 	private readonly syncClaudeWorkstreamSwitcherScheduler = this._register(new RunOnceScheduler(() => {
-		this.syncClaudeWorkstreamSwitcher(this.pendingClaudeWorkstreamActiveKey);
+		// Prefer the currently visible tab over a stale queued key (dispose races).
+		this.syncClaudeWorkstreamSwitcher(
+			this.visibleClaudeTerminalKey ?? this.pendingClaudeWorkstreamActiveKey,
+		);
 	}, 0));
 	private claudeTerminalHeight = CLAUDE_TERMINAL_DEFAULT_HEIGHT;
 	private claudeTerminalCollapsed = true;
@@ -7403,28 +7410,25 @@ class ModeShellContribution extends Disposable {
 		this._register(toDisposable(() => claudeHostObserver.disconnect()));
 		void this.restoreClaudeTerminalSession();
 		this._register(this.terminalService.onDidChangeInstances(() => {
-			// Close / prune / intentional switch dispose PTYs — don't fight their next-tab pick.
-			if (this.claudeTerminalUiMutationDepth > 0) {
-				return;
-			}
-			const key = this.resolveClaudeTerminalKeyForSelection();
-			if (!key) {
-				return;
-			}
 			// Persisted PTYs often appear after the first restore attempt — rebind when
 			// the preferred key has a terminal but the host is still empty.
 			this.syncClaudeTerminalMapFromService();
-			const restored = this.findClaudeTerminalInstance(key);
-			if (!restored) {
-				return;
-			}
+			const key = this.resolveClaudeTerminalKeyForSelection();
+			const restored = key ? this.findClaudeTerminalInstance(key) : undefined;
 			const visible = this.getVisibleClaudeTerminalInstance();
-			if (visible === restored && restored.domElement?.parentElement === this.uiClaudeTerminalHost) {
-				return;
-			}
-			// Only auto-reattach when the host is empty for the preferred key — never
-			// override a different visible workstream tab on incidental dispose events.
-			if (visible && this.visibleClaudeTerminalKey && this.visibleClaudeTerminalKey !== key) {
+			const visibleAttached = Boolean(
+				visible
+				&& restored
+				&& visible === restored
+				&& restored.domElement?.parentElement === this.uiClaudeTerminalHost,
+			);
+			if (!shouldRebindClaudeTerminalToSelection({
+				uiMutationDepth: this.claudeTerminalUiMutationDepth,
+				selectionKey: key,
+				visibleKey: this.visibleClaudeTerminalKey,
+				selectionTerminalAvailable: Boolean(restored),
+				visibleIsSelectionAttached: visibleAttached,
+			})) {
 				return;
 			}
 			this.showClaudeTerminalForKey(key);
@@ -9425,7 +9429,7 @@ class ModeShellContribution extends Disposable {
 					} else {
 						this.activeRailCardId = id;
 						this.uiWorkspaceHomeCardRail.setActiveId(id, []);
-						this.surfaceMainView = (sectionId === 'preview' || sectionId === 'deployed') ? 'preview' : 'plan';
+						this.surfaceMainView = isLiveSurfaceRailSection(sectionId) ? 'preview' : 'plan';
 						this.syncSurfaceMainView();
 						this.surfacePlanPanel?.selectSection(sectionId);
 					}
@@ -10660,7 +10664,7 @@ class ModeShellContribution extends Disposable {
 	private selectSurfaceSectionCard(surfaceId: string, sectionId: string): void {
 		const id = `surfaceSection:${sectionId}`;
 		this.activeRailCardId = id;
-		const livePane = sectionId === 'preview' || sectionId === 'deployed';
+		const livePane = isLiveSurfaceRailSection(sectionId);
 		this.surfaceMainView = livePane ? 'preview' : 'plan';
 		this.persistSurfaceMainView(surfaceId, this.surfaceMainView);
 		this.persistSurfaceSection(surfaceId, sectionId);
@@ -10971,6 +10975,7 @@ class ModeShellContribution extends Disposable {
 		return this.toSurfaceRailSectionCards(staticSurfaceProposalTreeCards({
 			localUrl: surface.localUrl,
 			productionUrl: surface.productionUrl,
+			databaseUrl: surface.databaseUrl,
 			purposeValue: surface.purpose,
 			schema: surface.schema,
 		}), surface);
@@ -13429,8 +13434,9 @@ class ModeShellContribution extends Disposable {
 			this.queueSyncClaudeWorkstreamSwitcher(activeKey);
 			return;
 		}
-		this.claudeTerminalKeyTabListeners.clear();
 		const hideTabs = () => {
+			this.lastClaudeTerminalTabKeys = [];
+			this.claudeTerminalKeyTabListeners.clear();
 			this.uiClaudeTerminalKeyTabs.classList.add('hidden');
 			clearNode(this.uiClaudeTerminalKeyTabs);
 			this.uiClaudeTerminalKeyLabel?.classList.remove('hidden');
@@ -13441,7 +13447,20 @@ class ModeShellContribution extends Disposable {
 			hideTabs();
 			return;
 		}
+		// Same session set: only flip active classes — full rebuild destroys the button
+		// under the cursor and drops mid-click tab switches while Claude streams.
+		if (
+			claudeTerminalTabKeysEqual(this.lastClaudeTerminalTabKeys, liveKeys)
+			&& this.uiClaudeTerminalKeyTabs.childElementCount > 0
+		) {
+			this.patchClaudeTerminalTabActive(activeKey);
+			this.uiClaudeTerminalKeyTabs.classList.remove('hidden');
+			this.uiClaudeTerminalKeyLabel.classList.add('hidden');
+			return;
+		}
+		this.claudeTerminalKeyTabListeners.clear();
 		clearNode(this.uiClaudeTerminalKeyTabs);
+		this.lastClaudeTerminalTabKeys = [...liveKeys];
 		const activeSurfaceId = activeKey ? surfaceIdFromClaudeKey(activeKey) : undefined;
 		const hasWorkstreamTabs = activeSurfaceId
 			? liveKeys.some(key => {
@@ -13506,6 +13525,28 @@ class ModeShellContribution extends Disposable {
 		this.uiClaudeTerminalKeyLabel.classList.add('hidden');
 	}
 
+	/** Update selected styling without recreating tab DOM. */
+	private patchClaudeTerminalTabActive(activeKey: string | undefined): void {
+		if (!this.uiClaudeTerminalKeyTabs) {
+			return;
+		}
+		const wraps = this.uiClaudeTerminalKeyTabs.querySelectorAll('.custom-mode-ui-claude-terminal-key-tab-wrap');
+		let index = 0;
+		for (const key of this.lastClaudeTerminalTabKeys) {
+			const wrap = wraps.item(index++) as HTMLElement | null;
+			if (!wrap) {
+				continue;
+			}
+			const active = key === activeKey;
+			wrap.classList.toggle('active', active);
+			const tab = wrap.querySelector('.custom-mode-ui-claude-terminal-key-tab');
+			if (tab instanceof HTMLElement) {
+				tab.classList.toggle('active', active);
+				tab.setAttribute('aria-selected', active ? 'true' : 'false');
+			}
+		}
+	}
+
 	/** Short header-tab label for a Claude session key. */
 	private claudeTerminalTabLabel(key: string): string {
 		if (key === WORKSPACE_CLAUDE_KEY) {
@@ -13560,38 +13601,45 @@ class ModeShellContribution extends Disposable {
 	 * Surface / Console card selection must not force Claude open.
 	 */
 	private showClaudeTerminalForKey(key: string | undefined, options?: { reveal?: boolean }): void {
-		if (options?.reveal) {
-			this.setClaudeTerminalCollapsed(false);
-			this.scheduleClaudeTerminalHide();
-		} else if (!this.claudeTerminalCollapsed) {
-			// Already open — keep open and refresh the idle timer while switching sessions.
-			this.scheduleClaudeTerminalHide();
-		}
-		this.syncClaudeTerminalMapFromService();
-		if (key && this.visibleClaudeTerminalKey === key) {
-			const current = this.claudeTerminalByKey.get(key);
-			if (current && !current.isDisposed) {
-				// Re-attach if the PTY is registered but no longer in the host (e.g. after detach race).
-				if (current.domElement?.parentElement !== this.uiClaudeTerminalHost) {
-					this.attachClaudeTerminalToHost(key, current);
+		// Guard onDidChangeInstances during detach→attach — clearing visibleClaudeTerminalKey
+		// mid-switch previously let selection rebind snap the tab back.
+		this.claudeTerminalUiMutationDepth++;
+		try {
+			if (options?.reveal) {
+				this.setClaudeTerminalCollapsed(false);
+				this.scheduleClaudeTerminalHide();
+			} else if (!this.claudeTerminalCollapsed) {
+				// Already open — keep open and refresh the idle timer while switching sessions.
+				this.scheduleClaudeTerminalHide();
+			}
+			this.syncClaudeTerminalMapFromService();
+			if (key && this.visibleClaudeTerminalKey === key) {
+				const current = this.claudeTerminalByKey.get(key);
+				if (current && !current.isDisposed) {
+					// Re-attach if the PTY is registered but no longer in the host (e.g. after detach race).
+					if (current.domElement?.parentElement !== this.uiClaudeTerminalHost) {
+						this.attachClaudeTerminalToHost(key, current);
+						return;
+					}
+					this.updateClaudeTerminalKeyLabel(key);
+					this.uiClaudeTerminalEmpty.classList.add('hidden');
 					return;
 				}
-				this.updateClaudeTerminalKeyLabel(key);
-				this.uiClaudeTerminalEmpty.classList.add('hidden');
+			}
+			this.detachVisibleClaudeTerminal();
+			if (!key) {
+				this.showClaudeTerminalEmpty(undefined);
 				return;
 			}
+			const terminal = this.findClaudeTerminalInstance(key);
+			if (!terminal) {
+				this.ensureClaudeTerminalInitialized(key, options);
+				return;
+			}
+			this.attachClaudeTerminalToHost(key, terminal);
+		} finally {
+			this.claudeTerminalUiMutationDepth--;
 		}
-		this.detachVisibleClaudeTerminal();
-		if (!key) {
-			this.showClaudeTerminalEmpty(undefined);
-			return;
-		}
-		const terminal = this.findClaudeTerminalInstance(key);
-		if (!terminal) {
-			this.ensureClaudeTerminalInitialized(key, options);
-			return;
-		}
-		this.attachClaudeTerminalToHost(key, terminal);
 	}
 
 	/**
@@ -14651,6 +14699,7 @@ class ModeShellContribution extends Disposable {
 		const next = this.toSurfaceRailSectionCards(staticSurfaceProposalTreeCards({
 			localUrl: surface.localUrl,
 			productionUrl: surface.productionUrl,
+			databaseUrl: surface.databaseUrl,
 			purposeValue: surface.purpose,
 			schema: surface.schema,
 		}));
@@ -14681,8 +14730,10 @@ class ModeShellContribution extends Disposable {
 				? surface?.localUrl?.trim() || undefined
 				: card.id === 'deployed'
 					? surface?.productionUrl?.trim() || undefined
-					: undefined;
-			const value = (card.id === 'preview' || card.id === 'deployed')
+					: card.id === 'database'
+						? surface?.databaseUrl?.trim() || undefined
+						: undefined;
+			const value = (card.id === 'preview' || card.id === 'deployed' || card.id === 'database')
 				? resolveSurfaceUrlRailCardValue({ value: card.value, href })
 				: card.value;
 			return {
@@ -14994,6 +15045,7 @@ class ModeShellContribution extends Disposable {
 				sectionId: this.activeSurfaceRailSectionId(),
 				localUrl: selectedSurface.localUrl,
 				productionUrl: selectedSurface.productionUrl,
+				databaseUrl: selectedSurface.databaseUrl,
 			});
 			if (live) {
 				return live;
@@ -15021,9 +15073,9 @@ class ModeShellContribution extends Disposable {
 		return this.activeRailCardId === 'surfaceSection:deployed';
 	}
 
-	/** Preview or Deployed — either routes a URL into the embedded Console pane. */
+	/** Preview, Deployed, or Database — routes a URL into the embedded Console pane. */
 	private isLiveUrlSectionSelected(): boolean {
-		return this.isPreviewSectionSelected() || this.isDeployedSectionSelected();
+		return isLiveSurfaceRailSection(this.activeSurfaceRailSectionId());
 	}
 
 	private activeSurfaceRailSectionId(): string | undefined {
@@ -15075,9 +15127,10 @@ class ModeShellContribution extends Disposable {
 					sectionId,
 					localUrl: surface.localUrl,
 					productionUrl: surface.productionUrl,
+					databaseUrl: surface.databaseUrl,
 				});
 				// Non-live rail cards (Proposed / Plan / Graph / …): keep the webview warm.
-				// Only Preview / Deployed assign src — flipping docs must not reload Next.
+				// Only Preview / Deployed / Database assign src — flipping docs must not reload Next.
 				if (!liveSelected) {
 					this.setSurfaceEmptyState(undefined);
 					this.logSelectedSurfaceRoute(surface, this.getEmbeddedUiUrl() || undefined);
@@ -17104,6 +17157,17 @@ class ModeShellContribution extends Disposable {
 				subtitle: localize(
 					'customMode.surfaceMissingDeployedUrlSubtitle',
 					'Publish to Vercel (Actions), then set productionUrl on this surface in workspace.goal.json.',
+				),
+			});
+			return;
+		}
+
+		if (this.activeSurfaceRailSectionId() === 'database') {
+			this.setSurfaceEmptyState({
+				title: localize('customMode.surfaceMissingDatabaseUrlTitle', '{0} has no database console URL', surface.name),
+				subtitle: localize(
+					'customMode.surfaceMissingDatabaseUrlSubtitle',
+					'When this surface uses Supabase (or another browsable DB console), set databaseUrl on this surface in workspace.goal.json.',
 				),
 			});
 			return;

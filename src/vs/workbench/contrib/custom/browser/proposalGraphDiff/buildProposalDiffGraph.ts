@@ -133,8 +133,16 @@ export function buildProposalDiffGraph(
 	const addNodes = [...(proposal.add_nodes ?? [])];
 	const missingNodes = new Set(snapshot.comparison?.nodes?.missing_in_clone ?? []);
 	const matchedFromSnap = snapshot.comparison?.nodes?.matched_in_clone;
+	// compare_proposal truncates matched_in_clone for large graphs (gaps_truncated) —
+	// trusting a short list marks every unlisted node missing. Only use it when it
+	// covers present_count; otherwise derive matched = proposed − missing.
+	const presentCount = snapshot.comparison?.nodes?.present_count;
+	const matchedListComplete = Array.isArray(matchedFromSnap)
+		&& (typeof presentCount !== 'number' || matchedFromSnap.length >= presentCount);
 	const matchedNodes = new Set(
-		matchedFromSnap ?? addNodes.filter(id => !missingNodes.has(id)),
+		matchedListComplete && matchedFromSnap
+			? matchedFromSnap
+			: addNodes.filter(id => !missingNodes.has(id)),
 	);
 	const removalNodes = [...(snapshot.comparison?.removals?.nodes_still_present ?? [])];
 

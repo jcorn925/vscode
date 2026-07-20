@@ -105,6 +105,7 @@ suite('cadreSurfaceClaudeTemplate', () => {
 		assert.ok(prompt.includes('apps/cadre-support-bot/'));
 		assert.ok(prompt.includes('dbKind'));
 		assert.ok(prompt.includes('nosql'));
+		assert.ok(prompt.includes('databaseUrl'));
 		assert.ok(prompt.includes('Do NOT edit purpose'));
 	});
 
