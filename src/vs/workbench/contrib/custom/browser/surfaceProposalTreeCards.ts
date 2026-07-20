@@ -30,6 +30,7 @@ export const SURFACE_PROPOSAL_TREE_SECTION_ORDER = [
 	'proposed',
 	'graph',
 	'preview',
+	'deployed',
 	'description',
 	'context',
 	'plan',
@@ -68,6 +69,7 @@ export function surfaceDescriptionCardValue(purpose?: string): string {
 
 export function staticSurfaceProposalTreeCards(options?: {
 	readonly localUrl?: string;
+	readonly productionUrl?: string;
 	readonly purposeValue?: string;
 	readonly proposedValue?: string;
 	readonly graphValue?: string;
@@ -89,6 +91,11 @@ export function staticSurfaceProposalTreeCards(options?: {
 			id: 'preview',
 			key: 'Preview',
 			value: options?.localUrl?.trim() ? 'URL' : SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+		},
+		{
+			id: 'deployed',
+			key: 'Deployed',
+			value: options?.productionUrl?.trim() ? 'Vercel' : SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
 		},
 		{
 			id: 'description',
@@ -122,6 +129,62 @@ export function surfaceGraphRegionsCardValue(regions: readonly SurfaceProposalTr
 		}
 	}
 	return files.size ? `${files.size}·0` : SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE;
+}
+
+/** Proposed Graph badge from proposal add_nodes / add_edges (host-side; no webview round-trip). */
+export function surfaceProposedGraphCardValue(options: {
+	readonly nodeCount?: number;
+	readonly edgeCount?: number;
+}): string {
+	const nodes = Math.max(0, options.nodeCount ?? 0);
+	const edges = Math.max(0, options.edgeCount ?? 0);
+	if (!nodes && !edges) {
+		return SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE;
+	}
+	return `${nodes}·${edges}`;
+}
+
+/**
+ * Host-side rail cards from plan/proposal document fields.
+ * Used so Preview-focused surfaces still upgrade past static "—" placeholders when the
+ * tree webview is hidden and may not post `surfaceProposalTree.cards` back.
+ */
+export function surfaceProposalTreeCardsFromDocument(options: {
+	readonly localUrl?: string;
+	readonly productionUrl?: string;
+	readonly purposeValue?: string;
+	readonly planMarkdown?: string;
+	readonly claudeMdMarkdown?: string;
+	readonly proposedNodeCount?: number;
+	readonly proposedEdgeCount?: number;
+	readonly graphRegions?: readonly SurfaceProposalTreeGraphRegion[];
+	readonly phasesCardValue?: string;
+	readonly contextCardValue?: string;
+}): SurfaceProposalTreeCardItem[] {
+	const cards: SurfaceProposalTreeCardItem[] = [
+		...staticSurfaceProposalTreeCards({
+			localUrl: options.localUrl,
+			productionUrl: options.productionUrl,
+			purposeValue: options.purposeValue,
+			proposedValue: surfaceProposedGraphCardValue({
+				nodeCount: options.proposedNodeCount,
+				edgeCount: options.proposedEdgeCount,
+			}),
+			graphValue: surfaceGraphRegionsCardValue(options.graphRegions ?? []),
+			planValue: options.planMarkdown?.trim() ? 'plan.md' : undefined,
+			// Match webview rail: Rules badge is CLAUDE.md once the document has been published.
+			rulesValue: 'CLAUDE.md',
+		}),
+	];
+	const phases = options.phasesCardValue?.trim();
+	if (phases) {
+		cards.push({ id: 'phases', key: 'Build phases', value: phases });
+	}
+	const context = options.contextCardValue?.trim();
+	if (context) {
+		cards.push({ id: 'context', key: 'Repo Context', value: context });
+	}
+	return orderSurfaceProposalTreeCards(cards);
 }
 
 function sectionOrderRank(id: string): number {

@@ -308,6 +308,9 @@ export async function upsertImportedGoalWorkspaceSurface(
 	} else if (typeof existing.localUrl === 'string' && existing.localUrl.trim()) {
 		surface.localUrl = existing.localUrl.trim();
 	}
+	if (typeof existing.productionUrl === 'string' && existing.productionUrl.trim()) {
+		surface.productionUrl = existing.productionUrl.trim();
+	}
 
 	if (existingIndex >= 0) {
 		surfaces[existingIndex] = surface;

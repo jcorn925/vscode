@@ -29,6 +29,7 @@ import {
 	isClaudeOwnedAutoContinueStage,
 } from './surfacePlanAutoContinue.js';
 import {
+	isSurfaceDeployedWired,
 	isSurfacePlanLocked,
 	isSurfacePreviewWired,
 	resolveSurfacePlanWorkflowStatus,
@@ -115,6 +116,8 @@ export async function resolveSurfacePendingPlanAction(
 		readonly localUrl?: string;
 		readonly devCommand?: string;
 		readonly previewEnabled?: boolean;
+		readonly productionUrl?: string;
+		readonly deployedEnabled?: boolean;
 	},
 ): Promise<SurfacePendingPlanProbe> {
 	const id = surfaceId.trim();
@@ -170,6 +173,9 @@ export async function resolveSurfacePendingPlanAction(
 		previewEnabled: options?.previewEnabled ?? isSurfacePreviewWired({
 			localUrl: options?.localUrl,
 			devCommand: options?.devCommand,
+		}),
+		deployedEnabled: options?.deployedEnabled ?? isSurfaceDeployedWired({
+			productionUrl: options?.productionUrl,
 		}),
 		openBlockers: openBlockerStepRefs(blockers),
 	});

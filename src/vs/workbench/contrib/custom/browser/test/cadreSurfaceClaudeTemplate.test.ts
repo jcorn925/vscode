@@ -94,9 +94,11 @@ suite('cadreSurfaceClaudeTemplate', () => {
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Do not begin generate phases on Plan lock alone'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Enable Preview (Console-owned gate)'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Operational blockers (Console-owned gate)'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Deployed (Console-owned gate)'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('blockers.json'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('localUrl'));
 		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('devCommand'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('productionUrl'));
 	});
 
 	test('CADRE_CLAUDE_SETTINGS_JSON allow-lists inspect script but not python3 -c', () => {

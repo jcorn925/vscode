@@ -53,10 +53,13 @@ import {
 	type SurfaceWorkstreamRunsDocument,
 } from '../../../../../custom/goalWorkspace/surfaceWorkstreamRuns.js';
 import {
+	DEPLOYED_STEP,
+	DEPLOYED_STEP_ID,
 	ENABLE_PREVIEW_STEP,
 	ENABLE_PREVIEW_STEP_ID,
 	VERIFY_GRAPH_STEP,
 	VERIFY_GRAPH_STEP_ID,
+	isSurfaceDeployedWired,
 	isSurfacePlanLocked,
 	isSurfacePreviewWired,
 	markSurfacePlanLocked,
@@ -950,9 +953,23 @@ export class SurfacePlanPanel extends Disposable {
 
 	private buildPreviewInfo(options: SurfacePlanPanelLoadOptions): SurfaceProposalTreePreviewInfo {
 		const localUrl = options.localUrl?.trim() || options.surface?.localUrl?.trim();
+		const productionUrl = options.surface?.productionUrl?.trim();
 		const name = options.surfaceName?.trim() || options.surfaceId;
+		const deployedMessage = productionUrl
+			? localize(
+				'surfacePlan.deployedHint',
+				'Production deploy at {0}. Select the Deployed card to show it in Console.',
+				productionUrl,
+			)
+			: localize(
+				'surfacePlan.deployedMissingUrl',
+				'{0} has no productionUrl yet. Publish to Vercel (Actions), then write productionUrl on this surface in workspace.goal.json.',
+				name,
+			);
 		if (!localUrl) {
 			return {
+				productionUrl,
+				deployedMessage,
 				message: localize(
 					'surfacePlan.previewMissingUrl',
 					'{0} has no preview URL. Add localUrl to this surface in workspace.goal.json to route the preview.',
@@ -962,6 +979,8 @@ export class SurfacePlanPanel extends Disposable {
 		}
 		return {
 			localUrl,
+			productionUrl,
+			deployedMessage,
 			message: localize(
 				'surfacePlan.previewHint',
 				'Open {0} in a browser, or add a Start command in workspace.goal.json to launch the live app from Console.',
@@ -1124,6 +1143,9 @@ export class SurfacePlanPanel extends Disposable {
 			previewEnabled: isSurfacePreviewWired({
 				localUrl: this.lastOptions?.localUrl ?? surface?.localUrl,
 				devCommand: surface?.devCommand,
+			}),
+			deployedEnabled: isSurfaceDeployedWired({
+				productionUrl: surface?.productionUrl,
 			}),
 			openBlockers: openBlockerStepRefs(this.blockersDocument),
 		};
@@ -1748,10 +1770,12 @@ export class SurfacePlanPanel extends Disposable {
 						? VERIFY_GRAPH_STEP.label
 						: stepId === ENABLE_PREVIEW_STEP_ID
 							? ENABLE_PREVIEW_STEP.label
-							: (openBlocker?.label
-								|| this.lastProposalPhases.find(phase => phase.id === stepId)?.title
-								|| rawLabel.replace(/^Retry:\s*/i, '').trim()
-								|| stepId);
+							: stepId === DEPLOYED_STEP_ID
+								? DEPLOYED_STEP.label
+								: (openBlocker?.label
+									|| this.lastProposalPhases.find(phase => phase.id === stepId)?.title
+									|| rawLabel.replace(/^Retry:\s*/i, '').trim()
+									|| stepId);
 					await this.writePhaseProgress(createRunningPhaseProgress({
 						surfaceId: this.lastOptions.surfaceId,
 						stepId,

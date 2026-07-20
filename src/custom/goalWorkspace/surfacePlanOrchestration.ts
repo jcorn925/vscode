@@ -104,7 +104,9 @@ export function buildSurfacePlanOrchestrationPrompt(brief: SurfacePlanOrchestrat
 				? 'Confirm Code Graph should be dispatched to Claude to remap_and_wait + compare_proposal against the surface graph proposal before Enable Preview.'
 				: brief.stepId === 'enable_preview'
 					? 'Confirm Enable Preview should be dispatched to Claude to set localUrl + devCommand on the surface.'
-					: `Confirm phase "${brief.stepLabel}" (${brief.stepId}) should be dispatched to Claude for implementation + Ix verify.`;
+					: brief.stepId === 'deployed'
+						? 'Confirm Deployed should be dispatched to Claude to publish the surface and set productionUrl on the surface.'
+						: `Confirm phase "${brief.stepLabel}" (${brief.stepId}) should be dispatched to Claude for implementation + Ix verify.`;
 
 	return [
 		CUSTOM_AI_PLAN_STEPS_ORCHESTRATION_GUIDANCE,

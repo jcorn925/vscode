@@ -18,6 +18,7 @@ import {
 	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
 	SURFACE_PROPOSAL_TREE_SECTION_ORDER,
 	surfaceDescriptionCardValue,
+	surfaceProposalTreeCardsFromDocument,
 	type SurfaceProposalTreeCardItem,
 	type SurfaceProposalTreeGraphRegion,
 } from './surfaceProposalTreeCards.js';
@@ -39,13 +40,17 @@ export {
 	staticSurfaceProposalTreeCards,
 	surfaceDescriptionCardValue,
 	surfaceGraphRegionsCardValue,
+	surfaceProposalTreeCardsFromDocument,
 	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
 	SURFACE_PROPOSAL_TREE_SECTION_ORDER,
 } from './surfaceProposalTreeCards.js';
 
 export interface SurfaceProposalTreePreviewInfo {
 	readonly localUrl?: string;
+	/** Public Vercel / production URL for the Deployed card. */
+	readonly productionUrl?: string;
 	readonly message: string;
+	readonly deployedMessage?: string;
 }
 
 export interface SurfaceProposalTreeDocumentOptions {
@@ -200,6 +205,24 @@ export class SurfaceProposalTreeView extends Disposable {
 		const phaseRowStatuses = phases.map((phase, index) =>
 			resolvePhaseRowStatus(phase.id, index, options.phaseStatuses, currentPhaseIndex));
 		const phasesProgressBadge = formatPhaseProgressBadge(phases.length, options.phaseStatuses);
+		// Publish rail badges on the host immediately — do not wait for the (possibly hidden)
+		// webview to echo `surfaceProposalTree.cards` after render.
+		const selectedRepos = options.referenceCandidates?.repos.filter(repo => repo.selected).length ?? 0;
+		const totalRepos = options.referenceCandidates?.repos.length ?? 0;
+		this._onDidChangeCards.fire(surfaceProposalTreeCardsFromDocument({
+			localUrl: options.previewInfo?.localUrl,
+			productionUrl: options.previewInfo?.productionUrl,
+			purposeValue: options.surfacePurpose,
+			planMarkdown: options.planMarkdown,
+			claudeMdMarkdown: options.claudeMdMarkdown,
+			proposedNodeCount: options.proposal?.add_nodes?.length,
+			proposedEdgeCount: options.proposal?.add_edges?.length,
+			graphRegions: options.graphRegions,
+			phasesCardValue: phases.length
+				? (phasesProgressBadge || String(phases.length))
+				: undefined,
+			contextCardValue: totalRepos > 0 ? `${selectedRepos}/${totalRepos}` : undefined,
+		}));
 		void this.webview.postMessage({
 			type: 'surfaceProposalTree.setDocument',
 			...options,
@@ -2172,6 +2195,7 @@ export class SurfaceProposalTreeView extends Disposable {
 				cards.push(metaCard('proposed', 'Proposed Graph', proposedGraph.cardValue || '—'));
 				cards.push(metaCard('graph', 'Real Graph', codeGraph.cardValue || '—'));
 				cards.push(metaCard('preview', 'Preview', previewInfo?.localUrl ? 'URL' : '—'));
+				cards.push(metaCard('deployed', 'Deployed', previewInfo?.productionUrl ? 'Vercel' : '—'));
 
 				const intentFromPlan = (() => {
 					if (!planMarkdown || !planMarkdown.trim()) {
@@ -2244,6 +2268,22 @@ export class SurfaceProposalTreeView extends Disposable {
 				previewBody.append(el('p', 'preview-message', previewInfo?.message || 'Preview not configured.'));
 				previewSection.append(previewBody);
 				sectionById.preview = previewSection;
+
+				const deployedSection = section('deployed', 'Deployed (Vercel)', previewInfo?.productionUrl ? 'vercel' : '—', false);
+				const deployedBody = el('div', 'preview-body');
+				if (previewInfo?.productionUrl) {
+					deployedBody.append(el('p', 'preview-url', previewInfo.productionUrl));
+				}
+				deployedBody.append(el(
+					'p',
+					'preview-message',
+					previewInfo?.deployedMessage
+						|| (previewInfo?.productionUrl
+							? 'Production deploy — shown in the Console pane when this card is selected.'
+							: 'Not deployed yet. Use Publish to Vercel (Actions), then set productionUrl on this surface.'),
+				));
+				deployedSection.append(deployedBody);
+				sectionById.deployed = deployedSection;
 
 				const descriptionSection = section('description', 'Description', descriptionBadge, false);
 				if (descriptionBodyText) {

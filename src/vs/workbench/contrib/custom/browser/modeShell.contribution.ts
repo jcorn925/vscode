@@ -8123,46 +8123,78 @@ class ModeShellContribution extends Disposable {
 		if (this.uiStepsPane.classList.contains('hidden')) {
 			return;
 		}
-		// Steps history stays visible whenever Console or a surface is active — never auto-collapse.
-		if (collapsed) {
+		// Console expanded ⇒ Steps stays visible (Steps alone does not force Console).
+		if (collapsed && !this.consoleRailCollapsed) {
 			return;
 		}
 		if (this.stepsCollapsed === collapsed) {
-			this.clearStepsHideTimer();
+			if (!collapsed) {
+				this.clearStepsHideTimer();
+				this.scheduleStepsHide();
+			}
 			return;
 		}
-		this.stepsCollapsed = false;
-		this.uiContainer.classList.remove('custom-mode-ui-steps-collapsed');
-		this.clearStepsHideTimer();
+		this.stepsCollapsed = collapsed;
+		this.uiContainer.classList.toggle('custom-mode-ui-steps-collapsed', collapsed);
+		if (!collapsed) {
+			this.clearStepsHideTimer();
+			this.scheduleStepsHide();
+		} else {
+			this.clearStepsHideTimer();
+		}
 	}
 
 	private scheduleStepsHide(): void {
-		// Intentionally no-op: keep Done/Current/Upcoming history on screen.
+		if (this.stepsHovering || this.uiStepsPane.classList.contains('hidden') || !this.consoleRailCollapsed) {
+			return;
+		}
 		this.clearStepsHideTimer();
+		this.stepsHideTimer = mainWindow.setTimeout(() => {
+			this.stepsHideTimer = undefined;
+			if (!this.stepsHovering && !this.uiStepsPane.classList.contains('hidden') && this.consoleRailCollapsed) {
+				this.setStepsCollapsed(true);
+			}
+		}, CARD_RAIL_AUTO_HIDE_MS);
 	}
 
-	/** Console card column shown ⇒ ensure Steps is expanded; Steps does not open Console. */
+	/** One-way couple: Console card column shown ⇒ Steps shown; Steps does not open Console. */
 	private onConsoleRailCollapsedChange(collapsed: boolean): void {
 		this.consoleRailCollapsed = collapsed;
 		if (!collapsed) {
 			this.setStepsCollapsed(false);
+			return;
+		}
+		// Collapse together on the same clock — do not start a second Steps timer.
+		if (!this.stepsHovering) {
+			this.setStepsCollapsed(true);
 		}
 	}
 
 	private bindStepsAutoHide(): void {
-		// Keep hover/reopen affordances for reveal after an edge case collapse, but do not schedule hide.
 		const onEnter = (): void => {
 			this.stepsHovering = true;
 			this.setStepsCollapsed(false);
 		};
 		const onLeave = (): void => {
 			this.stepsHovering = false;
+			this.scheduleStepsHide();
 		};
 		this._register(addDisposableListener(this.uiStepsPane, 'pointerenter', onEnter));
 		this._register(addDisposableListener(this.uiStepsPane, 'pointerleave', onLeave));
 		this._register(addDisposableListener(this.uiStepsReopenBtn, 'pointerenter', onEnter));
 		this._register(addDisposableListener(this.uiStepsReopenBtn, 'pointerleave', onLeave));
 		this._register(addDisposableListener(this.uiStepsReopenBtn, 'focus', () => this.setStepsCollapsed(false)));
+		// Preview webviews steal pointer events — clear the hover latch when the main
+		// content / launch panel is entered so Steps can still auto-hide.
+		const clearHoverFromMain = (): void => {
+			if (!this.stepsHovering && this.stepsCollapsed) {
+				return;
+			}
+			this.stepsHovering = false;
+			this.scheduleStepsHide();
+		};
+		this._register(addDisposableListener(this.uiBrowserShell, 'pointerenter', clearHoverFromMain));
+		this._register(addDisposableListener(this.uiSurfaceLaunchPanel, 'pointerenter', clearHoverFromMain));
 		this._register(addDisposableListener(this.uiContainer, 'pointermove', (event: PointerEvent) => {
 			if (!this.stepsCollapsed || this.uiStepsPane.classList.contains('hidden')) {
 				return;
@@ -8208,8 +8240,9 @@ class ModeShellContribution extends Disposable {
 			return;
 		}
 
-		// Always keep the Steps history strip expanded while Console/surface is active.
-		this.setStepsCollapsed(false);
+		if (!this.stepsHovering) {
+			this.scheduleStepsHide();
+		}
 		this.syncStepsReopenAttention();
 	}
 
@@ -9130,7 +9163,7 @@ class ModeShellContribution extends Disposable {
 					} else {
 						this.activeRailCardId = id;
 						this.uiWorkspaceHomeCardRail.setActiveId(id, []);
-						this.surfaceMainView = sectionId === 'preview' ? 'preview' : 'plan';
+						this.surfaceMainView = (sectionId === 'preview' || sectionId === 'deployed') ? 'preview' : 'plan';
 						this.syncSurfaceMainView();
 						this.surfacePlanPanel?.selectSection(sectionId);
 					}
@@ -9586,6 +9619,7 @@ class ModeShellContribution extends Disposable {
 				surfaceConfirmed: true,
 				localUrl: surface.localUrl,
 				devCommand: surface.devCommand,
+				productionUrl: surface.productionUrl,
 			});
 			return [surface, probe] as const;
 		}));
@@ -10117,20 +10151,21 @@ class ModeShellContribution extends Disposable {
 	private selectSurfaceSectionCard(surfaceId: string, sectionId: string): void {
 		const id = `surfaceSection:${sectionId}`;
 		this.activeRailCardId = id;
-		this.surfaceMainView = sectionId === 'preview' ? 'preview' : 'plan';
+		const livePane = sectionId === 'preview' || sectionId === 'deployed';
+		this.surfaceMainView = livePane ? 'preview' : 'plan';
 		this.persistSurfaceMainView(surfaceId, this.surfaceMainView);
 		this.persistSurfaceSection(surfaceId, sectionId);
 		this.uiWorkspaceHomeCardRail?.setActiveId(id, [`surface:${surfaceId}`]);
-		// Preview "not reachable" empty chrome must not stick when focusing Graph/Plan/…
+		// Preview/Deployed waiting empty chrome must not stick when focusing Graph/Plan/…
 		// — otherwise syncWorkspaceHomeView keeps the plan column hidden under that copy.
-		if (sectionId !== 'preview') {
+		if (!livePane) {
 			this.lastSurfacePreviewRouteKey = undefined;
 			this.setSurfaceEmptyState(undefined);
 		}
 		this.syncWorkspaceHomeView();
 		this.syncSurfaceMainView();
 		this.surfacePlanPanel?.selectSection(sectionId);
-		if (sectionId === 'preview') {
+		if (livePane) {
 			this.routeSelectedSurfacePreview();
 		}
 	}
@@ -10416,7 +10451,9 @@ class ModeShellContribution extends Disposable {
 		this.activeRailCardId = activeId;
 		if (promoteSurfaceSection && openSurfaceId && defaultSurfaceSectionId) {
 			this.persistSurfaceSection(openSurfaceId, defaultSurfaceSectionId);
-			this.surfaceMainView = defaultSurfaceSectionId === 'preview' ? 'preview' : 'plan';
+			this.surfaceMainView = (defaultSurfaceSectionId === 'preview' || defaultSurfaceSectionId === 'deployed')
+				? 'preview'
+				: 'plan';
 			this.surfacePlanPanel?.selectSection(defaultSurfaceSectionId);
 		}
 		// Keep the open Console / surface parent highlighted when a nested section card is focused.
@@ -12240,11 +12277,12 @@ class ModeShellContribution extends Disposable {
 			this.surfaceClaudeWorkingById.set(request.surfaceId, request.stepLabel);
 			this.syncClaudeReopenAttention();
 		}
-		// Parallel workstream fan-out for generate phases (not lock / Enable Preview).
+		// Parallel workstream fan-out for generate phases (not lock / Preview / Deployed).
 		const claudeDirect = !shouldRunCustomAiPlanOrchestration(this.getAgentOrchestratorProvider());
 		if (
 			request.actionId === 'run_next_phase'
 			&& request.stepId !== 'enable_preview'
+			&& request.stepId !== 'deployed'
 			&& await this.tryFanoutClaudeWorkstreams(workspaceFolder, request)
 		) {
 			this.notificationService.info(localize(
@@ -12294,19 +12332,28 @@ class ModeShellContribution extends Disposable {
 					`Console started step "Enable Preview" (${request.stepId}) for surface ${request.surfaceId} (${request.surfaceName}).`,
 					`${progressPath} is status "running" for that stepId.`,
 					`Update this surface entry in workspace.goal.json with path (apps/${request.surfaceId} unless already set), localUrl (http://localhost:<unique-unused-port>), and devCommand that serves that URL (prefer npm run dev --prefix apps/${request.surfaceId} -- --port <port>).`,
-					`Pick a port not used by other surfaces in workspace.goal.json. Local Preview is enough — do not require Vercel/public deploy.`,
+					`Pick a port not used by other surfaces in workspace.goal.json. Local Preview only for this step — public deploy is the separate Deployed step.`,
 					`When localUrl and devCommand are written, update ${progressPath} to status "completed" for the same stepId/stepLabel (keep surfaceId).`,
 					`On failure, set status "failed" with a short error field, then stop.`,
 					`Do not edit .workflow.json — Console marks Steps completed only after it sees completed progress (or when it detects localUrl+devCommand).`,
 				].join(' ')
-				: [
-					`Console started phase "${request.stepLabel}" (${request.stepId}) for surface ${request.surfaceId} (${request.surfaceName}).`,
-					`${progressPath} is status "running" for that stepId.`,
-					`Execute that phase from the graph proposal checklist, then remap_and_wait + compare_proposal.`,
-					`When the phase gate passes, update ${progressPath} to status "completed" for the same stepId/stepLabel (keep surfaceId).`,
-					`On failure, set status "failed" with a short error field, then stop.`,
-					`Do not edit .workflow.json — Console marks Steps completed only after it sees completed progress.`,
-				].join(' ');
+				: request.stepId === 'deployed'
+					? [
+						`Console started step "Deployed" (${request.stepId}) for surface ${request.surfaceId} (${request.surfaceName}).`,
+						`${progressPath} is status "running" for that stepId.`,
+						`Publish this surface to a public host (prefer Vercel production deploy for the surface app path), then write productionUrl on this surface entry in workspace.goal.json (https public URL, not localhost).`,
+						`When productionUrl is written and the deploy is live, update ${progressPath} to status "completed" for the same stepId/stepLabel (keep surfaceId).`,
+						`On failure, set status "failed" with a short error field, then stop.`,
+						`Do not edit .workflow.json — Console marks Steps completed only after it sees completed progress (or when it detects productionUrl).`,
+					].join(' ')
+					: [
+						`Console started phase "${request.stepLabel}" (${request.stepId}) for surface ${request.surfaceId} (${request.surfaceName}).`,
+						`${progressPath} is status "running" for that stepId.`,
+						`Execute that phase from the graph proposal checklist, then remap_and_wait + compare_proposal.`,
+						`When the phase gate passes, update ${progressPath} to status "completed" for the same stepId/stepLabel (keep surfaceId).`,
+						`On failure, set status "failed" with a short error field, then stop.`,
+						`Do not edit .workflow.json — Console marks Steps completed only after it sees completed progress.`,
+					].join(' ');
 		await this.submitPromptToClaudeKey(workspaceFolder, request.surfaceId, prompt, { reveal: true });
 	}
 
@@ -13870,6 +13917,7 @@ class ModeShellContribution extends Disposable {
 	): void {
 		const next = this.toSurfaceRailSectionCards(staticSurfaceProposalTreeCards({
 			localUrl: surface.localUrl,
+			productionUrl: surface.productionUrl,
 			purposeValue: surface.purpose,
 		}));
 		this.surfaceRailCardsLoading = false;
@@ -14164,6 +14212,9 @@ class ModeShellContribution extends Disposable {
 	private getTargetEmbeddedUiUrl(): string | undefined {
 		const selectedSurface = this.getSelectedSurface();
 		if (selectedSurface) {
+			if (this.isPublishedSectionSelected()) {
+				return selectedSurface.productionUrl?.trim() || undefined;
+			}
 			return selectedSurface.localUrl;
 		}
 		return this.devServerService.getActiveUrl();
@@ -14174,8 +14225,18 @@ class ModeShellContribution extends Disposable {
 
 	/** True when the Preview section card owns the content pane. */
 	private isPreviewSectionSelected(): boolean {
-		return this.surfaceMainView === 'preview'
-			|| this.activeRailCardId === 'surfaceSection:preview';
+		return this.activeRailCardId === 'surfaceSection:preview'
+			|| (this.surfaceMainView === 'preview' && !this.isPublishedSectionSelected());
+	}
+
+	/** True when the Published (Vercel) section card owns the content pane. */
+	private isPublishedSectionSelected(): boolean {
+		return this.activeRailCardId === 'surfaceSection:published';
+	}
+
+	/** Preview or Published — either routes a URL into the embedded Console pane. */
+	private isLiveUrlSectionSelected(): boolean {
+		return this.isPreviewSectionSelected() || this.isPublishedSectionSelected();
 	}
 
 	private routeSelectedSurfacePreview(): void {
@@ -14215,20 +14276,23 @@ class ModeShellContribution extends Disposable {
 			if (!surface) {
 				this.setSurfaceEmptyState(undefined);
 			} else {
-				const url = surface.localUrl;
-				// Preview waiting/missing chrome only while the Preview card is focused —
-				// Plan / Rules / … keep the plan column, never the "no preview URL" empty.
-				const previewSelected = this.isPreviewSectionSelected();
+				const publishedSelected = this.isPublishedSectionSelected();
+				const liveSelected = this.isLiveUrlSectionSelected();
+				const url = publishedSelected
+					? surface.productionUrl?.trim()
+					: surface.localUrl?.trim();
+				// Live waiting/missing chrome only while Preview or Published is focused —
+				// Plan / Rules / … keep the plan column, never the "no URL" empty.
 				if (!url) {
-					if (previewSelected) {
+					if (liveSelected) {
 						this.setSurfaceMissingUrlState(surface);
 					} else {
 						this.setSurfaceEmptyState(undefined);
 					}
 					this.clearEmbeddedUiUrl();
 					this.logSelectedSurfaceRoute(surface, undefined);
-				} else if (previewSelected && !this.appReachable) {
-					// Preview card owns the waiting chrome — keep the plan column intact otherwise.
+				} else if (liveSelected && !this.appReachable && !publishedSelected) {
+					// Local Preview owns waiting chrome until the dev server is up.
 					this.setSurfaceServerDownState(surface, url);
 					// Same-origin is enough — don't stomp SPA routes (e.g. /analytics) back to /.
 					if (!this.embeddedUiShowsSurfacePreview(url)) {
@@ -14323,6 +14387,16 @@ class ModeShellContribution extends Disposable {
 		return this.appReachable && this.embeddedUiShowsUrl(surface.localUrl);
 	}
 
+	/** Production URL is treated as live once loaded into the embedded pane (no local server gate). */
+	private isSelectedSurfacePublishedReachable(): boolean {
+		const surface = this.getSelectedSurface();
+		const url = surface?.productionUrl?.trim();
+		if (!url) {
+			return false;
+		}
+		return this.appReachable && this.embeddedUiShowsUrl(url);
+	}
+
 	private setSurfaceMainView(view: SurfaceMainView): void {
 		this.ensureWorkspaceView();
 		const next = view === 'taskTree' ? 'plan' : view;
@@ -14354,23 +14428,25 @@ class ModeShellContribution extends Disposable {
 		// Unified Plan column owns Rules / Graph / Preview sections — never show the left rail.
 		this.uiSurfaceMainViewToggle.classList.add('hidden');
 		this.uiBrowserShell.classList.remove('custom-mode-ui-surface-view-cards');
-		const showPreview = showToggle && (
-			this.surfaceMainView === 'preview'
-			|| this.activeRailCardId === 'surfaceSection:preview'
-		);
+		const showLivePane = showToggle && this.isLiveUrlSectionSelected();
 		for (const [view, button] of this.uiSurfaceTaskTreeToggleButtons) {
-			const active = showPreview ? view === 'preview' : view === 'plan';
+			const active = showLivePane ? view === 'preview' : view === 'plan';
 			button.classList.toggle('active', active);
 			button.setAttribute('aria-selected', String(active));
 		}
 
 		// Waiting Start-preview chrome fills the card-rail content host; only the live webview
 		// takes over as a sibling column beside the cards (preview-visible).
-		const showPlan = showToggle && !showPreview;
-		const previewLive = showPreview && this.isSelectedSurfacePreviewReachable();
+		const showPlan = showToggle && !showLivePane;
+		const publishedSelected = this.isPublishedSectionSelected();
+		const previewLive = showLivePane && (
+			publishedSelected
+				? this.isSelectedSurfacePublishedReachable()
+				: this.isSelectedSurfacePreviewReachable()
+		);
 		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-preview-visible', previewLive);
 		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-main-view-overlay', previewLive);
-		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-preview-waiting', showPreview && !previewLive);
+		this.uiBrowserShell.classList.toggle('custom-mode-ui-surface-preview-waiting', showLivePane && !previewLive);
 		// Never let stale Preview waiting empty-state own the pane when a non-Preview section is focused.
 		if (showPlan && !this.uiSurfaceEmptyState.classList.contains('hidden')) {
 			this.uiSurfaceEmptyState.classList.add('hidden');
@@ -14381,10 +14457,13 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceClaudeMdPanelRoot.classList.add('hidden');
 		this.uiSurfaceClaudeMdPanelRoot.hidden = true;
 		this.uiSurfaceIxSubsystemsPanelRoot.classList.add('hidden');
-		if (showPlan) {
+		// Always hydrate Plan/Graph/Rules card values when a surface is open — even if Preview
+		// owns the main pane (100% surfaces default there). Gating load on showPlan left the
+		// rail stuck on static "—" placeholders from applyImmediateSurfaceRailCards.
+		if (showToggle && this.selectedSurfaceId && this.selectedSurfaceId !== ADD_SURFACE_ID) {
 			const surface = this.getSelectedSurface();
 			void this.surfacePlanPanel?.load({
-				surfaceId: this.selectedSurfaceId!,
+				surfaceId: this.selectedSurfaceId,
 				surfaceName: surface?.name,
 				surfacePath: surface?.path,
 				treeId: this.selectedSurfaceTaskTree?.id,
@@ -14953,8 +15032,7 @@ class ModeShellContribution extends Disposable {
 		this.uiSurfaceLaunchPanel.replaceChildren();
 
 		const surface = this.getSelectedSurface();
-		const previewSelected = !this.contextGatheringOpen
-			&& (this.surfaceMainView === 'preview' || this.activeRailCardId === 'surfaceSection:preview');
+		const previewSelected = !this.contextGatheringOpen && this.isPreviewSectionSelected();
 		if (!surface || !previewSelected || this.isSelectedSurfacePreviewReachable()) {
 			this.uiSurfaceLaunchPanel.classList.add('hidden');
 			this.uiSurfaceLaunchPanel.hidden = true;
@@ -15801,6 +15879,17 @@ class ModeShellContribution extends Disposable {
 	private setSurfaceMissingUrlState(surface: WorkspaceSurface | undefined): void {
 		if (!surface) {
 			this.setSurfaceEmptyState(undefined);
+			return;
+		}
+
+		if (this.isPublishedSectionSelected()) {
+			this.setSurfaceEmptyState({
+				title: localize('customMode.surfaceMissingPublishedUrlTitle', '{0} is not published yet', surface.name),
+				subtitle: localize(
+					'customMode.surfaceMissingPublishedUrlSubtitle',
+					'Publish to Vercel (Actions), then set productionUrl on this surface in workspace.goal.json.',
+				),
+			});
 			return;
 		}
 

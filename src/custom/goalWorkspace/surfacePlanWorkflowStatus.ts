@@ -38,8 +38,15 @@ export const VERIFY_GRAPH_STEP_ID = 'verify_graph';
 /** Console-owned gate: wire Preview via localUrl + devCommand on the surface. */
 export const ENABLE_PREVIEW_STEP_ID = 'enable_preview';
 
+/** Console-owned gate: public deploy via productionUrl on the surface. */
+export const DEPLOYED_STEP_ID = 'deployed';
+
 export function isSurfacePreviewWired(input: { readonly localUrl?: string; readonly devCommand?: string } | undefined): boolean {
 	return Boolean(input?.localUrl?.trim() && input?.devCommand?.trim());
+}
+
+export function isSurfaceDeployedWired(input: { readonly productionUrl?: string } | undefined): boolean {
+	return Boolean(input?.productionUrl?.trim());
 }
 
 export interface SurfacePlanWorkflowSignals {
@@ -67,8 +74,13 @@ export interface SurfacePlanWorkflowSignals {
 	 */
 	readonly previewEnabled?: boolean;
 	/**
-	 * Open operational blockers (env keys, agent-declared gaps) shown after Enable Preview.
-	 * Step ids should already be `blocker:<id>`.
+	 * Surface has a public `productionUrl` in workspace.goal.json. Completes
+	 * `deployed` only after Enable Preview (+ open blockers cleared).
+	 */
+	readonly deployedEnabled?: boolean;
+	/**
+	 * Open operational blockers (env keys, agent-declared gaps) shown after Enable
+	 * Preview and before Deployed. Step ids should already be `blocker:<id>`.
 	 */
 	readonly openBlockers?: readonly SurfaceBlockerStepRef[];
 }
@@ -88,6 +100,12 @@ export const VERIFY_GRAPH_STEP: SurfacePlanWorkflowStep = {
 export const ENABLE_PREVIEW_STEP: SurfacePlanWorkflowStep = {
 	id: ENABLE_PREVIEW_STEP_ID,
 	label: 'Enable Preview',
+	kind: 'action',
+};
+
+export const DEPLOYED_STEP: SurfacePlanWorkflowStep = {
+	id: DEPLOYED_STEP_ID,
+	label: 'Deployed',
 	kind: 'action',
 };
 
@@ -163,6 +181,7 @@ export function inferSurfacePlanWorkflowStage(signals: SurfacePlanWorkflowSignal
 			&& completed.has('lock_plan')
 			&& completed.has(VERIFY_GRAPH_STEP_ID)
 			&& completed.has(ENABLE_PREVIEW_STEP_ID)
+			&& completed.has(DEPLOYED_STEP_ID)
 			&& !hasOpenBlockers
 		) {
 			return 'complete';
@@ -173,6 +192,7 @@ export function inferSurfacePlanWorkflowStage(signals: SurfacePlanWorkflowSignal
 		if (completed.has('lock_plan') && (
 			!completed.has(VERIFY_GRAPH_STEP_ID)
 			|| !completed.has(ENABLE_PREVIEW_STEP_ID)
+			|| !completed.has(DEPLOYED_STEP_ID)
 			|| hasOpenBlockers
 		)) {
 			return 'building';
@@ -217,6 +237,7 @@ export function buildSurfacePlanWorkflowSteps(signals: SurfacePlanWorkflowSignal
 			label: blocker.label,
 			kind: 'blocker' as const,
 		})),
+		DEPLOYED_STEP,
 	];
 
 	const currentStepId = resolveCurrentStepId(stageId, phases, completed, openBlockers);
@@ -373,6 +394,7 @@ function resolveNextAction(
 						|| step.kind === 'blocker'
 						|| step.id === VERIFY_GRAPH_STEP_ID
 						|| step.id === ENABLE_PREVIEW_STEP_ID
+						|| step.id === DEPLOYED_STEP_ID
 					)
 				);
 				if (failedStep) {
@@ -408,13 +430,21 @@ function resolveNextAction(
 				};
 			}
 			const nextBlocker = steps.find(step => step.kind === 'blocker' && step.status !== 'completed');
-			if (!nextBlocker) {
+			if (nextBlocker) {
+				return {
+					id: 'run_next_phase',
+					label: nextBlocker.label,
+					stepId: nextBlocker.id,
+				};
+			}
+			const deployed = steps.find(step => step.id === DEPLOYED_STEP_ID && step.status !== 'completed');
+			if (!deployed) {
 				return undefined;
 			}
 			return {
 				id: 'run_next_phase',
-				label: nextBlocker.label,
-				stepId: nextBlocker.id,
+				label: deployed.label,
+				stepId: deployed.id,
 			};
 		}
 		default:
@@ -449,10 +479,13 @@ function resolveCurrentStepId(
 		if (openBlockers.length) {
 			return openBlockers[0]!.id;
 		}
-		return phases[phases.length - 1]?.id ?? ENABLE_PREVIEW_STEP_ID;
+		if (!completed.has(DEPLOYED_STEP_ID)) {
+			return DEPLOYED_STEP_ID;
+		}
+		return phases[phases.length - 1]?.id ?? DEPLOYED_STEP_ID;
 	}
 	if (stageId === 'complete') {
-		return ENABLE_PREVIEW_STEP_ID;
+		return DEPLOYED_STEP_ID;
 	}
 	if (stageId === 'plan_ready') {
 		return 'plan_ready';
@@ -485,6 +518,7 @@ function isStepImpliedComplete(
 		phases.some(phase => phase.id === stepId)
 		|| stepId === VERIFY_GRAPH_STEP_ID
 		|| stepId === ENABLE_PREVIEW_STEP_ID
+		|| stepId === DEPLOYED_STEP_ID
 	)) {
 		return true;
 	}
@@ -504,6 +538,9 @@ function effectiveCompletedStepIds(signals: SurfacePlanWorkflowSignals): Set<str
 	if (signals.previewEnabled && canAutoCompleteEnablePreview(signals, completed)) {
 		completed.add(ENABLE_PREVIEW_STEP_ID);
 	}
+	if (signals.deployedEnabled && canAutoCompleteDeployed(signals, completed)) {
+		completed.add(DEPLOYED_STEP_ID);
+	}
 	return completed;
 }
 
@@ -521,6 +558,24 @@ function canAutoCompleteEnablePreview(
 	}
 	// Code Graph is a visible Next gate — do not skip past it when preview is already wired.
 	return completed.has(VERIFY_GRAPH_STEP_ID);
+}
+
+/** Deployed sits after Enable Preview (+ blockers); only auto-complete once Preview is done. */
+function canAutoCompleteDeployed(
+	signals: SurfacePlanWorkflowSignals,
+	completed: ReadonlySet<string>,
+): boolean {
+	if (!(signals.planLocked || completed.has('lock_plan'))) {
+		return false;
+	}
+	const phases = signals.proposalPhases ?? [];
+	if (!phases.every(phase => completed.has(phase.id))) {
+		return false;
+	}
+	if (!completed.has(VERIFY_GRAPH_STEP_ID) || !completed.has(ENABLE_PREVIEW_STEP_ID)) {
+		return false;
+	}
+	return (signals.openBlockers ?? []).length === 0;
 }
 
 function toCompletedSet(value: ReadonlySet<string> | readonly string[] | undefined): Set<string> {
@@ -565,6 +620,9 @@ export function resolveSurfaceSectionIdForStep(
 	}
 	if (step.id === ENABLE_PREVIEW_STEP_ID) {
 		return pick('preview', 'plan');
+	}
+	if (step.id === DEPLOYED_STEP_ID) {
+		return pick('deployed', 'preview', 'plan');
 	}
 	switch (step.id) {
 		case 'research_survey':

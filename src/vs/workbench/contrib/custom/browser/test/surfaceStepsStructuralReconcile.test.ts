@@ -10,7 +10,7 @@ import {
 	isFullStructuralProposalPass,
 	phaseIdsToCompleteFromStructuralPass,
 } from '../surfaceStepsStructuralReconcile.js';
-import { ENABLE_PREVIEW_STEP_ID } from '../../../../../../custom/goalWorkspace/surfacePlanWorkflowStatus.js';
+import { DEPLOYED_STEP_ID, ENABLE_PREVIEW_STEP_ID } from '../../../../../../custom/goalWorkspace/surfacePlanWorkflowStatus.js';
 
 suite('surfaceStepsStructuralReconcile', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -116,6 +116,7 @@ suite('surfaceStepsStructuralReconcile', () => {
 			completedStepIds: new Set(['phase-1', 'phase-2']),
 		});
 		assert.ok(!ids.includes(ENABLE_PREVIEW_STEP_ID));
+		assert.ok(!ids.includes(DEPLOYED_STEP_ID));
 		assert.deepStrictEqual(ids, []);
 	});
 
@@ -130,6 +131,7 @@ suite('surfaceStepsStructuralReconcile', () => {
 			completedStepIds: [],
 		});
 		assert.ok(!ids.includes(ENABLE_PREVIEW_STEP_ID));
+		assert.ok(!ids.includes(DEPLOYED_STEP_ID));
 		assert.deepStrictEqual(ids, ['phase-1', 'phase-2']);
 	});
 });

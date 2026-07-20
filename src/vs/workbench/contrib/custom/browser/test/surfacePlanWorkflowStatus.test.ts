@@ -6,10 +6,12 @@
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import {
+	DEPLOYED_STEP_ID,
 	ENABLE_PREVIEW_STEP_ID,
 	VERIFY_GRAPH_STEP_ID,
 	buildSurfacePlanWorkflowSteps,
 	inferSurfacePlanWorkflowStage,
+	isSurfaceDeployedWired,
 	isSurfacePlanLocked,
 	isSurfacePreviewWired,
 	markSurfacePlanLocked,
@@ -175,7 +177,9 @@ suite('surfacePlanWorkflowStatus', () => {
 		assert.ok(stepIds.includes('phase-2'));
 		assert.ok(stepIds.includes(VERIFY_GRAPH_STEP_ID));
 		assert.ok(stepIds.includes(ENABLE_PREVIEW_STEP_ID));
+		assert.ok(stepIds.includes(DEPLOYED_STEP_ID));
 		assert.ok(stepIds.indexOf(VERIFY_GRAPH_STEP_ID) < stepIds.indexOf(ENABLE_PREVIEW_STEP_ID));
+		assert.ok(stepIds.indexOf(ENABLE_PREVIEW_STEP_ID) < stepIds.indexOf(DEPLOYED_STEP_ID));
 	});
 
 	test('building next action is first pending phase', () => {
@@ -287,7 +291,7 @@ suite('surfacePlanWorkflowStatus', () => {
 		assert.strictEqual(afterPhases.steps.find(step => step.id === ENABLE_PREVIEW_STEP_ID)?.status, 'pending');
 	});
 
-	test('complete requires Code Graph then Enable Preview (or wired preview after Graph)', () => {
+	test('complete requires Code Graph, Enable Preview, then Deployed', () => {
 		const incomplete = resolveSurfacePlanWorkflowStatus({
 			hasPlanContent: true,
 			hasFinalProposal: true,
@@ -299,7 +303,7 @@ suite('surfacePlanWorkflowStatus', () => {
 		});
 		assert.strictEqual(incomplete.stageId, 'building');
 
-		const viaStep = resolveSurfacePlanWorkflowStatus({
+		const awaitingDeploy = resolveSurfacePlanWorkflowStatus({
 			hasPlanContent: true,
 			hasFinalProposal: true,
 			hasDraftProposal: true,
@@ -307,6 +311,23 @@ suite('surfacePlanWorkflowStatus', () => {
 			planLocked: true,
 			proposalPhases: [{ id: 'phase-1', title: 'Phase 1' }],
 			completedStepIds: ['lock_plan', 'phase-1', VERIFY_GRAPH_STEP_ID, ENABLE_PREVIEW_STEP_ID],
+		});
+		assert.strictEqual(awaitingDeploy.stageId, 'building');
+		assert.strictEqual(awaitingDeploy.steps.find(step => step.id === DEPLOYED_STEP_ID)?.status, 'current');
+		assert.deepStrictEqual(awaitingDeploy.nextAction, {
+			id: 'run_next_phase',
+			label: 'Deployed',
+			stepId: DEPLOYED_STEP_ID,
+		});
+
+		const viaStep = resolveSurfacePlanWorkflowStatus({
+			hasPlanContent: true,
+			hasFinalProposal: true,
+			hasDraftProposal: true,
+			hasCandidates: true,
+			planLocked: true,
+			proposalPhases: [{ id: 'phase-1', title: 'Phase 1' }],
+			completedStepIds: ['lock_plan', 'phase-1', VERIFY_GRAPH_STEP_ID, ENABLE_PREVIEW_STEP_ID, DEPLOYED_STEP_ID],
 		});
 		assert.strictEqual(viaStep.stageId, 'complete');
 
@@ -319,12 +340,14 @@ suite('surfacePlanWorkflowStatus', () => {
 			proposalPhases: [{ id: 'phase-1', title: 'Phase 1' }],
 			completedStepIds: ['lock_plan', 'phase-1', VERIFY_GRAPH_STEP_ID],
 			previewEnabled: true,
+			deployedEnabled: true,
 		});
 		assert.strictEqual(viaManifest.stageId, 'complete');
 		assert.strictEqual(viaManifest.steps.find(step => step.id === ENABLE_PREVIEW_STEP_ID)?.status, 'completed');
+		assert.strictEqual(viaManifest.steps.find(step => step.id === DEPLOYED_STEP_ID)?.status, 'completed');
 	});
 
-	test('open blockers appear after Enable Preview and block complete', () => {
+	test('open blockers appear after Enable Preview, before Deployed, and block complete', () => {
 		const status = resolveSurfacePlanWorkflowStatus({
 			hasPlanContent: true,
 			hasFinalProposal: true,
@@ -341,6 +364,7 @@ suite('surfacePlanWorkflowStatus', () => {
 		});
 		assert.strictEqual(status.stageId, 'building');
 		assert.strictEqual(status.steps.find(step => step.id === 'blocker:env:ANTHROPIC_API_KEY')?.status, 'current');
+		assert.strictEqual(status.steps.find(step => step.id === DEPLOYED_STEP_ID)?.status, 'pending');
 		assert.deepStrictEqual(status.nextAction, {
 			id: 'run_next_phase',
 			label: 'Set ANTHROPIC_API_KEY in .env.local',
@@ -358,7 +382,8 @@ suite('surfacePlanWorkflowStatus', () => {
 			previewEnabled: true,
 			openBlockers: [],
 		});
-		assert.strictEqual(cleared.stageId, 'complete');
+		assert.strictEqual(cleared.stageId, 'building');
+		assert.strictEqual(cleared.steps.find(step => step.id === DEPLOYED_STEP_ID)?.status, 'current');
 	});
 
 	test('isSurfacePreviewWired requires both localUrl and devCommand', () => {
@@ -367,6 +392,14 @@ suite('surfacePlanWorkflowStatus', () => {
 		assert.strictEqual(isSurfacePreviewWired({
 			localUrl: 'http://localhost:3001',
 			devCommand: 'npm run dev --prefix apps/bot -- --port 3001',
+		}), true);
+	});
+
+	test('isSurfaceDeployedWired requires productionUrl', () => {
+		assert.strictEqual(isSurfaceDeployedWired(undefined), false);
+		assert.strictEqual(isSurfaceDeployedWired({ productionUrl: '   ' }), false);
+		assert.strictEqual(isSurfaceDeployedWired({
+			productionUrl: 'https://cadre-bot.vercel.app',
 		}), true);
 	});
 
@@ -465,7 +498,7 @@ suite('surfacePlanWorkflowStatus', () => {
 suite('resolveSurfaceSectionIdForStep', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	const sections = ['rules', 'plan', 'context', 'description', 'proposed', 'graph', 'phases', 'workstreams', 'preview'] as const;
+	const sections = ['rules', 'plan', 'context', 'description', 'proposed', 'graph', 'phases', 'workstreams', 'preview', 'deployed'] as const;
 
 	test('maps planning stages to description / proposed / plan / context', () => {
 		assert.strictEqual(resolveSurfaceSectionIdForStep({ id: 'lock_plan', kind: 'action' }, sections), 'proposed');
@@ -511,13 +544,21 @@ suite('resolveSurfaceSectionIdForStep', () => {
 		);
 	});
 
-	test('maps verify_graph to graph and enable_preview/blockers to preview', () => {
+	test('maps verify_graph to graph, enable_preview to preview, deployed to published', () => {
 		assert.strictEqual(
 			resolveSurfaceSectionIdForStep({ id: VERIFY_GRAPH_STEP_ID, kind: 'action' }, sections),
 			'graph',
 		);
 		assert.strictEqual(
 			resolveSurfaceSectionIdForStep({ id: ENABLE_PREVIEW_STEP_ID, kind: 'action' }, sections),
+			'preview',
+		);
+		assert.strictEqual(
+			resolveSurfaceSectionIdForStep({ id: DEPLOYED_STEP_ID, kind: 'action' }, sections),
+			'published',
+		);
+		assert.strictEqual(
+			resolveSurfaceSectionIdForStep({ id: DEPLOYED_STEP_ID, kind: 'action' }, ['preview', 'plan']),
 			'preview',
 		);
 		assert.strictEqual(
@@ -561,7 +602,8 @@ suite('resolveSurfaceSectionIdForStep', () => {
 			planLocked: true,
 			previewEnabled: true,
 			proposalPhases: [{ id: 'phase-1', title: 'Phase 1' }],
-			completedStepIds: ['lock_plan', 'phase-1', VERIFY_GRAPH_STEP_ID, ENABLE_PREVIEW_STEP_ID],
+			completedStepIds: ['lock_plan', 'phase-1', VERIFY_GRAPH_STEP_ID, ENABLE_PREVIEW_STEP_ID, DEPLOYED_STEP_ID],
+			deployedEnabled: true,
 		});
 		const complete = summarizeSurfacePlanWorkflowProgress(done);
 		assert.strictEqual(complete.complete, true);
@@ -622,6 +664,7 @@ suite('surfacePlanWorkflow', () => {
 				'P1',
 				'verify_graph',
 				'enable_preview',
+				'deployed',
 			],
 		}).steps);
 		assert.strictEqual(

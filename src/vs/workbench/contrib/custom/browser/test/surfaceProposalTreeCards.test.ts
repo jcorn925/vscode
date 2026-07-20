@@ -10,6 +10,8 @@ import {
 	orderSurfaceProposalTreeSectionIds,
 	staticSurfaceProposalTreeCards,
 	surfaceGraphRegionsCardValue,
+	surfaceProposedGraphCardValue,
+	surfaceProposalTreeCardsFromDocument,
 	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
 	SURFACE_PROPOSAL_TREE_SECTION_ORDER,
 	type SurfaceProposalTreeCardItem,
@@ -23,10 +25,15 @@ suite('orderSurfaceProposalTreeCards', () => {
 			localUrl: 'http://localhost:3000',
 			purposeValue: 'Acquire clients.',
 		});
-		assert.deepStrictEqual(cards.map(c => c.id), ['proposed', 'graph', 'preview', 'description', 'plan', 'rules']);
+		assert.deepStrictEqual(cards.map(c => c.id), ['proposed', 'graph', 'preview', 'deployed', 'description', 'plan', 'rules']);
 		assert.strictEqual(cards.find(c => c.id === 'preview')?.value, 'URL');
+		assert.strictEqual(cards.find(c => c.id === 'deployed')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(cards.find(c => c.id === 'graph')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
 		assert.strictEqual(cards.find(c => c.id === 'description')?.value, 'Acquire clients.');
+		assert.strictEqual(
+			staticSurfaceProposalTreeCards({ productionUrl: 'https://cadre.vercel.app' }).find(c => c.id === 'deployed')?.value,
+			'Vercel',
+		);
 		assert.strictEqual(
 			staticSurfaceProposalTreeCards().find(c => c.id === 'description')?.value,
 			SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
@@ -38,6 +45,31 @@ suite('orderSurfaceProposalTreeCards', () => {
 		assert.strictEqual(surfaceGraphRegionsCardValue([
 			{ name: 'A', memberFiles: ['a.ts', 'b.ts'], entryPath: 'a.ts' },
 		]), '2·0');
+	});
+
+	test('surfaceProposedGraphCardValue formats node·edge totals', () => {
+		assert.strictEqual(surfaceProposedGraphCardValue({}), SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
+		assert.strictEqual(surfaceProposedGraphCardValue({ nodeCount: 12, edgeCount: 4 }), '12·4');
+	});
+
+	test('surfaceProposalTreeCardsFromDocument upgrades placeholders from plan/proposal fields', () => {
+		const cards = surfaceProposalTreeCardsFromDocument({
+			localUrl: 'http://localhost:4173',
+			purposeValue: 'Internal dashboard for inbound ops',
+			planMarkdown: '# Plan\n\nLocked.',
+			proposedNodeCount: 39,
+			proposedEdgeCount: 11,
+			graphRegions: [{ name: 'UI', memberFiles: ['apps/a/page.tsx', 'apps/a/api.ts'] }],
+			phasesCardValue: '3/3',
+			contextCardValue: '2/5',
+		});
+		assert.strictEqual(cards.find(c => c.id === 'proposed')?.value, '39·11');
+		assert.strictEqual(cards.find(c => c.id === 'graph')?.value, '2·0');
+		assert.strictEqual(cards.find(c => c.id === 'preview')?.value, 'URL');
+		assert.strictEqual(cards.find(c => c.id === 'plan')?.value, 'plan.md');
+		assert.strictEqual(cards.find(c => c.id === 'rules')?.value, 'CLAUDE.md');
+		assert.strictEqual(cards.find(c => c.id === 'phases')?.value, '3/3');
+		assert.strictEqual(cards.find(c => c.id === 'context')?.value, '2/5');
 	});
 
 	test('sorts to canonical Canvas / Workspace order regardless of push order', () => {
@@ -57,7 +89,7 @@ suite('orderSurfaceProposalTreeCards', () => {
 		);
 		assert.deepStrictEqual(
 			[...SURFACE_PROPOSAL_TREE_SECTION_ORDER].filter(id => id !== 'removals'),
-			['phases', 'proposed', 'graph', 'preview', 'description', 'context', 'plan', 'rules'],
+			['phases', 'proposed', 'graph', 'preview', 'published', 'description', 'context', 'plan', 'rules'],
 		);
 	});
 

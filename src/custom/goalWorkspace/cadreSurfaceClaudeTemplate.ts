@@ -110,17 +110,27 @@ That step is done only when this surface in \`workspace.goal.json\` has both
 serves it (prefer \`npm run dev --prefix apps/<surface-id> -- --port <port>\`).
 When Console Next kicks \`enable_preview\`, write those fields (and \`path\` if
 missing), then mark phase-progress \`completed\`. Do not invent \`.workflow.json\`
-completions. Local Preview is enough — public deploy is optional.
+completions. Local Preview only for this step — public deploy is the separate
+**Deployed** step.
 
 ## Operational blockers (Console-owned gate)
 
-After Enable Preview, Console may show **blocker** Steps from
-\`.agent/surfaces/<surface-id>.blockers.json\` (e.g. missing \`.env.local\` keys
-from \`.env.example\`). Console auto-probes env keys; you may also append
+After Enable Preview (and before Deployed), Console may show **blocker** Steps
+from \`.agent/surfaces/<surface-id>.blockers.json\` (e.g. missing \`.env.local\`
+keys from \`.env.example\`). Console auto-probes env keys; you may also append
 \`kind: "manual"\` open blockers when you discover operational gaps (API keys,
 webhooks, etc.). Never invent secrets — ask the human to paste real values.
 When Console Next kicks \`blocker:…\`, clear that blocker, then mark
 phase-progress \`completed\` (and/or set the blocker \`status: "resolved"\`).
+Do not invent \`.workflow.json\` completions.
+
+## Deployed (Console-owned gate)
+
+After Enable Preview and any open blockers, Console shows a **Deployed** Steps
+row (\`deployed\`). That step is done only when this surface in
+\`workspace.goal.json\` has a public \`productionUrl\` (https, not localhost —
+e.g. a Vercel production URL). When Console Next kicks \`deployed\`, publish the
+surface app, write \`productionUrl\`, then mark phase-progress \`completed\`.
 Do not invent \`.workflow.json\` completions.
 
 ## Research recipe (planning only)
@@ -236,7 +246,7 @@ it is machine-global for every ix client on this host.
 | \`.agent/surfaces/<id>.phase-progress.json\` | Claude↔Console phase handshake (\`running\` / \`completed\` / \`failed\`) |
 | \`.agent/surfaces/<id>.workflow.json\` | Console-owned Steps row (do not invent completions) |
 | \`.agent/surfaces/<id>.blockers.json\` | Operational blockers (env keys / agent-declared gaps) |
-| \`workspace.goal.json\` | Surface registry — Preview needs \`localUrl\` + \`devCommand\` |
+| \`workspace.goal.json\` | Surface registry — Preview needs \`localUrl\` + \`devCommand\`; Deployed needs \`productionUrl\` |
 | \`.agent/references/*\` | Shallow clones for planning maps only |
 
 ### Plan vs Proposal split

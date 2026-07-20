@@ -45,6 +45,8 @@ export interface WorkspaceSurface {
 	readonly path?: string;
 	readonly devCommand?: string;
 	readonly localUrl?: string;
+	/** Public production URL after deploy (e.g. https://….vercel.app). */
+	readonly productionUrl?: string;
 	readonly purpose?: string;
 	readonly capabilities: readonly string[];
 	readonly events: readonly string[];
@@ -1074,6 +1076,7 @@ function parseSurface(raw: unknown, index: number, diagnostics: WorkspaceDiagnos
 		path: optionalWorkspaceRelativePath(raw, 'path', `${basePath}.path`, diagnostics),
 		devCommand: optionalString(raw, 'devCommand', `${basePath}.devCommand`, diagnostics),
 		localUrl: optionalLocalPreviewUrl(raw, 'localUrl', `${basePath}.localUrl`, diagnostics),
+		productionUrl: optionalProductionUrl(raw, 'productionUrl', `${basePath}.productionUrl`, diagnostics),
 		purpose: optionalString(raw, 'purpose', `${basePath}.purpose`, diagnostics),
 		capabilities: optionalStringArray(raw, 'capabilities', `${basePath}.capabilities`, diagnostics),
 		events: optionalStringArray(raw, 'events', `${basePath}.events`, diagnostics),
@@ -1219,6 +1222,29 @@ function optionalLocalPreviewUrl(raw: Record<string, unknown>, key: string, path
 	}
 	if (!isLocalPreviewHostname(url.hostname)) {
 		diagnostics.push({ path, message: 'Expected a localhost preview URL.' });
+		return undefined;
+	}
+	return value;
+}
+
+function optionalProductionUrl(raw: Record<string, unknown>, key: string, path: string, diagnostics: WorkspaceDiagnostic[]): string | undefined {
+	const value = optionalString(raw, key, path, diagnostics);
+	if (value === undefined) {
+		return undefined;
+	}
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		diagnostics.push({ path, message: 'Expected a valid public http(s) URL.' });
+		return undefined;
+	}
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+		diagnostics.push({ path, message: 'Expected an http(s) URL.' });
+		return undefined;
+	}
+	if (isLocalPreviewHostname(url.hostname)) {
+		diagnostics.push({ path, message: 'Expected a public production URL, not localhost.' });
 		return undefined;
 	}
 	return value;
