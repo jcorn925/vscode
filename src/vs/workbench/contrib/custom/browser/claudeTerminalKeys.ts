@@ -106,3 +106,25 @@ export function isClaudeKeyForSurface(key: string, surfaceId: string): boolean {
 	const parsed = parseClaudeWorkstreamKey(key);
 	return parsed?.surfaceId === surfaceId;
 }
+
+/**
+ * Workstream / serialize Claude keys for `surfaceId` among `keys`.
+ * Ignores the plain surface key and reserved workspace/actions keys.
+ */
+export function workstreamClaudeKeysForSurface(surfaceId: string, keys: readonly string[]): string[] {
+	const target = surfaceId.trim();
+	if (!target) {
+		return [];
+	}
+	const out: string[] = [];
+	const seen = new Set<string>();
+	for (const key of keys) {
+		const parsed = parseClaudeWorkstreamKey(key);
+		if (!parsed || parsed.surfaceId !== target || seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		out.push(key);
+	}
+	return out;
+}

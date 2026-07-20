@@ -17,6 +17,7 @@ import {
 	parseClaudeTerminalKey,
 	parseClaudeWorkstreamKey,
 	surfaceIdFromClaudeKey,
+	workstreamClaudeKeysForSurface,
 	WORKSPACE_CLAUDE_KEY,
 } from '../claudeTerminalKeys.js';
 
@@ -67,5 +68,20 @@ suite('claudeTerminalKeys', () => {
 		assert.ok(isClaudeKeyForSurface('cadre-support-bot', 'cadre-support-bot'));
 		assert.ok(isClaudeKeyForSurface('cadre-support-bot::ws-1', 'cadre-support-bot'));
 		assert.ok(!isClaudeKeyForSurface('other::ws-1', 'cadre-support-bot'));
+	});
+
+	test('workstreamClaudeKeysForSurface keeps only ws/serialize keys for the surface', () => {
+		assert.deepStrictEqual(
+			workstreamClaudeKeysForSurface('cadre-admin-console', [
+				'cadre-admin-console',
+				'cadre-admin-console::ws-42',
+				'cadre-admin-console::serialize',
+				'cadre-eval-harness::ws-8',
+				WORKSPACE_CLAUDE_KEY,
+				'cadre-admin-console::ws-42',
+			]),
+			['cadre-admin-console::ws-42', 'cadre-admin-console::serialize'],
+		);
+		assert.deepStrictEqual(workstreamClaudeKeysForSurface('', ['a::ws-1']), []);
 	});
 });

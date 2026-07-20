@@ -19,6 +19,7 @@ import { IWorkspaceContextService, WorkbenchState } from '../../vs/platform/work
 import { ITerminalService } from '../../vs/workbench/contrib/terminal/browser/terminal.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../vs/platform/storage/common/storage.js';
 import { INotificationService, Severity } from '../../vs/platform/notification/common/notification.js';
+import { ILogService } from '../../vs/platform/log/common/log.js';
 import { ILifecycleService } from '../../vs/workbench/services/lifecycle/common/lifecycle.js';
 import { IOpenerService } from '../../vs/platform/opener/common/opener.js';
 import { localize } from '../../vs/nls.js';
@@ -28,6 +29,12 @@ import {
 	ensureHomebrewShellEnvInProfile,
 	resolveKnownIxCliPath,
 } from './ixInstallHelpers.js';
+import {
+	buildIxPruneWorkspaceRegistryArgs,
+	parseIxPruneWorkspaceRegistrySummary,
+	type IxPruneWorkspaceRegistryOptions,
+	type IxPruneWorkspaceRegistrySummary,
+} from './ixPruneWorkspaceRegistry.js';
 
 export type IxPhase = 'idle' | 'installing' | 'docker' | 'mapping' | 'watching' | 'error';
 
@@ -81,6 +88,18 @@ export interface IIxIntegrationService {
 	 * Use before `ix subsystems` / JSON `ix map` in Process notes flows.
 	 */
 	ensureIxMappedIfEmpty(cwd: URI): Promise<{ readonly statsPreview: string; readonly ranMap: boolean; readonly statsOk: boolean }>;
+	/**
+	 * Dry-run or apply prune of dead entries in ~/.ix/config.yaml via
+	 * scripts/ix_prune_workspace_registry.py. When apply+restartDocker, runs `ix docker restart`.
+	 */
+	pruneWorkspaceRegistry(options?: IxPruneWorkspaceRegistryOptions & { readonly restartDocker?: boolean }): Promise<{
+		readonly ok: boolean;
+		readonly output: string;
+		readonly exitCode: number;
+		readonly summary?: IxPruneWorkspaceRegistrySummary;
+		readonly error?: string;
+		readonly dockerRestarted?: boolean;
+	}>;
 }
 
 export const IIxIntegrationService = createDecorator<IIxIntegrationService>('ixIntegrationService');
@@ -99,6 +118,10 @@ const IX_BACKEND_PROBE_TIMEOUT_MS = 60_000;
 const IX_DOCKER_START_TIMEOUT_MS = 300_000;
 const IX_BACKEND_READY_RETRY_COUNT = 12;
 const IX_BACKEND_READY_RETRY_DELAY_MS = 10_000;
+/** After `ix docker restart` for a false-healthy / stuck-lock wedge. */
+const IX_BACKEND_RESTART_TIMEOUT_MS = 120_000;
+const IX_BACKEND_POST_RESTART_RETRY_COUNT = 6;
+const IX_BACKEND_POST_RESTART_RETRY_DELAY_MS = 5_000;
 
 function mapStepId(uri: URI): string {
 	return `map:${uri.toString()}`;
@@ -304,6 +327,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		@INotificationService private readonly notificationService: INotificationService,
 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
 		@IOpenerService private readonly openerService: IOpenerService,
+		@ILogService private readonly logService: ILogService,
 	) {
 		super();
 
@@ -687,6 +711,18 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		if (await this.probeIxBackendReachable(cwd, ixBin)) {
 			return true;
 		}
+		// Common wedge: Docker reports containers healthy but Arango/Memory Layer
+		// stuck-locks health checks — restart both, then short retry (do not wait
+		// through a full docker-start + long probe loop first).
+		if (await this.restartIxDockerBackend(cwd, ixBin)) {
+			for (let attempt = 0; attempt < IX_BACKEND_POST_RESTART_RETRY_COUNT; attempt++) {
+				if (await this.probeIxBackendReachable(cwd, ixBin)) {
+					this.logService.info('[Ix] Backend reachable after docker restart recovery');
+					return true;
+				}
+				await new Promise<void>(resolve => setTimeout(resolve, IX_BACKEND_POST_RESTART_RETRY_DELAY_MS));
+			}
+		}
 		const started = await this.ensureIxDockerStarted(cwd, ixBin, { ui: 'none' });
 		if (!started) {
 			return false;
@@ -698,6 +734,33 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			await new Promise<void>(resolve => setTimeout(resolve, IX_BACKEND_READY_RETRY_DELAY_MS));
 		}
 		return false;
+	}
+
+	/** Restart Ix Arango + Memory Layer containers (clears false-healthy stuck-lock). */
+	private async restartIxDockerBackend(cwd: URI, ixBin: string): Promise<boolean> {
+		this.logService.warn('[Ix] Backend unreachable while Docker is up — running `ix docker restart`');
+		try {
+			const restarted = await this.runCommand(
+				cwd,
+				`${this.quoteIx(ixBin)} docker restart`,
+				IX_BACKEND_RESTART_TIMEOUT_MS,
+				{ ui: 'none' },
+			);
+			if (restarted.exitCode === 0) {
+				return true;
+			}
+			this.logService.warn('[Ix] `ix docker restart` exited non-zero; trying docker restart of known containers');
+			const fallback = await this.runCommand(
+				cwd,
+				'docker restart backend-arangodb-1 backend-memory-layer-1',
+				IX_BACKEND_RESTART_TIMEOUT_MS,
+				{ ui: 'none' },
+			);
+			return fallback.exitCode === 0;
+		} catch (error: unknown) {
+			this.logService.warn('[Ix] Failed to restart Ix docker backend', error);
+			return false;
+		}
 	}
 
 	private async ensureIxDockerStarted(
@@ -759,6 +822,60 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 		const mapped = await this.runCommand(cwd, `${this.quoteIx(ixBin)} map --all-items .`, 600_000, { ui: 'none' });
 		return { statsPreview, ranMap: mapped.exitCode === 0, statsOk: mapped.exitCode === 0 };
+	}
+
+	async pruneWorkspaceRegistry(options?: IxPruneWorkspaceRegistryOptions & { readonly restartDocker?: boolean }): Promise<{
+		readonly ok: boolean;
+		readonly output: string;
+		readonly exitCode: number;
+		readonly summary?: IxPruneWorkspaceRegistrySummary;
+		readonly error?: string;
+		readonly dockerRestarted?: boolean;
+	}> {
+		if (isWeb) {
+			return { ok: false, output: '', exitCode: 1, error: 'Ix registry prune is not available on web.' };
+		}
+		const appRoot = this.environmentService.appRoot?.trim();
+		if (!appRoot) {
+			return { ok: false, output: '', exitCode: 1, error: 'Could not resolve Code OSS app root for prune script.' };
+		}
+		const scriptUri = joinPath(URI.file(appRoot), 'scripts', 'ix_prune_workspace_registry.py');
+		if (!await this.fileService.exists(scriptUri)) {
+			return { ok: false, output: '', exitCode: 1, error: `Missing prune script: ${scriptUri.fsPath}` };
+		}
+		const cwd = this.workspaceContextService.getWorkspace().folders[0]?.uri
+			?? this.environmentService.userHome;
+		const args = buildIxPruneWorkspaceRegistryArgs(options);
+		const command = [
+			'python3',
+			this.quoteShellArg(scriptUri.fsPath),
+			...args.map(arg => this.quoteShellArg(arg)),
+		].join(' ');
+		const result = await this.runCommand(cwd, command, 120_000, { ui: 'none' });
+		const summary = parseIxPruneWorkspaceRegistrySummary(result.output);
+		if (result.exitCode !== 0) {
+			return {
+				ok: false,
+				output: result.output,
+				exitCode: result.exitCode,
+				summary,
+				error: stripAnsi(result.output).trim() || `Prune script exited with code ${result.exitCode}`,
+			};
+		}
+		let dockerRestarted = false;
+		if (options?.apply && options.restartDocker) {
+			const ixBin = await this.resolveIxBinary(cwd);
+			if (ixBin) {
+				dockerRestarted = await this.restartIxDockerBackend(cwd, ixBin);
+			}
+		}
+		return {
+			ok: true,
+			output: result.output,
+			exitCode: result.exitCode,
+			summary,
+			dockerRestarted,
+		};
 	}
 
 	async mapPath(cwd: URI, relativePath: string, timeoutMs: number = 600_000): Promise<{ ok: true; raw: string; command: string } | { ok: false; error: string; raw: string; command: string; exitCode: number }> {

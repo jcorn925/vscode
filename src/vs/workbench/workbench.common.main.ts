@@ -426,6 +426,7 @@ import './contrib/editSessions/browser/editSessions.contribution.js';
 // Remote Coding Agents
 import './contrib/remoteCodingAgents/browser/remoteCodingAgents.contribution.js';
 import './contrib/custom/browser/modeShell.contribution.js';
+import './contrib/custom/browser/suppressConsoleFileQuickOpen.contribution.js';
 import './contrib/custom/browser/defaultProjectBootstrap.contribution.js';
 import './contrib/custom/browser/startupGuide.contribution.js';
 import './contrib/custom/browser/appLaunchGuide.contribution.js';

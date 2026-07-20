@@ -92,4 +92,15 @@ suite('surfacePlanOrchestration', () => {
 		assert.ok(buildClaudeDispatchNotification('Knowledge', false).includes('dispatched'));
 		assert.ok(buildClaudeDispatchNotification('Knowledge', true).includes('skipped'));
 	});
+
+	test('buildClaudeDispatchNotification uses Claude-direct copy', () => {
+		assert.strictEqual(
+			buildClaudeDispatchNotification('Knowledge', true, { claudeDirect: true }),
+			'Sent step to Claude: Knowledge',
+		);
+		assert.strictEqual(
+			buildClaudeDispatchNotification('Knowledge', false, { claudeDirect: true }),
+			'Sent step to Claude: Knowledge',
+		);
+	});
 });

@@ -108,6 +108,17 @@ suite('cadreSurfaceClaudeTemplate', () => {
 		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('Bash(git clone --depth 1 https://github.com/* .agent/references/*)'));
 		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('Bash(sleep *)'));
 		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('mcp__ix-graph__draft_proposal_from_workspace'));
+		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('Bash(ix docker restart)'));
+		assert.ok(CADRE_CLAUDE_SETTINGS_JSON.includes('Bash(docker restart backend-arangodb-1 backend-memory-layer-1)'));
+	});
+
+	test('CADRE_SURFACE_CLAUDE_MD documents Ix backend restart-and-retry', () => {
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Ix backend wedge'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('ix docker restart'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('Ix backend recovery (common)'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('backend-arangodb-1'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('ix_prune_workspace_registry.py'));
+		assert.ok(CADRE_SURFACE_CLAUDE_MD.includes('~/.ix/config.yaml'));
 	});
 
 	test('buildCadreClaudeMcpJson points stdio ix-graph at absolute script path', () => {

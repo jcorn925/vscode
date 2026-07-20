@@ -60,14 +60,14 @@ suite('surfacePlanPanel ownership', () => {
 			},
 		});
 
-		const tracker = root.querySelector('.custom-mode-surface-plan-status-tracker') as HTMLElement;
+		const tracker = panel.statusTrackerElement;
 		assert.strictEqual(tracker.dataset.surfaceId, 'cadre-support-bot');
 		assert.ok(tracker.getAttribute('aria-label')?.includes('Cadre AI Support Chatbot'));
-		assert.strictEqual(root.querySelector('.custom-mode-surface-plan-status-surface-chip'), null);
+		assert.strictEqual(tracker.querySelector('.custom-mode-surface-plan-status-surface-chip'), null);
 
 		panel.clear();
 		assert.strictEqual(tracker.dataset.surfaceId, undefined);
-		assert.strictEqual(root.querySelectorAll('.custom-mode-surface-plan-status-step').length, 0);
+		assert.strictEqual(tracker.querySelectorAll('.custom-mode-surface-plan-status-step').length, 0);
 
 		panel.dispose();
 	});

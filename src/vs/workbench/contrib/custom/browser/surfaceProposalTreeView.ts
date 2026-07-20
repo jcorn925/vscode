@@ -16,9 +16,18 @@ import type { SurfaceProposalProgress } from './surfaceProposalProgress.js';
 import {
 	orderSurfaceProposalTreeCards,
 	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+	SURFACE_PROPOSAL_TREE_SECTION_ORDER,
+	surfaceDescriptionCardValue,
 	type SurfaceProposalTreeCardItem,
 	type SurfaceProposalTreeGraphRegion,
 } from './surfaceProposalTreeCards.js';
+import {
+	formatPhaseProgressBadge,
+	resolveCurrentPhaseIndex,
+	resolvePhaseRowStatus,
+	resolveWorkstreamExecutionPresentation,
+	type WorkstreamExecutionPresentation,
+} from './workstreamExecutionPresentation.js';
 
 export type {
 	SurfaceProposalTreeCardItem,
@@ -26,9 +35,12 @@ export type {
 } from './surfaceProposalTreeCards.js';
 export {
 	orderSurfaceProposalTreeCards,
+	orderSurfaceProposalTreeSectionIds,
 	staticSurfaceProposalTreeCards,
+	surfaceDescriptionCardValue,
 	surfaceGraphRegionsCardValue,
 	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+	SURFACE_PROPOSAL_TREE_SECTION_ORDER,
 } from './surfaceProposalTreeCards.js';
 
 export interface SurfaceProposalTreePreviewInfo {
@@ -48,14 +60,32 @@ export interface SurfaceProposalTreeDocumentOptions {
 	readonly graphRegions?: readonly SurfaceProposalTreeGraphRegion[];
 	readonly graphMessage?: string;
 	readonly previewInfo?: SurfaceProposalTreePreviewInfo;
+	/** Surface purpose from workspace.goal.json — Description card / section body. */
+	readonly surfacePurpose?: string;
 	readonly referenceCandidates?: SurfaceReferenceCandidates;
 	readonly storageKey?: string;
 	readonly proposalMissingMessage?: string;
 	/**
-	 * When true, hide the Workstreams "Run parallel workstreams" button — Steps Next
-	 * already owns generate-phase fan-out for the current phase.
+	 * When true, hide the Workstreams run button — Steps Next already owns generate
+	 * for the current phase.
 	 */
 	readonly hideRunWorkstreamsButton?: boolean;
+	/**
+	 * Settings: when true, Run may spawn one Claude per parallel-safe workstream.
+	 * When false (default), Run uses one Claude for the whole surface.
+	 */
+	readonly parallelClaudeWorkstreamsEnabled?: boolean;
+	/** Current Steps row id — used to highlight the matching build phase. */
+	readonly currentStepId?: string;
+	/** True while phase-progress lists inflight workstream Claude keys. */
+	readonly workstreamsInflight?: boolean;
+	/** Per-phase Steps statuses (plus failed overlay from phase-progress). */
+	readonly phaseStatuses?: readonly {
+		readonly id: string;
+		readonly status: 'pending' | 'current' | 'completed' | 'skipped' | 'failed';
+	}[];
+	/** In-flight or failed note from phase-progress.json. */
+	readonly phaseProgressNote?: string;
 }
 
 export interface SurfaceProposalTreeToggleRepoRequest {
@@ -82,6 +112,9 @@ export class SurfaceProposalTreeView extends Disposable {
 
 	private readonly _onDidRequestRunWorkstreams = this._register(new Emitter<void>());
 	readonly onDidRequestRunWorkstreams: Event<void> = this._onDidRequestRunWorkstreams.event;
+
+	private readonly _onDidRequestRegenerateRealGraph = this._register(new Emitter<void>());
+	readonly onDidRequestRegenerateRealGraph: Event<void> = this._onDidRequestRegenerateRealGraph.event;
 
 	constructor(webviewService: IWebviewService, onReady: () => void) {
 		super();
@@ -135,6 +168,10 @@ export class SurfaceProposalTreeView extends Disposable {
 			}
 			if (message?.type === 'surfaceProposalTree.runWorkstreams') {
 				this._onDidRequestRunWorkstreams.fire();
+				return;
+			}
+			if (message?.type === 'surfaceProposalTree.regenerateRealGraph') {
+				this._onDidRequestRegenerateRealGraph.fire();
 			}
 		}));
 		this.setHtml();
@@ -146,7 +183,31 @@ export class SurfaceProposalTreeView extends Disposable {
 
 	setDocument(options: SurfaceProposalTreeDocumentOptions): void {
 		this.lastDocument = options;
-		void this.webview.postMessage({ type: 'surfaceProposalTree.setDocument', ...options });
+		const parallelStreamCount = options.partition?.workstreams?.length ?? 0;
+		const serializeCount = options.partition?.serializeGroups?.length ?? 0;
+		const workstreamExecution: WorkstreamExecutionPresentation | undefined =
+			(parallelStreamCount || serializeCount)
+				? resolveWorkstreamExecutionPresentation({
+					parallelEnabled: !!options.parallelClaudeWorkstreamsEnabled,
+					workstreamsInflight: !!options.workstreamsInflight,
+					parallelStreamCount,
+					canParallelize: !!options.partition?.canParallelize,
+					hideRunWorkstreamsButton: !!options.hideRunWorkstreamsButton,
+				})
+				: undefined;
+		const phases = options.proposal?.phases ?? [];
+		const currentPhaseIndex = resolveCurrentPhaseIndex(phases, options.currentStepId);
+		const phaseRowStatuses = phases.map((phase, index) =>
+			resolvePhaseRowStatus(phase.id, index, options.phaseStatuses, currentPhaseIndex));
+		const phasesProgressBadge = formatPhaseProgressBadge(phases.length, options.phaseStatuses);
+		void this.webview.postMessage({
+			type: 'surfaceProposalTree.setDocument',
+			...options,
+			workstreamExecution,
+			currentPhaseIndex,
+			phaseRowStatuses,
+			phasesProgressBadge,
+		});
 	}
 
 	republish(): void {
@@ -348,6 +409,15 @@ export class SurfaceProposalTreeView extends Disposable {
 			color: var(--vscode-textLink-foreground); word-break: break-all;
 		}
 		.preview-message { margin: 0; color: var(--vscode-descriptionForeground); }
+		.description-body {
+			padding: 12px 14px; white-space: pre-wrap;
+			font: 13px/1.55 var(--vscode-font-family); color: var(--vscode-foreground);
+		}
+		.description-body .description-label {
+			margin: 0 0 6px; font-size: 11px; font-weight: 600;
+			color: var(--vscode-descriptionForeground); text-transform: uppercase; letter-spacing: 0.04em;
+		}
+		.description-body .description-text { margin: 0; }
 		.sections {
 			min-width: 0;
 			min-height: 0;
@@ -517,6 +587,14 @@ export class SurfaceProposalTreeView extends Disposable {
 			color: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
 			background: color-mix(in srgb, var(--vscode-testing-iconPassed, var(--vscode-charts-green)) 18%, transparent);
 		}
+		.badge-parallel-ready {
+			color: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
+			background: color-mix(in srgb, var(--vscode-charts-blue, var(--vscode-textLink-foreground)) 16%, transparent);
+		}
+		.badge-cluster {
+			color: var(--vscode-descriptionForeground);
+			background: color-mix(in srgb, var(--vscode-descriptionForeground) 14%, transparent);
+		}
 		.badge-coupled {
 			color: var(--vscode-editorWarning-foreground, var(--vscode-charts-orange));
 			background: color-mix(in srgb, var(--vscode-editorWarning-foreground, var(--vscode-charts-orange)) 18%, transparent);
@@ -561,6 +639,43 @@ export class SurfaceProposalTreeView extends Disposable {
 		.parallel-run-btn:not(:disabled):hover {
 			background: var(--vscode-button-hoverBackground);
 		}
+		.graph-section-toolbar {
+			display: flex; justify-content: flex-end; align-items: center;
+			gap: 8px; padding: 8px 12px 0;
+		}
+		.graph-help-btn {
+			appearance: none; width: 24px; height: 24px; padding: 0;
+			border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+			border-radius: 999px;
+			background: var(--vscode-button-secondaryBackground, transparent);
+			color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+			font: 700 12px/1 var(--vscode-font-family); cursor: pointer;
+		}
+		.graph-help-btn:hover, .graph-help-btn[aria-expanded="true"] {
+			background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+		}
+		.graph-help-panel {
+			margin: 8px 12px 0; padding: 10px 12px;
+			border: 1px solid var(--vscode-panel-border);
+			border-radius: 6px;
+			background: var(--vscode-sideBar-background);
+			font: 12px/1.45 var(--vscode-font-family);
+			color: var(--vscode-foreground);
+		}
+		.graph-help-panel.hidden { display: none; }
+		.graph-help-panel p { margin: 0 0 8px; }
+		.graph-help-panel p:last-child { margin-bottom: 0; }
+		.graph-help-panel strong { font-weight: 600; }
+		.graph-regenerate-btn {
+			appearance: none; border: 1px solid var(--vscode-button-border, transparent);
+			border-radius: 6px; padding: 5px 10px;
+			background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+			color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+			font: 600 11px/1.3 var(--vscode-font-family); cursor: pointer;
+		}
+		.graph-regenerate-btn:hover {
+			background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
+		}
 		.serialize-block {
 			margin: 0 12px 12px; border: 1px solid var(--vscode-panel-border);
 			border-radius: 6px; background: var(--vscode-sideBar-background);
@@ -591,11 +706,68 @@ export class SurfaceProposalTreeView extends Disposable {
 			border-bottom: 1px solid var(--vscode-panel-border);
 		}
 		.phase:last-child { border-bottom: 0; }
+		.phase-current {
+			background: color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-textLink-foreground)) 8%, transparent);
+		}
+		.phase-done {
+			opacity: 0.78;
+		}
+		.phase-failed {
+			background: color-mix(in srgb, var(--vscode-testing-iconFailed, var(--vscode-errorForeground)) 8%, transparent);
+		}
+		.phase-header {
+			display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;
+		}
 		.phase-title {
-			margin: 0 0 8px; font-size: 13px; font-weight: 700;
+			margin: 0; font-size: 13px; font-weight: 700;
+		}
+		.phase-subtitle {
+			margin: 0 0 8px; color: var(--vscode-descriptionForeground); font-size: 11px;
+		}
+		.phase-note {
+			margin: 0 0 8px; color: var(--vscode-descriptionForeground); font-size: 11px;
+			white-space: pre-wrap;
+		}
+		.phase-note.phase-note-error {
+			color: var(--vscode-testing-iconFailed, var(--vscode-errorForeground));
 		}
 		.phase-items {
 			margin: 0; padding-left: 18px;
+		}
+		.phase-done .phase-items {
+			text-decoration: line-through;
+			text-decoration-color: color-mix(in srgb, var(--vscode-descriptionForeground) 55%, transparent);
+		}
+		.badge-phase-done {
+			color: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
+			background: color-mix(in srgb, var(--vscode-testing-iconPassed, var(--vscode-charts-green)) 18%, transparent);
+		}
+		.badge-phase-current {
+			color: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
+			background: color-mix(in srgb, var(--vscode-charts-blue, var(--vscode-textLink-foreground)) 16%, transparent);
+		}
+		.badge-phase-pending {
+			color: var(--vscode-descriptionForeground);
+			background: color-mix(in srgb, var(--vscode-descriptionForeground) 14%, transparent);
+		}
+		.badge-phase-failed {
+			color: var(--vscode-testing-iconFailed, var(--vscode-errorForeground));
+			background: color-mix(in srgb, var(--vscode-testing-iconFailed, var(--vscode-errorForeground)) 18%, transparent);
+		}
+		.badge-phase-skipped {
+			color: var(--vscode-descriptionForeground);
+			background: color-mix(in srgb, var(--vscode-descriptionForeground) 14%, transparent);
+		}
+		.execution-block {
+			margin: 0; border-top: 1px solid var(--vscode-panel-border);
+			background: var(--vscode-sideBar-background);
+		}
+		.execution-block > summary {
+			cursor: pointer; user-select: none; padding: 10px 14px;
+			font-weight: 600; font-size: 12px;
+		}
+		.execution-block[open] > summary {
+			border-bottom: 1px solid var(--vscode-panel-border);
 		}
 		.phase-items li {
 			margin: 4px 0;
@@ -823,9 +995,14 @@ export class SurfaceProposalTreeView extends Disposable {
 			function focusSection(id, options) {
 				const flash = !options || options.flash !== false;
 				// Legacy Files / Relationships / Architecture cards redirect into Proposed Graph tabs.
+				// Workstreams nest under Build phases — open phases and expand the execution anchor.
 				let sectionId = id;
 				let tabId = options && options.tab;
-				if (id === 'files' || id === 'relationships' || id === 'architecture') {
+				let openExecution = false;
+				if (id === 'workstreams') {
+					sectionId = 'phases';
+					openExecution = true;
+				} else if (id === 'files' || id === 'relationships' || id === 'architecture') {
 					sectionId = 'proposed';
 					tabId = id === 'relationships' ? 'relationships' : 'files';
 				} else if (id === 'proposed' && !tabId) {
@@ -838,7 +1015,16 @@ export class SurfaceProposalTreeView extends Disposable {
 				if (!sectionEl) {
 					return;
 				}
-				sectionEl.open = true;
+				// Card selection owns expand state — collapse every other section.
+				for (const other of content.querySelectorAll('details.section')) {
+					other.open = other === sectionEl;
+				}
+				if (openExecution) {
+					const exec = sectionEl.querySelector('details.execution-block[data-section="workstreams"]');
+					if (exec) {
+						exec.open = true;
+					}
+				}
 				if (tabId && sectionEl.querySelector('.graph-view-tabs')) {
 					setGraphTab(sectionId, tabId);
 				}
@@ -898,7 +1084,7 @@ export class SurfaceProposalTreeView extends Disposable {
 				return li;
 			}
 
-			function section(id, title, count, open = true) {
+			function section(id, title, count, open = false) {
 				const details = el('details', 'section');
 				details.dataset.section = id;
 				details.open = open;
@@ -1031,7 +1217,8 @@ export class SurfaceProposalTreeView extends Disposable {
 
 			/**
 			 * Real Graph — same shape as Proposed (files + relationships), not Ix subsystem blobs.
-			 * Prefer compare-matched files/edges; else Ix memberFiles + proposal edges that land on them.
+			 * Prefer on-disk Ix member files (actual code); fall back to compare-matched proposal nodes.
+			 * Match ratios stay on Repo Context / Workstreams cards — not this graph.
 			 */
 			function buildCodeDrawableGraph(regions, proposal, diffGraph) {
 				const fromFiles = (fileIds, relEdges, legendSuffix) => {
@@ -1083,38 +1270,7 @@ export class SurfaceProposalTreeView extends Disposable {
 					};
 				};
 
-				// 1) Compare snapshot: only files/edges that exist in the live clone.
-				if (diffGraph && Array.isArray(diffGraph.nodes)) {
-					const matchedNodes = diffGraph.nodes.filter(n => !n.status || n.status === 'matched');
-					if (matchedNodes.length) {
-						const matchedIds = new Set(matchedNodes.map(n => String(n.id)));
-						const fileIds = matchedNodes.map(n => n.canonicalId || n.label || n.id);
-						const relEdges = (diffGraph.edges || [])
-							.filter(e => (!e.status || e.status === 'matched')
-								&& matchedIds.has(String(e.from))
-								&& matchedIds.has(String(e.to)))
-							.map(e => ({
-								src: e.from,
-								dst: e.to,
-								predicate: e.label || e.predicate || 'IMPORTS',
-							}));
-						// Map edge ends through node ids → canonical paths when possible.
-						const idToCanonical = new Map(
-							matchedNodes.map(n => [String(n.id), n.canonicalId || n.label || n.id]),
-						);
-						const canonicalEdges = relEdges.map(e => ({
-							src: idToCanonical.get(String(e.src)) || e.src,
-							dst: idToCanonical.get(String(e.dst)) || e.dst,
-							predicate: e.predicate,
-						}));
-						const built = fromFiles(fileIds, canonicalEdges, 'grouped by folder · matched in clone');
-						if (built) {
-							return built;
-						}
-					}
-				}
-
-				// 2) Ix member files (same visual unit as Proposed), edges from proposal when both ends exist.
+				// 1) On-disk / Ix members — the real app surface, not only proposal matches.
 				const memberFiles = [];
 				for (const region of regions || []) {
 					for (const file of region.memberFiles || []) {
@@ -1133,6 +1289,36 @@ export class SurfaceProposalTreeView extends Disposable {
 					const built = fromFiles(memberFiles, relEdges, 'grouped by folder · from Ix members');
 					if (built) {
 						return built;
+					}
+				}
+
+				// 2) Fallback: compare-matched proposal nodes when Ix members are unavailable.
+				if (diffGraph && Array.isArray(diffGraph.nodes)) {
+					const matchedNodes = diffGraph.nodes.filter(n => !n.status || n.status === 'matched');
+					if (matchedNodes.length) {
+						const matchedIds = new Set(matchedNodes.map(n => String(n.id)));
+						const fileIds = matchedNodes.map(n => n.canonicalId || n.label || n.id);
+						const relEdges = (diffGraph.edges || [])
+							.filter(e => (!e.status || e.status === 'matched')
+								&& matchedIds.has(String(e.from))
+								&& matchedIds.has(String(e.to)))
+							.map(e => ({
+								src: e.from,
+								dst: e.to,
+								predicate: e.label || e.predicate || 'IMPORTS',
+							}));
+						const idToCanonical = new Map(
+							matchedNodes.map(n => [String(n.id), n.canonicalId || n.label || n.id]),
+						);
+						const canonicalEdges = relEdges.map(e => ({
+							src: idToCanonical.get(String(e.src)) || e.src,
+							dst: idToCanonical.get(String(e.dst)) || e.dst,
+							predicate: e.predicate,
+						}));
+						const built = fromFiles(fileIds, canonicalEdges, 'grouped by folder · matched in clone');
+						if (built) {
+							return built;
+						}
 					}
 				}
 
@@ -1184,6 +1370,28 @@ export class SurfaceProposalTreeView extends Disposable {
 			 * (Proposed Graph and Real Graph share this chrome).
 			 * Files tab includes architecture # comments when provided.
 			 */
+			function appendGraphHelpPanel(kind) {
+				const panel = el('div', 'graph-help-panel hidden');
+				panel.setAttribute('role', 'region');
+				panel.setAttribute('aria-label', 'How graphs are generated');
+				const viewLine = kind === 'proposed'
+					? 'Proposed Graph shows Claude-authored target files and structural IMPORTS from the proposal (add_nodes / add_edges).'
+					: 'Real Graph shows the Ix map of on-disk members and relationships. Regenerate re-runs that map.';
+				panel.append(el('p', '', viewLine));
+				const cluster = el('p', '');
+				cluster.append(
+					el('strong', '', 'Clustering. '),
+					document.createTextNode('Ix uses community detection (Louvain-style) to label regions on the code graph so humans and agents can reason about subsystems. Console workstreams partition the IMPORTS spine into structural connected components (soft links ignored). This canvas lays out by folder columns for readability.'),
+				);
+				const accuracy = el('p', '');
+				accuracy.append(
+					el('strong', '', 'Accuracy. '),
+					document.createTextNode('Proposed vs Real comparison is recall-gated: every proposed structural node and edge must appear in the live graph. That catches missing wiring without failing on extra live detail. Fuller proposed edges keep the visualization honest and the verification target aligned with real imports.'),
+				);
+				panel.append(cluster, accuracy);
+				return panel;
+			}
+
 			function appendGraphSection(sections, id, title, drawable, emptyMessage, listOptions) {
 				const files = listOptions && listOptions.files ? listOptions.files : [];
 				const relationships = listOptions && listOptions.relationships ? listOptions.relationships : [];
@@ -1193,6 +1401,33 @@ export class SurfaceProposalTreeView extends Disposable {
 				const architecture = listOptions && listOptions.architecture;
 				const hasLists = files.length > 0 || relationships.length > 0;
 				const graphSection = section(id, title, drawable.cardValue || '—', false);
+
+				const toolbar = el('div', 'graph-section-toolbar');
+				const helpBtn = el('button', 'graph-help-btn', '?');
+				helpBtn.type = 'button';
+				helpBtn.title = 'How graphs are generated';
+				helpBtn.setAttribute('aria-label', 'How graphs are generated');
+				helpBtn.setAttribute('aria-expanded', 'false');
+				const helpPanel = appendGraphHelpPanel(id === 'proposed' ? 'proposed' : 'real');
+				helpBtn.addEventListener('click', (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					const open = helpPanel.classList.toggle('hidden') === false;
+					helpBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+				});
+				toolbar.append(helpBtn);
+				if (id === 'graph') {
+					const regen = el('button', 'graph-regenerate-btn', 'Regenerate');
+					regen.type = 'button';
+					regen.title = 'Re-run Ix map and rebuild Real Graph from on-disk files';
+					regen.addEventListener('click', (event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						vscode.postMessage({ type: 'surfaceProposalTree.regenerateRealGraph' });
+					});
+					toolbar.append(regen);
+				}
+				graphSection.append(toolbar, helpPanel);
 
 				if (hasLists) {
 					const tabs = el('div', 'graph-view-tabs');
@@ -1728,26 +1963,20 @@ export class SurfaceProposalTreeView extends Disposable {
 					hasCompare ? diffGraph : undefined,
 				);
 				const previewInfo = options.previewInfo;
+				const surfacePurpose = (options.surfacePurpose || '').trim();
 				const referenceCandidates = options.referenceCandidates;
 				const proposalMissingMessage = options.proposalMissingMessage;
 				const hideRunWorkstreamsButton = !!options.hideRunWorkstreamsButton;
+				const parallelClaudeWorkstreamsEnabled = !!options.parallelClaudeWorkstreamsEnabled;
 				// File watchers republish often — keep the user's place instead of snapping to top.
 				const previousSections = content.querySelector('.sections');
 				const previousScrollTop = previousSections ? previousSections.scrollTop : 0;
 				content.replaceChildren();
 
 				const cards = [];
-				const sections = [];
-
-				// One column of section toggles — no separate view switching.
-				// Rail card order: progress/views first; Rules/Plan trail (not pinned to top).
-				const rulesSection = section('rules', 'CLAUDE.md', claudeMdMarkdown ? 'md' : '—', true);
-				if (claudeMdMarkdown && claudeMdMarkdown.trim()) {
-					rulesSection.append(renderPlanMarkdown(claudeMdMarkdown));
-				} else {
-					rulesSection.append(el('div', 'empty', claudeMdMessage || 'CLAUDE.md not found.'));
-				}
-				sections.push(rulesSection);
+				/** @type {Record<string, HTMLElement>} */
+				const sectionById = Object.create(null);
+				const SECTION_ORDER = ${JSON.stringify(Array.from(SURFACE_PROPOSAL_TREE_SECTION_ORDER))};
 
 				// Creation-time proposal viz + live Code Graph — same card chrome / SVG style.
 				// Files / Relationships live as tabs inside each graph (not separate rail cards).
@@ -1757,15 +1986,289 @@ export class SurfaceProposalTreeView extends Disposable {
 				// Compare match ratios (matched/total) stay on Workstreams / Real Graph progress.
 				const proposedFilesValueEarly = proposedNodesEarly.length ? String(proposedNodesEarly.length) : '—';
 				const proposedRelsValueEarly = proposedEdgesEarly.length ? String(proposedEdgesEarly.length) : '—';
+
+				// Build phases first when present (Canvas + Workspace share SECTION_ORDER).
+				if (proposal) {
+					const parallelStreams = partition?.workstreams ?? [];
+					const serializeGroups = partition?.serializeGroups ?? [];
+					const phases = proposal.phases || [];
+					const workstreamExecution = options.workstreamExecution;
+					const currentPhaseIndex = typeof options.currentPhaseIndex === 'number'
+						? options.currentPhaseIndex
+						: undefined;
+					const hasExecution = !!(parallelStreams.length || serializeGroups.length);
+
+					if (phases.length || hasExecution) {
+						const phasesCardValue = phases.length
+							? (options.phasesProgressBadge || String(phases.length))
+							: (progress
+								? progressValue(progress.workstreamsComplete, progress.workstreamsTotal, hasCompare)
+								: String(parallelStreams.length || serializeGroups.length));
+						cards.push(metaCard('phases', 'Build phases', phasesCardValue));
+						const phasesSection = section('phases', 'Build phases', phasesCardValue);
+
+						const renderStreamCard = (stream, opts) => {
+							const card = el('div', 'workstream');
+							const header = el('div', 'workstream-header');
+							header.append(
+								el('span', 'workstream-id', stream.id),
+								el('span', 'workstream-label', stream.label),
+								el('span', 'badge ' + (opts.badgeClass || 'badge-cluster'), opts.badgeLabel || 'cluster')
+							);
+							card.append(header);
+							const streamProgress = workstreamProgressById.get(stream.id);
+							const filesLabel = streamProgress && hasCompare
+								? (streamProgress.matchedNodes + '/' + streamProgress.totalNodes + ' files')
+								: (stream.nodes.length + ' files');
+							card.append(el('div', 'workstream-meta',
+								filesLabel + ' · ' + stream.edges.length + ' structural edges'));
+							const files = el('details', 'workstream-files');
+							files.append(el('summary', '', 'Show ' + stream.nodes.length + ' files'));
+							const nodeList = el('ul', 'workstream-nodes');
+							for (const node of stream.nodes) {
+								nodeList.append(el('li', '', clean(node)));
+							}
+							files.append(nodeList);
+							card.append(files);
+							if (stream.sharedPrefixes?.length) {
+								card.append(el('p', 'workstream-note',
+									'Shared prefixes: ' + stream.sharedPrefixes.join(', ')));
+							}
+							return card;
+						};
+
+						const phaseRowStatuses = Array.isArray(options.phaseRowStatuses) ? options.phaseRowStatuses : [];
+						const phaseProgressNote = typeof options.phaseProgressNote === 'string'
+							? options.phaseProgressNote.trim()
+							: '';
+						const phaseBadgeMeta = {
+							completed: { label: 'Done', className: 'badge-phase-done', rowClass: 'phase-done' },
+							current: { label: 'Current', className: 'badge-phase-current', rowClass: 'phase-current' },
+							pending: { label: 'Up next', className: 'badge-phase-pending', rowClass: 'phase-pending' },
+							skipped: { label: 'Skipped', className: 'badge-phase-skipped', rowClass: 'phase-skipped' },
+							failed: { label: 'Failed', className: 'badge-phase-failed', rowClass: 'phase-failed' },
+						};
+						for (let i = 0; i < phases.length; i++) {
+							const phase = phases[i];
+							const rowStatus = phaseRowStatuses[i];
+							const meta = rowStatus ? phaseBadgeMeta[rowStatus] : undefined;
+							const phaseEl = el('div', 'phase' + (meta ? ' ' + meta.rowClass : ''));
+							const header = el('div', 'phase-header');
+							header.append(el('h3', 'phase-title', phase.title || phase.id || 'Phase'));
+							if (meta) {
+								header.append(el('span', 'badge ' + meta.className, meta.label));
+							}
+							phaseEl.append(header);
+							if (rowStatus === 'completed') {
+								phaseEl.append(el('div', 'phase-subtitle', 'Completed'));
+							} else if (rowStatus === 'current') {
+								let subtitle = 'Phase ' + (i + 1) + ' of ' + phases.length;
+								if (hasCompare && progress && progress.workstreamsTotal > 0) {
+									subtitle += ' · ' + progress.workstreamsComplete + '/' + progress.workstreamsTotal + ' clusters';
+								}
+								phaseEl.append(el('div', 'phase-subtitle', subtitle));
+								if (phaseProgressNote) {
+									phaseEl.append(el('div', 'phase-note', phaseProgressNote));
+								}
+							} else if (rowStatus === 'failed') {
+								phaseEl.append(el('div', 'phase-subtitle', 'Failed'));
+								if (phaseProgressNote) {
+									phaseEl.append(el('div', 'phase-note phase-note-error', phaseProgressNote));
+								}
+							} else if (rowStatus === 'skipped') {
+								phaseEl.append(el('div', 'phase-subtitle', 'Skipped'));
+							} else if (rowStatus === 'pending') {
+								phaseEl.append(el('div', 'phase-subtitle', 'Up next'));
+							}
+							const items = el('ul', 'phase-items');
+							for (const item of phase.items || []) {
+								items.append(el('li', '', item));
+							}
+							phaseEl.append(items);
+							phasesSection.append(phaseEl);
+						}
+
+						if (hasExecution && workstreamExecution) {
+							const execBlock = el('details', 'execution-block');
+							execBlock.dataset.section = 'workstreams';
+							execBlock.open = !!workstreamExecution.openByDefault;
+							const execSummaryLabel = parallelClaudeWorkstreamsEnabled
+								? ('Execution · ' + (parallelStreams.length || 0) + ' stream'
+									+ ((parallelStreams.length || 0) === 1 ? '' : 's'))
+								: ('Execution · one Claude · ' + (parallelStreams.length || serializeGroups.length)
+									+ ' cluster' + ((parallelStreams.length || serializeGroups.length) === 1 ? '' : 's'));
+							execBlock.append(el('summary', '', execSummaryLabel));
+
+							const banner = el('div', 'parallel-banner');
+							banner.append(el('div', '', workstreamExecution.summaryLine));
+							if (workstreamExecution.noteLine) {
+								banner.append(el('div', 'parallel-banner-note', workstreamExecution.noteLine));
+							}
+							if (!hideRunWorkstreamsButton) {
+								const actions = el('div', 'parallel-banner-actions');
+								const runBtn = el('button', 'parallel-run-btn', parallelClaudeWorkstreamsEnabled
+									? 'Run parallel workstreams'
+									: 'Run workstreams');
+								runBtn.type = 'button';
+								runBtn.disabled = parallelClaudeWorkstreamsEnabled && !partition?.canParallelize;
+								runBtn.title = parallelClaudeWorkstreamsEnabled
+									? (partition?.canParallelize
+										? 'Spawn one Claude Code session per parallel-safe workstream'
+										: 'Need ≥2 parallel-safe workstreams (no shared node_prefixes)')
+									: 'Run generate with one Claude for this surface';
+								runBtn.addEventListener('click', () => {
+									vscode.postMessage({ type: 'surfaceProposalTree.runWorkstreams' });
+								});
+								actions.append(runBtn);
+								banner.append(actions);
+							}
+							execBlock.append(banner);
+
+							if (parallelStreams.length) {
+								const list = el('div', 'workstreams');
+								for (const stream of parallelStreams) {
+									list.append(renderStreamCard(stream, {
+										badgeClass: workstreamExecution.badgeClass,
+										badgeLabel: workstreamExecution.badgeLabel,
+									}));
+								}
+								execBlock.append(list);
+							}
+
+							if (serializeGroups.length) {
+								const serializeBlock = el('details', 'serialize-block');
+								serializeBlock.append(el('summary', '',
+									'Do first · ' + serializeGroups.length + ' coupled cluster'
+									+ (serializeGroups.length === 1 ? '' : 's')));
+								const serializeList = el('div', 'workstreams');
+								for (const stream of serializeGroups) {
+									serializeList.append(renderStreamCard(stream, {
+										badgeClass: 'badge-coupled',
+										badgeLabel: 'serialize',
+									}));
+								}
+								serializeBlock.append(serializeList);
+								execBlock.append(serializeBlock);
+							}
+
+							phasesSection.append(execBlock);
+						}
+
+						sectionById.phases = phasesSection;
+					}
+
+					const removals = (proposal.remove_nodes?.length || 0) + (proposal.remove_edges?.length || 0);
+					if (removals) {
+						cards.push(metaCard('removals', 'Removals', removals));
+						const removalSection = section('removals', 'Removals', removals, false);
+						const removalBody = el('div', 'prefixes');
+						for (const node of proposal.remove_nodes || []) removalBody.append(el('span', 'prefix', clean(node)));
+						for (const edge of proposal.remove_edges || []) removalBody.append(el('span', 'prefix', JSON.stringify(edge)));
+						removalSection.append(removalBody);
+						sectionById.removals = removalSection;
+					}
+				}
+
 				cards.push(metaCard('proposed', 'Proposed Graph', proposedGraph.cardValue || '—'));
 				cards.push(metaCard('graph', 'Real Graph', codeGraph.cardValue || '—'));
 				cards.push(metaCard('preview', 'Preview', previewInfo?.localUrl ? 'URL' : '—'));
+
+				const intentFromPlan = (() => {
+					if (!planMarkdown || !planMarkdown.trim()) {
+						return '';
+					}
+					const match = /##\s*Intent\s*\n([\s\S]*?)(?=\n##\s|$)/i.exec(planMarkdown);
+					return (match && match[1] ? match[1] : '').trim();
+				})();
+				const descriptionBodyText = surfacePurpose || intentFromPlan;
+				let descriptionBadge = '—';
+				if (surfacePurpose) {
+					const firstLine = surfacePurpose.split(/\r?\n/, 1)[0].trim();
+					descriptionBadge = firstLine.length <= 28
+						? firstLine
+						: firstLine.slice(0, 27).trimEnd() + '…';
+				} else if (intentFromPlan) {
+					descriptionBadge = 'Intent';
+				}
+				cards.push(metaCard('description', 'Description', descriptionBadge));
+
+				const graphSections = [];
+				appendGraphSection(
+					graphSections,
+					'proposed',
+					'Proposed Graph',
+					proposedGraph,
+					proposalMissingMessage
+						|| 'No proposed code graph yet. Claude drafts files + relationships into the proposal during surface creation.',
+					{
+						files: proposedNodesEarly,
+						relationships: proposedEdgesEarly,
+						filesValue: proposedFilesValueEarly,
+						relationshipsValue: proposedRelsValueEarly,
+						architecture: proposal?.architecture,
+					},
+				);
+				if (graphSections[0]) {
+					sectionById.proposed = graphSections[0];
+				}
+				const realFileIds = (codeGraph.nodes || []).map(n => n.path || n.id).filter(Boolean);
+				const realEdgeDocs = (codeGraph.edges || []).map(edge => ({
+					from: (codeGraph.nodes || []).find(n => n.id === edge.from)?.path || edge.from,
+					to: (codeGraph.nodes || []).find(n => n.id === edge.to)?.path || edge.to,
+					label: edge.label || 'links',
+				}));
+				const realGraphSections = [];
+				appendGraphSection(
+					realGraphSections,
+					'graph',
+					'Real Graph',
+					codeGraph,
+					graphMessage
+						|| 'No real graph yet. On-disk Ix member files + relationships will appear here — same layout as Proposed Graph.',
+					{
+						files: realFileIds,
+						relationships: realEdgeDocs,
+						filesValue: realFileIds.length ? String(realFileIds.length) : '—',
+						relationshipsValue: realEdgeDocs.length ? String(realEdgeDocs.length) : '—',
+					},
+				);
+				if (realGraphSections[0]) {
+					sectionById.graph = realGraphSections[0];
+				}
+
+				const previewSection = section('preview', 'Live app preview', previewInfo?.localUrl ? 'url' : '—', false);
+				const previewBody = el('div', 'preview-body');
+				if (previewInfo?.localUrl) {
+					previewBody.append(el('p', 'preview-url', previewInfo.localUrl));
+				}
+				previewBody.append(el('p', 'preview-message', previewInfo?.message || 'Preview not configured.'));
+				previewSection.append(previewBody);
+				sectionById.preview = previewSection;
+
+				const descriptionSection = section('description', 'Description', descriptionBadge, false);
+				if (descriptionBodyText) {
+					const descriptionBody = el('div', 'description-body');
+					descriptionBody.append(el(
+						'p',
+						'description-label',
+						surfacePurpose ? 'Purpose' : 'Intent',
+					));
+					descriptionBody.append(el('p', 'description-text', descriptionBodyText));
+					descriptionSection.append(descriptionBody);
+				} else {
+					descriptionSection.append(el(
+						'div',
+						'empty',
+						'No surface purpose yet. Set purpose on this surface in workspace.goal.json, or add an Intent section to plan.md.',
+					));
+				}
+				sectionById.description = descriptionSection;
 
 				if (referenceCandidates?.repos?.length) {
 					const selectedCount = referenceCandidates.repos.filter(r => r.selected).length;
 					cards.push(metaCard('context', 'Repo Context', selectedCount + '/' + referenceCandidates.repos.length));
 					const awaiting = referenceCandidates.status === 'awaiting_selection';
-					const contextSection = section('context', 'Research context repos', referenceCandidates.repos.length, true);
+					const contextSection = section('context', 'Research context repos', referenceCandidates.repos.length);
 					const body = el('div', 'refs-body');
 					body.append(el('p', 'refs-hint', awaiting
 						? 'Suggested repos are selected. Toggle any repo, then continue. Reasons cite plan.md Research.'
@@ -1823,205 +2326,61 @@ export class SurfaceProposalTreeView extends Disposable {
 						body.append(actions);
 					}
 					contextSection.append(body);
-					sections.push(contextSection);
+					sectionById.context = contextSection;
 				}
 
 				if (planMarkdown && planMarkdown.trim()) {
-					const planSection = section('plan', 'Plan', 'md', true);
+					const planSection = section('plan', 'Plan', 'md');
 					planSection.append(renderPlanMarkdown(planMarkdown));
-					sections.push(planSection);
-				} else {
-					const planSection = section('plan', 'Plan', '—', true);
-					planSection.append(el('div', 'empty', 'No plan.md yet.'));
-					sections.push(planSection);
-				}
-
-				appendGraphSection(
-					sections,
-					'proposed',
-					'Proposed Graph',
-					proposedGraph,
-					proposalMissingMessage
-						|| 'No proposed code graph yet. Claude drafts files + relationships into the proposal during surface creation.',
-					{
-						files: proposedNodesEarly,
-						relationships: proposedEdgesEarly,
-						filesValue: proposedFilesValueEarly,
-						relationshipsValue: proposedRelsValueEarly,
-						architecture: proposal?.architecture,
-					},
-				);
-				const realFileIds = (codeGraph.nodes || []).map(n => n.path || n.id).filter(Boolean);
-				const realEdgeDocs = (codeGraph.edges || []).map(edge => ({
-					from: (codeGraph.nodes || []).find(n => n.id === edge.from)?.path || edge.from,
-					to: (codeGraph.nodes || []).find(n => n.id === edge.to)?.path || edge.to,
-					label: edge.label || 'links',
-				}));
-				appendGraphSection(
-					sections,
-					'graph',
-					'Real Graph',
-					codeGraph,
-					graphMessage
-						|| 'No real graph yet. Matched clone files (or Ix member files) + relationships will appear here — same layout as Proposed Graph.',
-					{
-						files: realFileIds,
-						relationships: realEdgeDocs,
-						filesValue: realFileIds.length ? String(realFileIds.length) : '—',
-						relationshipsValue: realEdgeDocs.length ? String(realEdgeDocs.length) : '—',
-					},
-				);
-
-				const previewSection = section('preview', 'Live app preview', previewInfo?.localUrl ? 'url' : '—', false);
-				const previewBody = el('div', 'preview-body');
-				if (previewInfo?.localUrl) {
-					previewBody.append(el('p', 'preview-url', previewInfo.localUrl));
-				}
-				previewBody.append(el('p', 'preview-message', previewInfo?.message || 'Preview not configured.'));
-				previewSection.append(previewBody);
-				sections.push(previewSection);
-
-				if (proposal) {
-					const parallelStreams = partition?.workstreams ?? [];
-					const serializeGroups = partition?.serializeGroups ?? [];
-					if (parallelStreams.length || serializeGroups.length) {
-						const wsCardValue = progress
-							? progressValue(progress.workstreamsComplete, progress.workstreamsTotal, hasCompare)
-							: String(parallelStreams.length);
-						cards.push(metaCard('workstreams', 'Workstreams', wsCardValue));
-						const wsSection = section('workstreams', 'Parallel workstreams', wsCardValue, true);
-						const banner = el('div', 'parallel-banner');
-						if (partition?.canParallelize) {
-							banner.append(el('div', '', parallelStreams.length + ' subsystems can run as parallel Claude instances.'));
-							banner.append(el('div', 'parallel-banner-note', hideRunWorkstreamsButton
-								? 'Steps Next on the current generate phase spawns these automatically. Structural clusters only; soft links ignored.'
-								: 'Structural clusters only; soft links (REGISTERS/DESCRIBES) ignored. Coupled clusters serialize first.'));
-						} else if (parallelStreams.length === 1 && !serializeGroups.length) {
-							banner.append(el('div', '', 'Single subsystem — run as one agent stream.'));
-						} else if (!parallelStreams.length && serializeGroups.length) {
-							banner.append(el('div', '', 'No parallel subsystems yet — shared prefixes couple these clusters. Serialize first or assign one owner.'));
-						} else {
-							banner.append(el('div', '', 'Only one parallel subsystem; remaining clusters share prefixes and must serialize.'));
-						}
-						if (!hideRunWorkstreamsButton) {
-							const actions = el('div', 'parallel-banner-actions');
-							const runBtn = el('button', 'parallel-run-btn', 'Run parallel workstreams');
-							runBtn.type = 'button';
-							runBtn.disabled = !partition?.canParallelize;
-							runBtn.title = partition?.canParallelize
-								? 'Spawn one Claude Code session per parallel-safe workstream'
-								: 'Need ≥2 parallel-safe workstreams (no shared node_prefixes)';
-							runBtn.addEventListener('click', () => {
-								vscode.postMessage({ type: 'surfaceProposalTree.runWorkstreams' });
-							});
-							actions.append(runBtn);
-							banner.append(actions);
-						}
-						wsSection.append(banner);
-
-						const renderStreamCard = (stream, opts) => {
-							const card = el('div', 'workstream');
-							const header = el('div', 'workstream-header');
-							header.append(
-								el('span', 'workstream-id', stream.id),
-								el('span', 'workstream-label', stream.label),
-								el('span', 'badge ' + (opts.badgeClass || 'badge-parallel'), opts.badgeLabel || 'parallel')
-							);
-							card.append(header);
-							const streamProgress = workstreamProgressById.get(stream.id);
-							const filesLabel = streamProgress && hasCompare
-								? (streamProgress.matchedNodes + '/' + streamProgress.totalNodes + ' files')
-								: (stream.nodes.length + ' files');
-							card.append(el('div', 'workstream-meta',
-								filesLabel + ' · ' + stream.edges.length + ' structural edges'));
-							const files = el('details', 'workstream-files');
-							files.append(el('summary', '', 'Show ' + stream.nodes.length + ' files'));
-							const nodeList = el('ul', 'workstream-nodes');
-							for (const node of stream.nodes) {
-								nodeList.append(el('li', '', clean(node)));
-							}
-							files.append(nodeList);
-							card.append(files);
-							if (stream.sharedPrefixes?.length) {
-								card.append(el('p', 'workstream-note',
-									'Shared prefixes: ' + stream.sharedPrefixes.join(', ')));
-							}
-							return card;
-						};
-
-						if (parallelStreams.length) {
-							const list = el('div', 'workstreams');
-							for (const stream of parallelStreams) {
-								list.append(renderStreamCard(stream, {
-									badgeClass: 'badge-parallel',
-									badgeLabel: 'parallel',
-								}));
-							}
-							wsSection.append(list);
-						}
-
-						if (serializeGroups.length) {
-							const serializeBlock = el('details', 'serialize-block');
-							serializeBlock.append(el('summary', '',
-								'Serialize first · ' + serializeGroups.length + ' coupled cluster'
-								+ (serializeGroups.length === 1 ? '' : 's')));
-							const serializeList = el('div', 'workstreams');
-							for (const stream of serializeGroups) {
-								serializeList.append(renderStreamCard(stream, {
-									badgeClass: 'badge-coupled',
-									badgeLabel: 'serialize',
-								}));
-							}
-							serializeBlock.append(serializeList);
-							wsSection.append(serializeBlock);
-						}
-
-						sections.push(wsSection);
-					}
-
-					const phases = proposal.phases || [];
-					if (phases.length) {
-						cards.push(metaCard('phases', 'Phases', phases.length));
-						const phasesSection = section('phases', 'Phased checklist', phases.length);
-						for (const phase of phases) {
-							const phaseEl = el('div', 'phase');
-							phaseEl.append(el('h3', 'phase-title', phase.title || phase.id || 'Phase'));
-							const items = el('ul', 'phase-items');
-							for (const item of phase.items || []) {
-								items.append(el('li', '', item));
-							}
-							phaseEl.append(items);
-							phasesSection.append(phaseEl);
-						}
-						sections.push(phasesSection);
-					}
-
-					const removals = (proposal.remove_nodes?.length || 0) + (proposal.remove_edges?.length || 0);
-					if (removals) {
-						cards.push(metaCard('removals', 'Removals', removals));
-						const removalSection = section('removals', 'Removals', removals, false);
-						const removalBody = el('div', 'prefixes');
-						for (const node of proposal.remove_nodes || []) removalBody.append(el('span', 'prefix', clean(node)));
-						for (const edge of proposal.remove_edges || []) removalBody.append(el('span', 'prefix', JSON.stringify(edge)));
-						removalSection.append(removalBody);
-						sections.push(removalSection);
-					}
-				} else if (proposalMissingMessage) {
-					sections.push(el('div', 'empty', proposalMissingMessage));
-				}
-
-				// Docs trail progress/view cards — Mode Shell orders Surfaces by step activity only.
-				if (planMarkdown && planMarkdown.trim()) {
+					sectionById.plan = planSection;
 					cards.push(metaCard('plan', 'Plan', 'plan.md'));
 				} else {
+					const planSection = section('plan', 'Plan', '—');
+					planSection.append(el('div', 'empty', 'No plan.md yet.'));
+					sectionById.plan = planSection;
 					cards.push(metaCard('plan', 'Plan', '—'));
 				}
+
+				const rulesSection = section('rules', 'CLAUDE.md', claudeMdMarkdown ? 'md' : '—');
+				if (claudeMdMarkdown && claudeMdMarkdown.trim()) {
+					rulesSection.append(renderPlanMarkdown(claudeMdMarkdown));
+				} else {
+					rulesSection.append(el('div', 'empty', claudeMdMessage || 'CLAUDE.md not found.'));
+				}
+				sectionById.rules = rulesSection;
 				cards.push(metaCard('rules', 'Rules', 'CLAUDE.md'));
 
-				vscode.postMessage({ type: 'surfaceProposalTree.cards', cards: cards });
+				// Same order as Canvas rail: canonical SECTION_ORDER, preferred/selected pinned front.
+				const preferredId = selectedSectionId && sectionById[selectedSectionId]
+					? selectedSectionId
+					: null;
+				const orderedIds = preferredId
+					? [preferredId].concat(SECTION_ORDER.filter(id => id !== preferredId))
+					: SECTION_ORDER.slice();
+				const orderedCards = orderedIds
+					.map(id => cards.find(card => card.id === id))
+					.filter(Boolean)
+					.concat(cards.filter(card => orderedIds.indexOf(card.id) < 0 && SECTION_ORDER.indexOf(card.id) < 0));
+				vscode.postMessage({ type: 'surfaceProposalTree.cards', cards: orderedCards });
+
+				const sections = [];
+				for (const id of orderedIds) {
+					if (sectionById[id]) {
+						sections.push(sectionById[id]);
+					}
+				}
+				for (const id of Object.keys(sectionById)) {
+					if (orderedIds.indexOf(id) < 0) {
+						sections.push(sectionById[id]);
+					}
+				}
 
 				if (!sections.length) {
-					content.append(el('div', 'empty', 'No plan or proposal content yet.'));
+					if (proposalMissingMessage) {
+						content.append(el('div', 'empty', proposalMissingMessage));
+					} else {
+						content.append(el('div', 'empty', 'No plan or proposal content yet.'));
+					}
 					return;
 				}
 
@@ -2033,7 +2392,9 @@ export class SurfaceProposalTreeView extends Disposable {
 				if (selectedSectionId) {
 					const selected = sectionsCol.querySelector('details.section[data-section="' + selectedSectionId + '"]');
 					if (selected) {
-						selected.open = true;
+						for (const other of sectionsCol.querySelectorAll('details.section')) {
+							other.open = other === selected;
+						}
 					}
 					// Preserve mid-section reading position on republish; if scroll was still at 0
 					// (fresh select racing a reload), snap the selected section into place instantly.

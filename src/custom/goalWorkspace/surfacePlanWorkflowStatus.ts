@@ -308,6 +308,16 @@ export function summarizeSurfacePlanWorkflowProgress(
 	};
 }
 
+/**
+ * When a surface is fully done and Claude is not mid-edit, Preview is the default
+ * surface rail card (pinned first + selected on open).
+ */
+export function shouldPreferPreviewSurfaceSection(
+	progress: Pick<SurfacePlanWorkflowProgress, 'complete' | 'percent' | 'inProgress'> | undefined,
+): boolean {
+	return Boolean(progress?.complete && !progress.inProgress && (progress.percent ?? 0) >= 100);
+}
+
 function resolveNextAction(
 	stageId: SurfacePlanWorkflowStageId,
 	signals: SurfacePlanWorkflowSignals,
@@ -544,7 +554,8 @@ export function resolveSurfaceSectionIdForStep(
 	};
 
 	if (step.kind === 'phase') {
-		return pick('proposed', 'graph', 'phases', 'plan');
+		// Build phases own the Steps sequence; workstreams nest under phases as execution detail.
+		return pick('phases', 'workstreams', 'proposed', 'graph', 'plan');
 	}
 	if (step.kind === 'blocker' || isBlockerStepId(step.id)) {
 		return pick('preview', 'plan');
@@ -562,10 +573,17 @@ export function resolveSurfaceSectionIdForStep(
 			return pick('context', 'proposed', 'plan');
 		case 'confirm_surface':
 		case 'intent':
+			return pick('description', 'proposed', 'plan');
 		case 'plan_ready':
 		case 'lock_plan':
 			return pick('proposed', 'plan');
+		case 'phase-generate':
+			return pick('phases', 'workstreams', 'proposed', 'plan');
 		default:
+			// Parallel fan-out / workstream-run keys → Build phases (workstreams nested inside).
+			if (/workstream|serialize|ws-\d+/i.test(step.id)) {
+				return pick('phases', 'workstreams', 'proposed', 'plan');
+			}
 			return pick('plan');
 	}
 }

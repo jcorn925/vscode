@@ -24,6 +24,8 @@ export interface ConsoleWorkflowSignals {
 	readonly anySurfaceBuilding?: boolean;
 	/** At least one surface plan is locked (post-review). */
 	readonly anySurfacePlanLocked?: boolean;
+	/** At least one surface finished its plan/build workflow (100% Complete). */
+	readonly anySurfaceComplete?: boolean;
 	/** At least one surface app/dev server is running. */
 	readonly anySurfaceRunning?: boolean;
 }
@@ -34,9 +36,19 @@ export interface ConsoleWorkflowStepState {
 	readonly status: ConsoleWorkflowStepStatus;
 }
 
+export type ConsoleWorkflowActionId = 'start_apps';
+
+export interface ConsoleWorkflowAction {
+	readonly id: ConsoleWorkflowActionId;
+	readonly label: string;
+	/** Step id this action advances (the upcoming Apps running chip). */
+	readonly stepId: string;
+}
+
 export interface ConsoleWorkflowStatus {
 	readonly stageId: ConsoleWorkflowStageId;
 	readonly steps: readonly ConsoleWorkflowStepState[];
+	readonly nextAction: ConsoleWorkflowAction | undefined;
 }
 
 const STAGES: readonly { readonly id: Exclude<ConsoleWorkflowStageId, 'idle'>; readonly label: string }[] = [
@@ -51,7 +63,7 @@ export function inferConsoleWorkflowStage(signals: ConsoleWorkflowSignals): Cons
 	if (signals.anySurfaceRunning) {
 		return 'running';
 	}
-	if (signals.anySurfaceBuilding || signals.anySurfacePlanLocked) {
+	if (signals.anySurfaceBuilding || signals.anySurfacePlanLocked || signals.anySurfaceComplete) {
 		return 'building';
 	}
 	if (signals.surfaceCount > 0 || signals.suggestedStatus === 'confirmed' || signals.hasSuggestedSurfaces) {
@@ -73,6 +85,7 @@ export function resolveConsoleWorkflowStatus(signals: ConsoleWorkflowSignals): C
 		return {
 			stageId,
 			steps: STAGES.map(stage => ({ ...stage, status: 'pending' as const })),
+			nextAction: undefined,
 		};
 	}
 
@@ -87,11 +100,50 @@ export function resolveConsoleWorkflowStatus(signals: ConsoleWorkflowSignals): C
 		return { ...stage, status: 'pending' };
 	});
 
-	return { stageId, steps };
+	return {
+		stageId,
+		steps,
+		nextAction: resolveConsoleWorkflowNextAction(stageId, signals, steps),
+	};
 }
 
-export type ConsoleHomeSection = 'workspacePlan' | 'surfaces' | 'claudeMd' | 'branding';
+/**
+ * When Apps running is still upcoming and surfaces exist, offer Start Apps on that chip
+ * (same role as Surface Steps next-action on Enable Preview).
+ */
+export function resolveConsoleWorkflowNextAction(
+	stageId: ConsoleWorkflowStageId,
+	signals: ConsoleWorkflowSignals,
+	steps: readonly ConsoleWorkflowStepState[],
+): ConsoleWorkflowAction | undefined {
+	if (stageId === 'idle' || stageId === 'running') {
+		return undefined;
+	}
+	if (signals.surfaceCount <= 0) {
+		return undefined;
+	}
+	// Only once build has started — too early during planning / surface creation.
+	if (stageId !== 'building') {
+		return undefined;
+	}
+	const running = steps.find(step => step.id === 'running');
+	if (!running || running.status !== 'pending') {
+		return undefined;
+	}
+	return {
+		id: 'start_apps',
+		label: 'Start Apps',
+		stepId: 'running',
+	};
+}
+
+export type ConsoleHomeSection = 'workspacePlan' | 'surfaces' | 'claudeMd' | 'howItWorks' | 'branding' | 'settings';
 
 export function isConsoleHomeSection(value: string | undefined): value is ConsoleHomeSection {
-	return value === 'workspacePlan' || value === 'surfaces' || value === 'claudeMd' || value === 'branding';
+	return value === 'workspacePlan'
+		|| value === 'surfaces'
+		|| value === 'claudeMd'
+		|| value === 'howItWorks'
+		|| value === 'branding'
+		|| value === 'settings';
 }

@@ -37,9 +37,19 @@ Planning comes before code. Graph verification gates "done."
      file+edge review
 5. **Batch remaps.** Implement a whole subsystem, then remap once. Do not
    remap after every file (ingest settle is expensive).
-6. **Stay in scope.** Only create/edit files under this project root
+6. **Ix backend wedge — restart immediately.** If \`remap_and_wait\`,
+   \`compare_proposal\`, \`ix stats\`, or MCP calls hang / time out while
+   \`docker ps\` still shows \`backend-arangodb-1\` / \`backend-memory-layer-1\`
+   as healthy (Arango stuck-lock / false-healthy), do **not** burn time on
+   longer timeouts. Run \`ix docker restart\`, wait ~10s, re-check
+   \`ix docker status\` / \`ix stats\`, then retry the tool **once**. If
+   \`ix\` is missing from PATH, restart both containers:
+   \`docker restart backend-arangodb-1 backend-memory-layer-1\`. Note the
+   recovery in your phase report; do not abandon the phase for a wedged
+   backend.
+7. **Stay in scope.** Only create/edit files under this project root
    (references stay under \`.agent/references/\` and are never copied into apps/).
-7. **One surface id — no \`-2\` clones.** Re-plan by overwriting
+8. **One surface id — no \`-2\` clones.** Re-plan by overwriting
    \`.agent/surfaces/<surface-id>.plan.md\` and
    \`.agent/task-trees/<surface-id>.graph-proposal.json\` for the **existing**
    surface. Do not invent \`cadre-bot-2\` / sibling ids when research was skipped.
@@ -163,8 +173,54 @@ python3 .claude/scripts/inspect_goal_workspace.py --json
 \`\`\`
 
 Project \`.claude/settings.json\` allow-lists that script plus common git/ls/cat
-reads, planning-only GitHub survey, and ix-graph MCP tools.
-Write/destructive commands stay gated.
+reads, planning-only GitHub survey, ix-graph MCP tools, and Ix Docker recovery
+(\`ix docker restart\` / status). Write/destructive commands stay gated.
+
+## Ix backend recovery (common)
+
+Symptoms: health-check / \`remap_and_wait\` / \`ix stats\` timeout while Docker
+still reports both Ix containers healthy.
+
+Immediate fix (do this before lengthening timeouts):
+
+\`\`\`bash
+ix docker restart
+# wait ~10s
+ix docker status
+ix stats
+\`\`\`
+
+Fallback if \`ix\` is unavailable:
+
+\`\`\`bash
+docker restart backend-arangodb-1 backend-memory-layer-1
+\`\`\`
+
+Then retry the failed remap/compare **once**. Do not loop restart more than
+twice in a turn — if it still fails, set phase-progress \`failed\` with a short
+error mentioning the wedged Ix backend.
+
+### \`~/.ix/config.yaml\` (workspace registry)
+
+This file is the ix CLI **address book** (disk path → \`workspace_id\`). Graph
+nodes/edges live in ArangoDB — pruning the YAML only unregisters paths.
+
+- \`ix map\` / \`remap_and_wait\` resolve identity from \`root_path\` here.
+- Paths with spaces can YAML line-fold (\`Application\` / \`Support\`) and break
+  MCP path lookup — when resolution fails, \`grep\` the workspace name and pass
+  \`workspace_id\` explicitly.
+- Hundreds of dead \`/tmp\`, dogfood, and single-file registrations slow backend
+  boot and make the Arango wedge more likely. When the registry is bloated
+  (roughly 200+ workspaces) or wedges keep recurring, prune with backup:
+
+\`\`\`bash
+python3 <code-oss-root>/scripts/ix_prune_workspace_registry.py
+python3 <code-oss-root>/scripts/ix_prune_workspace_registry.py --apply --also-mtimes
+ix docker restart
+\`\`\`
+
+Dry-run first. Never hand-edit shared \`~/.ix/config.yaml\` without a backup —
+it is machine-global for every ix client on this host.
 
 ## How to use the docs
 
@@ -379,6 +435,23 @@ export const CADRE_CLAUDE_SETTINGS_JSON = `{
 			"Bash(mkdir -p .agent/workspace/attachments)",
 			"Bash(jq *)",
 			"Bash(sleep *)",
+			"Bash(ix docker restart)",
+			"Bash(ix docker restart *)",
+			"Bash(ix docker status)",
+			"Bash(ix docker status *)",
+			"Bash(ix docker start)",
+			"Bash(ix docker start *)",
+			"Bash(ix status)",
+			"Bash(ix stats)",
+			"Bash(docker restart backend-arangodb-1)",
+			"Bash(docker restart backend-memory-layer-1)",
+			"Bash(docker restart backend-arangodb-1 backend-memory-layer-1)",
+			"Bash(docker restart backend-memory-layer-1 backend-arangodb-1)",
+			"Bash(docker ps *)",
+			"Bash(python3 */scripts/ix_prune_workspace_registry.py)",
+			"Bash(python3 */scripts/ix_prune_workspace_registry.py *)",
+			"Bash(python3 scripts/ix_prune_workspace_registry.py)",
+			"Bash(python3 scripts/ix_prune_workspace_registry.py *)",
 			"Read(./workspace.goal.json)",
 			"Read(./CLAUDE.md)",
 			"Read(./plan.md)",

@@ -15,6 +15,7 @@ import {
 	markSurfacePlanLocked,
 	resolveSurfacePlanWorkflowStatus,
 	resolveSurfaceSectionIdForStep,
+	shouldPreferPreviewSurfaceSection,
 	summarizeSurfacePlanWorkflowProgress,
 } from '../../../../../../custom/goalWorkspace/surfacePlanWorkflowStatus.js';
 import {
@@ -464,25 +465,49 @@ suite('surfacePlanWorkflowStatus', () => {
 suite('resolveSurfaceSectionIdForStep', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	const sections = ['rules', 'plan', 'context', 'proposed', 'graph', 'phases', 'preview'] as const;
+	const sections = ['rules', 'plan', 'context', 'description', 'proposed', 'graph', 'phases', 'workstreams', 'preview'] as const;
 
-	test('maps planning stages to proposed / plan / context', () => {
+	test('maps planning stages to description / proposed / plan / context', () => {
 		assert.strictEqual(resolveSurfaceSectionIdForStep({ id: 'lock_plan', kind: 'action' }, sections), 'proposed');
-		assert.strictEqual(resolveSurfaceSectionIdForStep({ id: 'intent', kind: 'stage' }, sections), 'proposed');
+		assert.strictEqual(resolveSurfaceSectionIdForStep({ id: 'intent', kind: 'stage' }, sections), 'description');
+		assert.strictEqual(
+			resolveSurfaceSectionIdForStep({ id: 'confirm_surface', kind: 'stage' }, sections),
+			'description',
+		);
+		assert.strictEqual(
+			resolveSurfaceSectionIdForStep({ id: 'intent', kind: 'stage' }, ['proposed', 'plan']),
+			'proposed',
+		);
 		assert.strictEqual(
 			resolveSurfaceSectionIdForStep({ id: 'awaiting_repo_selection', kind: 'stage' }, sections),
 			'context',
 		);
+		assert.strictEqual(
+			resolveSurfaceSectionIdForStep({ id: 'research_map', kind: 'stage' }, sections),
+			'context',
+		);
 	});
 
-	test('maps phases to Proposed card with fallbacks', () => {
+	test('maps generate phases / workstreams to Build phases card', () => {
 		assert.strictEqual(
 			resolveSurfaceSectionIdForStep({ id: 'phase-streaming', kind: 'phase' }, sections),
-			'proposed',
+			'phases',
+		);
+		assert.strictEqual(
+			resolveSurfaceSectionIdForStep({ id: 'phase-generate', kind: 'action' }, sections),
+			'phases',
+		);
+		assert.strictEqual(
+			resolveSurfaceSectionIdForStep({ id: 'ws-16', kind: 'action' }, sections),
+			'phases',
 		);
 		assert.strictEqual(
 			resolveSurfaceSectionIdForStep({ id: 'phase-streaming', kind: 'phase' }, ['plan']),
 			'plan',
+		);
+		assert.strictEqual(
+			resolveSurfaceSectionIdForStep({ id: 'phase-streaming', kind: 'phase' }, ['workstreams', 'proposed']),
+			'workstreams',
 		);
 	});
 
@@ -542,6 +567,14 @@ suite('resolveSurfaceSectionIdForStep', () => {
 		assert.strictEqual(complete.complete, true);
 		assert.strictEqual(complete.percent, 100);
 		assert.strictEqual(complete.label, 'Complete');
+		assert.strictEqual(shouldPreferPreviewSurfaceSection(complete), true);
+		assert.strictEqual(shouldPreferPreviewSurfaceSection(running), false);
+		assert.strictEqual(shouldPreferPreviewSurfaceSection(earlyProgress), false);
+		assert.strictEqual(shouldPreferPreviewSurfaceSection({
+			complete: true,
+			percent: 100,
+			inProgress: true,
+		}), false);
 	});
 });
 
@@ -567,5 +600,57 @@ suite('surfacePlanWorkflow', () => {
 		assert.strictEqual(again.surfaceId, 'cadre-bot');
 		assert.ok(completedStepIdsFromWorkflow(again).includes('lock_plan'));
 		assert.ok(again.steps.some(step => step.id === 'phase-1'));
+	});
+
+	test('mergeWorkflowSteps does not demote completed steps from incomplete signals', () => {
+		const existing = mergeWorkflowSteps('cadre-admin-console', resolveSurfacePlanWorkflowStatus({
+			surfaceConfirmed: true,
+			hasPlanContent: true,
+			hasDraftProposal: true,
+			hasFinalProposal: true,
+			planLocked: true,
+			previewEnabled: true,
+			proposalPhases: [{ id: 'P1', title: 'Phase 1' }],
+			completedStepIds: [
+				'confirm_surface',
+				'intent',
+				'research_survey',
+				'awaiting_repo_selection',
+				'research_map',
+				'plan_ready',
+				'lock_plan',
+				'P1',
+				'verify_graph',
+				'enable_preview',
+			],
+		}).steps);
+		assert.strictEqual(
+			summarizeSurfacePlanWorkflowProgress(resolveSurfacePlanWorkflowStatus({
+				surfaceConfirmed: true,
+				hasPlanContent: true,
+				hasDraftProposal: true,
+				hasFinalProposal: true,
+				planLocked: true,
+				previewEnabled: true,
+				proposalPhases: [{ id: 'P1', title: 'Phase 1' }],
+				completedStepIds: completedStepIdsFromWorkflow(existing),
+			})).percent,
+			100,
+		);
+
+		// Mid-load empty signals would otherwise rewrite Steps to "Start planning".
+		const midLoad = resolveSurfacePlanWorkflowStatus({
+			surfaceConfirmed: true,
+			hasPlanContent: false,
+			hasDraftProposal: false,
+			hasFinalProposal: false,
+			planLocked: false,
+			proposalPhases: [],
+			completedStepIds: [],
+		}).steps;
+		const merged = mergeWorkflowSteps('cadre-admin-console', midLoad, existing);
+		assert.ok(completedStepIdsFromWorkflow(merged).includes('intent'));
+		assert.ok(completedStepIdsFromWorkflow(merged).includes('enable_preview'));
+		assert.strictEqual(merged.steps.find(step => step.id === 'intent')?.status, 'completed');
 	});
 });

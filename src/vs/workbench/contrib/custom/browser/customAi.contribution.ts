@@ -42,8 +42,11 @@ import {
 	CUSTOM_AI_VENDOR,
 	getCustomAiApiKeyHelpUrl,
 } from '../../../../../custom/ai/common/customAiConstants.js';
+import { ANTHROPIC_API_KEY_SECRET } from '../../../../../custom/goalWorkspace/anthropicApiKey.js';
+import { promptForAnthropicApiKey } from '../../../../../custom/goalWorkspace/anthropicApiKeyPrompt.js';
 
 const CUSTOM_AI_SET_KEY_COMMAND = 'customAi.setOpenaiApiKey';
+const CUSTOM_AI_SET_ANTHROPIC_KEY_COMMAND = 'customAi.setAnthropicApiKey';
 
 registerSingleton(ICustomAiChatTraceService, CustomAiChatTraceService, InstantiationType.Delayed);
 
@@ -187,6 +190,41 @@ registerAction2(class extends Action2 {
 			log.info('[CustomAi] Stored OpenAI-compatible API key');
 		} catch (e) {
 			log.error('[CustomAi] Failed to store API key', e);
+		}
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: CUSTOM_AI_SET_ANTHROPIC_KEY_COMMAND,
+			title: localize2('customAi.setAnthropicApiKey', 'Custom AI: Set Anthropic API Key'),
+			category: Categories.Preferences,
+			f1: true,
+		});
+	}
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const quickInput = accessor.get(IQuickInputService);
+		const secrets = accessor.get(ISecretStorageService);
+		const log = accessor.get(ILogService);
+		const opener = accessor.get(IOpenerService);
+		const input = await promptForAnthropicApiKey(quickInput, opener, CancellationToken.None, {
+			allowEmpty: true,
+		});
+		if (input === undefined) {
+			return;
+		}
+		try {
+			const trimmed = input.trim();
+			if (!trimmed) {
+				await secrets.delete(ANTHROPIC_API_KEY_SECRET);
+				log.info('[CustomAi] Cleared Anthropic API key');
+			} else {
+				await secrets.set(ANTHROPIC_API_KEY_SECRET, trimmed);
+				log.info('[CustomAi] Stored Anthropic API key');
+			}
+		} catch (e) {
+			log.error('[CustomAi] Failed to store Anthropic API key', e);
 		}
 	}
 });

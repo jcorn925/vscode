@@ -21,11 +21,54 @@ export interface SurfaceProposalTreeGraphRegion {
 export const SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE = '—';
 
 /**
- * Host-side section cards shown immediately on surface open — before plan/Ix load finishes.
- * Webview republish later upgrades values (and may add Repo Context / Workstreams).
+ * Canonical Canvas rail + Workspace section order.
+ * Build / graph views first; docs trail. Preferred step card (or Preview when
+ * the surface is 100% complete) may still pin to front.
  */
+export const SURFACE_PROPOSAL_TREE_SECTION_ORDER = [
+	'phases',
+	'proposed',
+	'graph',
+	'preview',
+	'description',
+	'context',
+	'plan',
+	'rules',
+	'removals',
+] as const;
+
+/** Build-rail sections we may auto-replace with Preview once the surface is complete. */
+export const SURFACE_RAIL_BUILD_SECTION_IDS = new Set([
+	'phases',
+	'proposed',
+	'graph',
+	'workstreams',
+]);
+
+const SECTION_ORDER_INDEX = new Map<string, number>(
+	SURFACE_PROPOSAL_TREE_SECTION_ORDER.map((id, index) => [id, index]),
+);
+
+/**
+ * Host-side section cards shown immediately on surface open — before plan/Ix load finishes.
+ * Webview republish later upgrades values (and may add Repo Context / Build phases).
+ */
+/** Short rail badge for the Description card (full text lives in the section body). */
+export function surfaceDescriptionCardValue(purpose?: string): string {
+	const trimmed = purpose?.trim();
+	if (!trimmed) {
+		return SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE;
+	}
+	const firstLine = trimmed.split(/\r?\n/, 1)[0]!.trim();
+	if (firstLine.length <= 28) {
+		return firstLine;
+	}
+	return `${firstLine.slice(0, 27).trimEnd()}…`;
+}
+
 export function staticSurfaceProposalTreeCards(options?: {
 	readonly localUrl?: string;
+	readonly purposeValue?: string;
 	readonly proposedValue?: string;
 	readonly graphValue?: string;
 	readonly planValue?: string;
@@ -46,6 +89,11 @@ export function staticSurfaceProposalTreeCards(options?: {
 			id: 'preview',
 			key: 'Preview',
 			value: options?.localUrl?.trim() ? 'URL' : SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+		},
+		{
+			id: 'description',
+			key: 'Description',
+			value: surfaceDescriptionCardValue(options?.purposeValue),
 		},
 		{
 			id: 'plan',
@@ -76,12 +124,44 @@ export function surfaceGraphRegionsCardValue(regions: readonly SurfaceProposalTr
 	return files.size ? `${files.size}·0` : SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE;
 }
 
+function sectionOrderRank(id: string): number {
+	return SECTION_ORDER_INDEX.get(id) ?? SURFACE_PROPOSAL_TREE_SECTION_ORDER.length;
+}
+
 /**
- * Section cards keep declaration order. Dynamic rail reordering is owned by Mode Shell
- * (surfaces by most recent associated plan-step activity) — Rules/Plan are not pinned.
+ * Order section cards for the surface rail (and keep Workspace sections in sync).
+ * Sorts by {@link SURFACE_PROPOSAL_TREE_SECTION_ORDER}, then pins `preferredSectionId` to the front.
  */
 export function orderSurfaceProposalTreeCards(
 	cards: readonly SurfaceProposalTreeCardItem[],
+	preferredSectionId?: string,
 ): SurfaceProposalTreeCardItem[] {
-	return [...cards];
+	const copy = [...cards].sort((a, b) => {
+		const rank = sectionOrderRank(a.id) - sectionOrderRank(b.id);
+		if (rank !== 0) {
+			return rank;
+		}
+		return 0;
+	});
+	const preferred = preferredSectionId?.trim();
+	if (!preferred) {
+		return copy;
+	}
+	const index = copy.findIndex(card => card.id === preferred);
+	if (index <= 0) {
+		return copy;
+	}
+	const [card] = copy.splice(index, 1);
+	return [card!, ...copy];
+}
+
+/** Sort section DOM nodes into the same order as Canvas rail cards. */
+export function orderSurfaceProposalTreeSectionIds(
+	sectionIds: readonly string[],
+	preferredSectionId?: string,
+): string[] {
+	return orderSurfaceProposalTreeCards(
+		sectionIds.map(id => ({ id, key: id, value: '' })),
+		preferredSectionId,
+	).map(card => card.id);
 }

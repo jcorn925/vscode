@@ -9,7 +9,9 @@ import {
 	CARD_RAIL_DEFAULT_WIDTH,
 	CARD_RAIL_MAX_WIDTH,
 	CARD_RAIL_MIN_WIDTH,
+	CARD_RAIL_STYLESHEET,
 	cardRailItemsEqual,
+	cardRailStructureEqual,
 	clampCardRailWidth,
 	createCardRailLayout,
 } from '../cardRailLayout.js';
@@ -33,6 +35,8 @@ suite('cardRailLayout', () => {
 
 		assert.ok(layout.root.classList.contains('custom-mode-card-rail'));
 		assert.strictEqual(layout.rail.querySelectorAll('button.custom-mode-card-rail-card').length, 2);
+		assert.match(CARD_RAIL_STYLESHEET, /\.custom-mode-card-rail-cards\s*\{[^}]*grid-template-columns:\s*1fr 1fr/s);
+		assert.match(CARD_RAIL_STYLESHEET, /\.custom-mode-card-rail-assoc\s*\{[^}]*grid-template-columns:\s*1fr 1fr/s);
 		assert.ok(layout.rail.querySelector('button[data-card-id="plan"]')?.classList.contains('active'));
 		assert.strictEqual(layout.contentHost.contains(content), true);
 
@@ -105,6 +109,39 @@ suite('cardRailLayout', () => {
 		layout.dispose();
 	});
 
+	test('setCards patches values in place when structure is unchanged', () => {
+		const layout = createCardRailLayout({
+			activeId: 'surfaceSection:proposed',
+			cards: [
+				{ id: 'surface:a', key: 'Admin', value: '', progressPercent: 40 },
+				{ id: 'surfaceSection:proposed', key: 'Proposed Graph', value: '—', assocGroup: 'surface:a' },
+			],
+			onSelect: () => { },
+		});
+		const before = layout.rail.querySelector('button[data-card-id="surfaceSection:proposed"]');
+		assert.ok(before);
+		layout.setCards([
+			{ id: 'surface:a', key: 'Admin', value: '', progressPercent: 54 },
+			{ id: 'surfaceSection:proposed', key: 'Proposed Graph', value: '67·20', assocGroup: 'surface:a' },
+		]);
+		const after = layout.rail.querySelector('button[data-card-id="surfaceSection:proposed"]');
+		assert.strictEqual(after, before, 'button node must be preserved across value-only updates');
+		assert.strictEqual(after?.querySelector('.custom-mode-card-rail-card-value')?.textContent, '67·20');
+		assert.strictEqual(
+			(layout.rail.querySelector('button[data-card-id="surface:a"] .custom-mode-card-rail-card-progress-bar') as HTMLElement | null)?.style.width,
+			'54%',
+		);
+		assert.ok(cardRailStructureEqual(
+			[{ id: 'surface:a', key: 'Admin', value: '' }],
+			[{ id: 'surface:a', key: 'Admin', value: 'x' }],
+		));
+		assert.ok(!cardRailStructureEqual(
+			[{ id: 'surface:a', key: 'Admin', value: '' }],
+			[{ id: 'surface:b', key: 'Admin', value: '' }],
+		));
+		layout.dispose();
+	});
+
 	test('progressPercent renders a compact bar and percent label', () => {
 		const layout = createCardRailLayout({
 			activeId: 'surface:a',
@@ -125,6 +162,8 @@ suite('cardRailLayout', () => {
 		assert.strictEqual(done.querySelector('.custom-mode-card-rail-card-progress-pct')?.textContent, '100%');
 		assert.strictEqual(doneBar.style.width, '100%');
 		assert.ok(doneBar.classList.contains('is-complete'));
+		// Inline spans ignore width — stylesheet must force block so the fill paints.
+		assert.match(CARD_RAIL_STYLESHEET, /\.custom-mode-card-rail-card-progress-bar\s*\{[^}]*display:\s*block/s);
 		assert.ok(!cardRailItemsEqual(
 			[{ id: 'surface:a', key: 'Cadre Admin', value: '', progressPercent: 42 }],
 			[{ id: 'surface:a', key: 'Cadre Admin', value: '', progressPercent: 43 }],

@@ -67,6 +67,9 @@ export interface SurfacePendingPlanProbe {
 	/** Stable fingerprint for Claude-owned stall auto-continue. */
 	readonly autoContinueFingerprint: string;
 	readonly autoContinueEligible: boolean;
+	/** Phase-progress step currently `running`, if any. */
+	readonly phaseInFlightStepId?: string;
+	readonly phaseInFlightStepLabel?: string;
 }
 
 /**
@@ -194,6 +197,8 @@ export async function resolveSurfacePendingPlanAction(
 		progress: summarizeSurfacePlanWorkflowProgress(status, { inProgressLabel }),
 		autoContinueFingerprint,
 		autoContinueEligible: isClaudeOwnedAutoContinueStage(status.stageId, phaseInFlightStepId),
+		phaseInFlightStepId: phaseInFlightStepId?.trim() || undefined,
+		phaseInFlightStepLabel: inProgressLabel,
 	};
 }
 

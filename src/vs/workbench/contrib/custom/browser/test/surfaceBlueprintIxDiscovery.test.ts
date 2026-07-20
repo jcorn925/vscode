@@ -9,15 +9,38 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/tes
 import { parseIxSubsystemRegions } from '../../../../../../custom/goalWorkspace/surfaceBlueprintIxDiscovery.js';
 import {
 	enrichSurfaceWithIxOverlay,
+	isIxSourceFilePath,
 	mergeIxSubsystemRegions,
 	regionsFromIxOverlayDiscovered,
 	scopeIxRegionsToSurface,
+	shouldExpandIxRegionMembers,
+	shouldSkipIxWalkDir,
 } from '../../../../../../custom/goalWorkspace/surfaceIxScope.js';
 import { toIxSubsystemRegions } from '../../../../../../custom/goalWorkspace/surfaceIxMatch.js';
 import type { IxOverlay } from '../../../../../../custom/goalWorkspace/ConsoleService.js';
 
 suite('surfaceBlueprintIxDiscovery', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('shouldExpandIxRegionMembers when overlay only has a directory path', () => {
+		assert.strictEqual(shouldExpandIxRegionMembers({
+			entryPath: 'apps/cadre-support-bot',
+			memberFiles: undefined,
+		}), true);
+		assert.strictEqual(shouldExpandIxRegionMembers({
+			entryPath: 'apps/cadre-support-bot/components/chat.tsx',
+			memberFiles: undefined,
+		}), false);
+		assert.strictEqual(shouldExpandIxRegionMembers({
+			entryPath: 'apps/cadre-support-bot',
+			memberFiles: ['apps/cadre-support-bot/components/chat.tsx'],
+		}), false);
+		assert.ok(isIxSourceFilePath('apps/cadre-support-bot/components/chat.tsx'));
+		assert.ok(!isIxSourceFilePath('apps/cadre-support-bot/.env.local'));
+		assert.ok(shouldSkipIxWalkDir('node_modules'));
+		assert.ok(shouldSkipIxWalkDir('.next'));
+		assert.ok(!shouldSkipIxWalkDir('components'));
+	});
 
 	test('parseIxSubsystemRegions accepts discoveredSubsystems wrapper with path/label/id', () => {
 		const parsed = parseIxSubsystemRegions({

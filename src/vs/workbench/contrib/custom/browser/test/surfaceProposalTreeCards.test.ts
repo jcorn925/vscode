@@ -7,20 +7,30 @@ import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import {
 	orderSurfaceProposalTreeCards,
+	orderSurfaceProposalTreeSectionIds,
 	staticSurfaceProposalTreeCards,
 	surfaceGraphRegionsCardValue,
 	SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+	SURFACE_PROPOSAL_TREE_SECTION_ORDER,
 	type SurfaceProposalTreeCardItem,
 } from '../surfaceProposalTreeCards.js';
 
 suite('orderSurfaceProposalTreeCards', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('staticSurfaceProposalTreeCards paints core sections immediately', () => {
-		const cards = staticSurfaceProposalTreeCards({ localUrl: 'http://localhost:3000' });
-		assert.deepStrictEqual(cards.map(c => c.id), ['proposed', 'graph', 'preview', 'plan', 'rules']);
+	test('staticSurfaceProposalTreeCards paints core sections in canonical order', () => {
+		const cards = staticSurfaceProposalTreeCards({
+			localUrl: 'http://localhost:3000',
+			purposeValue: 'Acquire clients.',
+		});
+		assert.deepStrictEqual(cards.map(c => c.id), ['proposed', 'graph', 'preview', 'description', 'plan', 'rules']);
 		assert.strictEqual(cards.find(c => c.id === 'preview')?.value, 'URL');
 		assert.strictEqual(cards.find(c => c.id === 'graph')?.value, SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE);
+		assert.strictEqual(cards.find(c => c.id === 'description')?.value, 'Acquire clients.');
+		assert.strictEqual(
+			staticSurfaceProposalTreeCards().find(c => c.id === 'description')?.value,
+			SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE,
+		);
 	});
 
 	test('surfaceGraphRegionsCardValue counts member files', () => {
@@ -30,19 +40,64 @@ suite('orderSurfaceProposalTreeCards', () => {
 		]), '2·0');
 	});
 
-	test('preserves declaration order without pinning Rules/Plan or reshuffling incomplete cards', () => {
+	test('sorts to canonical Canvas / Workspace order regardless of push order', () => {
 		const cards: SurfaceProposalTreeCardItem[] = [
-			{ id: 'proposed', key: 'Proposed Graph', value: SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE },
-			{ id: 'graph', key: 'Real Graph', value: SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE },
-			{ id: 'preview', key: 'Preview', value: 'URL' },
+			{ id: 'rules', key: 'Rules', value: 'CLAUDE.md' },
+			{ id: 'plan', key: 'Plan', value: 'plan.md' },
 			{ id: 'context', key: 'Repo Context', value: '2/5' },
-			{ id: 'workstreams', key: 'Workstreams', value: '28' },
+			{ id: 'description', key: 'Description', value: 'Purpose' },
+			{ id: 'preview', key: 'Preview', value: 'URL' },
+			{ id: 'graph', key: 'Real Graph', value: SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE },
+			{ id: 'proposed', key: 'Proposed Graph', value: SURFACE_PROPOSAL_TREE_CARD_INCOMPLETE_VALUE },
+			{ id: 'phases', key: 'Build phases', value: '4' },
+		];
+		assert.deepStrictEqual(
+			orderSurfaceProposalTreeCards(cards).map(c => c.id),
+			['phases', 'proposed', 'graph', 'preview', 'description', 'context', 'plan', 'rules'],
+		);
+		assert.deepStrictEqual(
+			[...SURFACE_PROPOSAL_TREE_SECTION_ORDER].filter(id => id !== 'removals'),
+			['phases', 'proposed', 'graph', 'preview', 'description', 'context', 'plan', 'rules'],
+		);
+	});
+
+	test('pins the current-step section card to the front after canonical sort', () => {
+		const cards: SurfaceProposalTreeCardItem[] = [
+			{ id: 'proposed', key: 'Proposed Graph', value: '39·11' },
+			{ id: 'graph', key: 'Real Graph', value: '14·0' },
+			{ id: 'preview', key: 'Preview', value: 'URL' },
+			{ id: 'description', key: 'Description', value: 'Purpose' },
+			{ id: 'context', key: 'Repo Context', value: '2/5' },
+			{ id: 'phases', key: 'Build phases', value: '4' },
 			{ id: 'plan', key: 'Plan', value: 'plan.md' },
 			{ id: 'rules', key: 'Rules', value: 'CLAUDE.md' },
 		];
 		assert.deepStrictEqual(
-			orderSurfaceProposalTreeCards(cards).map(c => c.id),
-			['proposed', 'graph', 'preview', 'context', 'workstreams', 'plan', 'rules'],
+			orderSurfaceProposalTreeCards(cards, 'phases').map(c => c.id),
+			['phases', 'proposed', 'graph', 'preview', 'description', 'context', 'plan', 'rules'],
+		);
+		assert.deepStrictEqual(
+			orderSurfaceProposalTreeCards(cards, 'graph').map(c => c.id),
+			['graph', 'phases', 'proposed', 'preview', 'description', 'context', 'plan', 'rules'],
+		);
+		assert.deepStrictEqual(
+			orderSurfaceProposalTreeCards(cards, 'missing').map(c => c.id),
+			['phases', 'proposed', 'graph', 'preview', 'description', 'context', 'plan', 'rules'],
+		);
+		assert.deepStrictEqual(
+			orderSurfaceProposalTreeCards(cards, 'preview').map(c => c.id),
+			['preview', 'phases', 'proposed', 'graph', 'description', 'context', 'plan', 'rules'],
+		);
+	});
+
+	test('orderSurfaceProposalTreeSectionIds matches card ordering', () => {
+		assert.deepStrictEqual(
+			orderSurfaceProposalTreeSectionIds(['rules', 'phases', 'proposed', 'preview']),
+			['phases', 'proposed', 'preview', 'rules'],
+		);
+		assert.deepStrictEqual(
+			orderSurfaceProposalTreeSectionIds(['rules', 'phases', 'proposed'], 'proposed'),
+			['proposed', 'phases', 'rules'],
 		);
 	});
 

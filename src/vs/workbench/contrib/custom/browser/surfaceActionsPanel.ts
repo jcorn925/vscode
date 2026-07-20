@@ -18,8 +18,6 @@ export interface SurfaceCommonActionItem {
 export class SurfaceActionsPanel extends Disposable {
 	private readonly listEl: HTMLElement;
 	private readonly emptyEl: HTMLElement;
-	private readonly refreshButton: HTMLButtonElement;
-	private readonly playButton: HTMLButtonElement;
 	private readonly actionListeners = this._register(new DisposableStore());
 	private readonly commonActions: readonly SurfaceCommonActionItem[];
 
@@ -33,24 +31,10 @@ export class SurfaceActionsPanel extends Disposable {
 		super();
 		this.commonActions = commonActions;
 
-		this.refreshButton = $('button.custom-mode-surface-actions-refresh', {
-			type: 'button',
-			title: localize('surfaceActions.refresh', 'Refresh'),
-			'aria-label': localize('surfaceActions.refresh', 'Refresh'),
-		}, localize('surfaceActions.refreshShort', 'Refresh')) as HTMLButtonElement;
-		this.playButton = $('button.custom-mode-surface-actions-play', {
-			type: 'button',
-			title: localize('surfaceActions.play', 'Play'),
-			'aria-label': localize('surfaceActions.play', 'Play'),
-		}, localize('surfaceActions.playShort', 'Play')) as HTMLButtonElement;
-		const toolbar = $('div.custom-mode-surface-actions-toolbar', undefined, this.refreshButton, this.playButton);
-
 		this.emptyEl = $('div.custom-mode-surface-actions-empty', undefined, localize('surfaceActions.empty', 'No workflow actions yet'));
 		this.listEl = $('div.custom-mode-surface-actions-list');
-		this.root.appendChild($('div.custom-mode-surface-actions', undefined, toolbar, this.emptyEl, this.listEl));
+		this.root.appendChild($('div.custom-mode-surface-actions', undefined, this.emptyEl, this.listEl));
 
-		this._register(addDisposableListener(this.refreshButton, 'click', () => void this.service.refresh()));
-		this._register(addDisposableListener(this.playButton, 'click', () => this.onPlay?.()));
 		this._register(this.service.onDidChangeState(state => this.render(state)));
 		this._register(toDisposable(() => this.root.replaceChildren()));
 
@@ -59,8 +43,6 @@ export class SurfaceActionsPanel extends Disposable {
 	}
 
 	private render(state: SurfaceFeatureChecklistState): void {
-		this.refreshButton.disabled = state.isRefreshing;
-		this.playButton.disabled = state.isRefreshing;
 		this.renderActions(state.actions);
 	}
 

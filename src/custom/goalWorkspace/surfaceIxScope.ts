@@ -141,6 +141,55 @@ export function regionsFromIxOverlayDiscovered(
 		}));
 }
 
+const IX_SOURCE_FILE_RE = /\.(tsx?|jsx?|mjs|cjs|py|go|rs|java|kt|swift|vue|svelte|css|scss|less|json|md)$/i;
+const IX_WALK_SKIP_DIRS = new Set([
+	'node_modules',
+	'.git',
+	'.next',
+	'dist',
+	'out',
+	'build',
+	'coverage',
+	'.turbo',
+	'.cache',
+	'__pycache__',
+]);
+
+/** True when Real Graph should walk the filesystem for member files under `entryPath`. */
+export function shouldExpandIxRegionMembers(
+	region: Pick<IxSubsystemRegion, 'entryPath' | 'memberFiles'>,
+): boolean {
+	if ((region.memberFiles?.filter(Boolean).length ?? 0) > 0) {
+		return false;
+	}
+	const entry = region.entryPath?.trim();
+	if (!entry) {
+		return false;
+	}
+	// File-like entry paths are already usable as a single member.
+	return !/\.[a-z0-9]+$/i.test(entry);
+}
+
+export function isIxSourceFilePath(relativePath: string): boolean {
+	const base = relativePath.split(/[/\\]/).pop() ?? '';
+	if (!base || base.startsWith('.')) {
+		return false;
+	}
+	return IX_SOURCE_FILE_RE.test(base);
+}
+
+export function shouldSkipIxWalkDir(name: string): boolean {
+	const trimmed = name.trim();
+	if (!trimmed || trimmed === '.' || trimmed === '..') {
+		return true;
+	}
+	if (IX_WALK_SKIP_DIRS.has(trimmed)) {
+		return true;
+	}
+	// Keep walking normal folders; skip dotdirs except those already listed.
+	return trimmed.startsWith('.');
+}
+
 /** Merge live Ix regions with overlay discoveries (live wins on id collision). */
 export function mergeIxSubsystemRegions(
 	primary: readonly IxSubsystemRegion[],

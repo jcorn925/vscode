@@ -9,10 +9,11 @@ import { Codicon } from '../../../../base/common/codicons.js';
 import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
-import { basename, joinPath } from '../../../../base/common/resources.js';
+import { basename, joinPath, relativePath } from '../../../../base/common/resources.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { localize } from '../../../../nls.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
+import { applyWheelToHorizontalScroll } from './horizontalWheelScroll.js';
 import { graphProposalResource } from '../../../../../custom/agentTaskTree/agentTaskTreeGraphProposal.js';
 import { taskTreesFolder } from '../../../../../custom/agentTaskTree/agentTaskTreeService.js';
 import { resolveSurfacePlanResource, surfaceGraphProposalDraftResource, surfacePlanResource } from '../../../../../custom/goalWorkspace/surfacePlanPaths.js';
@@ -79,10 +80,13 @@ import { discoverIxSubsystemRegions } from '../../../../../custom/goalWorkspace/
 import { discoverIxOverlay, type WorkspaceSurface } from '../../../../../custom/goalWorkspace/ConsoleService.js';
 import {
 	enrichSurfaceWithIxOverlay,
+	isIxSourceFilePath,
 	mergeIxSubsystemRegions,
 	regionsFromIxOverlayDiscovered,
 	resolveSurfacePathForIx,
 	scopeIxRegionsToSurface,
+	shouldExpandIxRegionMembers,
+	shouldSkipIxWalkDir,
 } from '../../../../../custom/goalWorkspace/surfaceIxScope.js';
 import type { IIxIntegrationService } from '../../../../../custom/ix/IxIntegrationService.js';
 import { IWebviewService } from '../../webview/browser/webview.js';
@@ -111,6 +115,20 @@ export interface SurfacePlanPanelLoadOptions {
 	readonly localUrl?: string;
 	readonly surface?: WorkspaceSurface;
 	readonly workspaceFolder: URI | undefined;
+	/** Workspace Settings: allow parallel Claude workstream fan-out. */
+	readonly parallelClaudeWorkstreamsEnabled?: boolean;
+}
+
+/** Stable key so Mode Shell sync can call load() often without cancelling hydrate. */
+export function surfacePlanPanelLoadSignature(options: SurfacePlanPanelLoadOptions): string {
+	return [
+		options.surfaceId.trim(),
+		options.workspaceFolder?.toString() ?? '',
+		options.treeId?.trim() ?? '',
+		options.surfacePath?.trim() ?? '',
+		options.localUrl?.trim() ?? '',
+		options.parallelClaudeWorkstreamsEnabled === true ? '1' : '0',
+	].join('\0');
 }
 
 export interface SurfacePlanBuildRequest {
@@ -176,6 +194,26 @@ export class SurfacePlanPanel extends Disposable {
 		readonly stepLabel?: string;
 	}> = this._onDidRequestRunWorkstreams.event;
 
+	/** Fired when all parallel/serialize Claude workstreams for a surface report completed. */
+	private readonly _onDidWorkstreamsComplete = this._register(new Emitter<{
+		readonly surfaceId: string;
+		readonly keys: readonly string[];
+	}>());
+	readonly onDidWorkstreamsComplete: Event<{
+		readonly surfaceId: string;
+		readonly keys: readonly string[];
+	}> = this._onDidWorkstreamsComplete.event;
+
+	/** Fired when the Plan Steps "current" row changes — Mode Shell pins that section card to the top. */
+	private readonly _onDidChangeCurrentStep = this._register(new Emitter<{
+		readonly id: string;
+		readonly kind: SurfacePlanWorkflowStepState['kind'];
+	} | undefined>());
+	readonly onDidChangeCurrentStep: Event<{
+		readonly id: string;
+		readonly kind: SurfacePlanWorkflowStepState['kind'];
+	} | undefined> = this._onDidChangeCurrentStep.event;
+
 	private readonly titleEl: HTMLElement;
 	private readonly pathEl: HTMLElement;
 	private readonly statusEl: HTMLElement;
@@ -195,6 +233,8 @@ export class SurfacePlanPanel extends Disposable {
 	private lastTreeDocument: SurfaceProposalTreeDocumentOptions | undefined;
 	private lastPlanMarkdown: string | undefined;
 	private lastProposalPhases: readonly SurfacePlanWorkflowPhaseRef[] = [];
+	/** Mirrors Workspace Settings — planning UI still shows streams when false. */
+	private parallelClaudeWorkstreamsEnabled = false;
 	/** In-memory Real Graph regions so reopen paints before Ix CLI returns. */
 	private readonly graphRegionsBySurfaceId = new Map<string, {
 		readonly regions: readonly SurfaceProposalTreeGraphRegion[];
@@ -211,12 +251,19 @@ export class SurfacePlanPanel extends Disposable {
 	private phaseProgressWriteInFlight = false;
 	private blockersWriteInFlight = false;
 	private nextActionInFlight = false;
+	private realGraphRegenerateInFlight = false;
+	private lastEmittedCurrentStepId: string | undefined;
 	/** Set when a Next click fires; cleared only when the next-action identity changes. */
 	private pendingNextActionKey: string | undefined;
 	private hasPlanContent = false;
 	private hasDraftProposal = false;
 	private hasFinalProposal = false;
 	private planLocked = false;
+	/** True after plan + proposal signals are resolved for the current load. */
+	private signalsHydrated = false;
+	/** Signature of the in-flight / last hydrated load — used to stop sync thrash. */
+	private loadInFlightSignature: string | undefined;
+	private lastHydratedSignature: string | undefined;
 	private lastStatusStepSignature: string | undefined;
 	private lastCenteredStepId: string | undefined;
 	private statusScrollSyncScheduled = false;
@@ -300,10 +347,13 @@ export class SurfacePlanPanel extends Disposable {
 				stepLabel: this.phaseProgressDocument?.stepLabel,
 			});
 		}));
+		this._register(this.treeView.onDidRequestRegenerateRealGraph(() => {
+			void this.regenerateRealGraph();
+		}));
 
 		this._register(addDisposableListener(this.refreshButton, 'click', () => {
 			if (this.lastOptions) {
-				void this.load({ ...this.lastOptions });
+				void this.load({ ...this.lastOptions }, { force: true });
 			}
 		}));
 		this._register(addDisposableListener(this.statusNextActionButton, 'click', (event: MouseEvent) => {
@@ -319,10 +369,10 @@ export class SurfacePlanPanel extends Disposable {
 		this._register(addDisposableListener(this.statusRailEl, 'scroll', () => {
 			this.scheduleStatusScrollSync();
 		}));
-		// Listen on the whole tracker (rail + chevrons/padding) so wheel/trackpad always pans.
-		this._register(addDisposableListener(this.statusTrackerEl, 'wheel', (event: WheelEvent) => {
-			this.handleStatusRailWheel(event);
-		}, { passive: false }));
+		// Capture-phase on rail + tracker so trackpad wheel isn't stolen by parent scrollables.
+		const onWheel = (event: WheelEvent) => this.handleStatusRailWheel(event);
+		this._register(addDisposableListener(this.statusRailEl, 'wheel', onWheel, { capture: true, passive: false }));
+		this._register(addDisposableListener(this.statusTrackerEl, 'wheel', onWheel, { capture: true, passive: false }));
 		this._register(toDisposable(() => this.root.replaceChildren()));
 		this.renderStatusTracker();
 		this.showTreeMessage(localize('surfacePlan.selectSurface', 'Select a surface to view its plan.md.'));
@@ -331,6 +381,30 @@ export class SurfacePlanPanel extends Disposable {
 	/** Scroll a section of the proposal tree into view — driven by the shared card rail. */
 	selectSection(id: string): void {
 		this.treeView.selectSection(id);
+	}
+
+	/** Current Plan Steps row — used to pin the matching surface section card. */
+	getCurrentWorkflowStep(): { id: string; kind: SurfacePlanWorkflowStepState['kind'] } | undefined {
+		if (!this.signalsHydrated) {
+			return undefined;
+		}
+		const status = resolveSurfacePlanWorkflowStatus(this.workflowSignals());
+		const current = status.steps.find(step => step.status === 'current');
+		return current ? { id: current.id, kind: current.kind } : undefined;
+	}
+
+	/** Workspace Settings toggle — updates Workstreams run CTA without full reload. */
+	setParallelClaudeWorkstreamsEnabled(enabled: boolean): void {
+		if (this.parallelClaudeWorkstreamsEnabled === enabled) {
+			return;
+		}
+		this.parallelClaudeWorkstreamsEnabled = enabled;
+		if (this.lastTreeDocument) {
+			this.publishTreeDocument({
+				...this.lastTreeDocument,
+				parallelClaudeWorkstreamsEnabled: enabled,
+			});
+		}
 	}
 
 	/** Drop Steps ownership when the SURFACE card is collapsed / home is shown. */
@@ -349,26 +423,51 @@ export class SurfacePlanPanel extends Disposable {
 		this.hasDraftProposal = false;
 		this.hasFinalProposal = false;
 		this.planLocked = false;
+		this.signalsHydrated = false;
+		this.loadInFlightSignature = undefined;
+		this.lastHydratedSignature = undefined;
 		this.lastStatusStepSignature = undefined;
 		this.lastCenteredStepId = undefined;
+		this.lastEmittedCurrentStepId = undefined;
 		this.statusStepListeners.clear();
 		clearNode(this.statusRailEl);
 		this.statusRailEl.scrollLeft = 0;
 		this.syncOwningSurfaceMeta();
 		this.renderStatusNextAction(undefined);
+		this._onDidChangeCurrentStep.fire(undefined);
 		this.showTreeMessage(localize('surfacePlan.selectSurface', 'Select a surface to view its plan.md.'));
 	}
 
-	async load(options: SurfacePlanPanelLoadOptions): Promise<void> {
+	/**
+	 * Load plan/proposal/workflow for a surface.
+	 * Pass `force: true` for Refresh / file watchers — otherwise identical sync calls
+	 * are coalesced so Steps/cards are not stuck mid-hydrate.
+	 */
+	async load(options: SurfacePlanPanelLoadOptions, loadOptions?: { readonly force?: boolean }): Promise<void> {
+		const force = loadOptions?.force === true;
+		const signature = surfacePlanPanelLoadSignature(options);
+		if (!force) {
+			if (this.loadInFlightSignature === signature) {
+				return;
+			}
+			if (this.signalsHydrated && this.lastHydratedSignature === signature) {
+				this.setParallelClaudeWorkstreamsEnabled(options.parallelClaudeWorkstreamsEnabled === true);
+				return;
+			}
+		}
 		const surfaceChanged = this.lastOptions?.surfaceId !== options.surfaceId;
 		this.lastOptions = options;
+		this.parallelClaudeWorkstreamsEnabled = options.parallelClaudeWorkstreamsEnabled === true;
 		if (surfaceChanged) {
 			this.lastStatusStepSignature = undefined;
 			this.lastCenteredStepId = undefined;
+			this.lastEmittedCurrentStepId = undefined;
 			this.statusRailEl.scrollLeft = 0;
 			this.nextActionInFlight = false;
 			this.pendingNextActionKey = undefined;
 		}
+		this.signalsHydrated = false;
+		this.loadInFlightSignature = signature;
 		const generation = ++this.loadGeneration;
 		const { surfaceId, surfaceName, surfacePath, treeId, workspaceFolder } = options;
 		this.titleEl.textContent = localize('surfacePlan.title', '{0} plan', surfaceName?.trim() || surfaceId);
@@ -377,6 +476,7 @@ export class SurfacePlanPanel extends Disposable {
 		// Stamp ownership immediately so Steps aria/dataset stay bound to the open surface.
 		this.syncOwningSurfaceMeta();
 
+		try {
 		if (!workspaceFolder) {
 			this.candidates = undefined;
 			this.hasPlanContent = false;
@@ -388,6 +488,9 @@ export class SurfacePlanPanel extends Disposable {
 			this.workflowDocument = undefined;
 			this.phaseProgressDocument = undefined;
 			this.blockersDocument = undefined;
+			this.signalsHydrated = true;
+			this.lastHydratedSignature = signature;
+			this.loadInFlightSignature = undefined;
 			this.renderStatusTracker();
 			this.clearCompose();
 			this.showTreeMessage(localize('surfacePlan.noWorkspace', 'Open a workspace folder to load plan.md.'));
@@ -465,6 +568,7 @@ export class SurfacePlanPanel extends Disposable {
 					return;
 				}
 				this.hasPlanContent = false;
+				this.markSignalsHydrated(signature, generation);
 				this.renderStatusTracker();
 				this.clearCompose();
 				this.showTreeMessage(localize(
@@ -528,6 +632,12 @@ export class SurfacePlanPanel extends Disposable {
 			}
 		}
 
+		// Plan + proposal signals are ready — safe to render/persist Steps.
+		this.markSignalsHydrated(signature, generation);
+		if (generation !== this.loadGeneration) {
+			return;
+		}
+
 		const snapshot = await this.loadProposalCompareSnapshot(workspaceFolder);
 		if (generation !== this.loadGeneration) {
 			return;
@@ -581,6 +691,21 @@ export class SurfacePlanPanel extends Disposable {
 				: (proposalMissingMessage || localize('surfacePlan.emptyContent', 'No plan or proposal content yet.')),
 		});
 		void this.refreshGraphRegionsInBackground(workspaceFolder, options.surface, surfaceId, generation);
+		} finally {
+			// If this generation aborted or threw before hydrate, do not leave coalescing stuck.
+			if (generation === this.loadGeneration && !this.signalsHydrated) {
+				this.loadInFlightSignature = undefined;
+			}
+		}
+	}
+
+	private markSignalsHydrated(signature: string, generation: number): void {
+		if (generation !== this.loadGeneration) {
+			return;
+		}
+		this.signalsHydrated = true;
+		this.lastHydratedSignature = signature;
+		this.loadInFlightSignature = undefined;
 	}
 
 	/** First paint: disk/memory graph cache + preview — do not wait on Ix CLI. */
@@ -647,6 +772,38 @@ export class SurfacePlanPanel extends Disposable {
 			graphRegions: graphRegions.regions,
 			graphMessage: graphRegions.message,
 		});
+	}
+
+	/**
+	 * Force-refresh Real Graph: clear cache, re-run Ix map for the surface path,
+	 * walk on-disk members, and republish the Graph section.
+	 */
+	async regenerateRealGraph(): Promise<void> {
+		const options = this.lastOptions;
+		const workspaceFolder = options?.workspaceFolder;
+		const surfaceId = options?.surfaceId;
+		if (!options || !workspaceFolder || !surfaceId) {
+			return;
+		}
+		if (this.realGraphRegenerateInFlight) {
+			return;
+		}
+		this.realGraphRegenerateInFlight = true;
+		const generation = this.loadGeneration;
+		try {
+			this.graphRegionsBySurfaceId.delete(surfaceId);
+			if (this.lastTreeDocument) {
+				this.publishTreeDocument({
+					...this.lastTreeDocument,
+					graphRegions: [],
+					graphMessage: localize('surfacePlan.graphRegenerating', 'Regenerating Real Graph…'),
+				});
+			}
+			this.treeView.selectSection('graph');
+			await this.refreshGraphRegionsInBackground(workspaceFolder, options.surface, surfaceId, generation);
+		} finally {
+			this.realGraphRegenerateInFlight = false;
+		}
 	}
 
 	private async loadProposalCompareSnapshot(workspaceFolder: URI): Promise<ProposalCompareSnapshot | undefined> {
@@ -720,14 +877,27 @@ export class SurfacePlanPanel extends Disposable {
 					),
 				};
 			}
-			return {
-				regions: scoped.map(region => ({
+			const withMembers = await Promise.all(scoped.map(async region => {
+				const base = {
 					name: region.name,
 					entryPath: region.entryPath,
 					memberFiles: region.memberFiles,
 					fileCount: region.fileCount,
-				})),
-			};
+				};
+				if (!shouldExpandIxRegionMembers(region) || !region.entryPath) {
+					return base;
+				}
+				const memberFiles = await this.listSourceFilesUnderSurfacePath(workspaceFolder, region.entryPath);
+				if (!memberFiles.length) {
+					return base;
+				}
+				return {
+					...base,
+					memberFiles,
+					fileCount: memberFiles.length,
+				};
+			}));
+			return { regions: withMembers };
 		} catch (error: unknown) {
 			return {
 				regions: [],
@@ -738,6 +908,44 @@ export class SurfacePlanPanel extends Disposable {
 				),
 			};
 		}
+	}
+
+	/** Walk a surface/subsystem directory for source files when Ix omits memberFiles. */
+	private async listSourceFilesUnderSurfacePath(workspaceFolder: URI, surfaceRelativePath: string): Promise<string[]> {
+		const root = joinPath(workspaceFolder, surfaceRelativePath);
+		const out: string[] = [];
+		const maxFiles = 400;
+		const queue: URI[] = [root];
+		while (queue.length && out.length < maxFiles) {
+			const dir = queue.shift()!;
+			let children: readonly { resource: URI; isDirectory?: boolean; name?: string }[] | undefined;
+			try {
+				const resolved = await this.fileService.resolve(dir);
+				children = resolved.children;
+			} catch {
+				continue;
+			}
+			if (!children?.length) {
+				continue;
+			}
+			for (const child of children) {
+				if (out.length >= maxFiles) {
+					break;
+				}
+				const name = child.name || basename(child.resource);
+				if (child.isDirectory) {
+					if (!shouldSkipIxWalkDir(name)) {
+						queue.push(child.resource);
+					}
+					continue;
+				}
+				const rel = relativePath(workspaceFolder, child.resource);
+				if (rel && isIxSourceFilePath(rel)) {
+					out.push(rel.replace(/\\/g, '/'));
+				}
+			}
+		}
+		return out.sort((a, b) => a.localeCompare(b));
 	}
 
 	private buildPreviewInfo(options: SurfacePlanPanelLoadOptions): SurfaceProposalTreePreviewInfo {
@@ -834,7 +1042,7 @@ export class SurfacePlanPanel extends Disposable {
 				// Reload so load() can reconcile Steps from a newly written full pass.
 				const compareSnapshotUri = proposalCompareSnapshotResource(workspaceFolder);
 				if (e.affects(compareSnapshotUri) || e.contains(compareSnapshotUri)) {
-					void this.load(this.lastOptions);
+					void this.load(this.lastOptions, { force: true });
 					return;
 				}
 				const planCandidates = [
@@ -852,7 +1060,7 @@ export class SurfacePlanPanel extends Disposable {
 					surfaceGraphProposalDraftResource(workspaceFolder, surfaceId),
 				];
 				if (planCandidates.some(uri => e.affects(uri)) || proposalCandidates.some(uri => e.contains(uri) || e.affects(uri))) {
-					void this.load(this.lastOptions);
+					void this.load(this.lastOptions, { force: true });
 				}
 			}));
 		} catch {
@@ -922,6 +1130,12 @@ export class SurfacePlanPanel extends Disposable {
 	}
 
 	private renderStatusTracker(): void {
+		// Avoid painting "Start planning" from empty mid-load signals (and never
+		// persist that lie over a completed workflow.json).
+		if (this.lastOptions && !this.signalsHydrated) {
+			this.syncOwningSurfaceMeta();
+			return;
+		}
 		const status = resolveSurfacePlanWorkflowStatus(this.workflowSignals());
 		this.statusTrackerEl.dataset.stage = status.stageId;
 		this.syncOwningSurfaceMeta();
@@ -1030,6 +1244,11 @@ export class SurfacePlanPanel extends Disposable {
 		this.statusStepListeners.clear();
 		clearNode(this.statusRailEl);
 		this.lastStatusStepSignature = signature;
+		if (currentStepId !== this.lastEmittedCurrentStepId) {
+			this.lastEmittedCurrentStepId = currentStepId;
+			const current = steps.find(step => step.id === currentStepId);
+			this._onDidChangeCurrentStep.fire(current ? { id: current.id, kind: current.kind } : undefined);
+		}
 		const recordedById = new Map((this.workflowDocument?.steps ?? []).map(step => [step.id, step]));
 		const surfaceName = this.owningSurfaceName();
 		for (let index = 0; index < steps.length; index++) {
@@ -1108,36 +1327,9 @@ export class SurfacePlanPanel extends Disposable {
 
 	/** Map wheel/trackpad (incl. vertical) onto the steps rail; chevrons are a fallback. */
 	private handleStatusRailWheel(event: WheelEvent): void {
-		const el = this.statusRailEl;
-		const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
-		if (maxScroll <= 0) {
-			return;
+		if (applyWheelToHorizontalScroll(this.statusRailEl, event)) {
+			this.scheduleStatusScrollSync();
 		}
-		// Prefer native horizontal deltas; otherwise treat vertical wheel as horizontal pan.
-		let delta = event.deltaX;
-		if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
-			delta = event.deltaY;
-		}
-		if (event.shiftKey && Math.abs(event.deltaY) > 0) {
-			delta = event.deltaY;
-		}
-		if (!delta) {
-			return;
-		}
-		// DOM_DELTA_LINE / PAGE → approximate pixels so scrolling feels consistent.
-		if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
-			delta *= 16;
-		} else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-			delta *= el.clientWidth;
-		}
-		const next = Math.max(0, Math.min(maxScroll, el.scrollLeft + delta));
-		if (next === el.scrollLeft) {
-			return;
-		}
-		event.preventDefault();
-		event.stopPropagation();
-		el.scrollLeft = next;
-		this.scheduleStatusScrollSync();
 	}
 
 	private centerStatusStep(stepId: string, smooth: boolean): void {
@@ -1149,8 +1341,20 @@ export class SurfacePlanPanel extends Disposable {
 		}
 		const rail = this.statusRailEl;
 		const maxScroll = Math.max(0, rail.scrollWidth - rail.clientWidth);
-		const target = stepEl.offsetLeft + (stepEl.offsetWidth / 2) - (rail.clientWidth / 2);
-		const left = Math.max(0, Math.min(maxScroll, target));
+		// Prefer keeping finished steps history visible: only nudge scroll enough to
+		// bring the current chip into view (right edge), never center-away the Done trail.
+		const padding = 12;
+		const stepLeft = stepEl.offsetLeft;
+		const stepRight = stepLeft + stepEl.offsetWidth;
+		const viewLeft = rail.scrollLeft;
+		const viewRight = viewLeft + rail.clientWidth;
+		let left = viewLeft;
+		if (stepRight + padding > viewRight) {
+			left = stepRight + padding - rail.clientWidth;
+		} else if (stepLeft - padding < viewLeft) {
+			left = stepLeft - padding;
+		}
+		left = Math.max(0, Math.min(maxScroll, left));
 		this.lastCenteredStepId = stepId;
 		if (Math.abs(rail.scrollLeft - left) < 2) {
 			this.scheduleStatusScrollSync();
@@ -1221,9 +1425,13 @@ export class SurfacePlanPanel extends Disposable {
 		this.statusNextActionButton.classList.remove('hidden');
 		// Stay disabled after click until this next-action identity changes (prevents re-prompting Claude).
 		this.statusNextActionButton.disabled = this.nextActionInFlight || this.pendingNextActionKey === actionKey;
-		this.statusNextActionButton.textContent = isRetry
-			? localize('surfacePlan.retryPhase', 'Retry: {0}', action.label)
+		// Button chrome is Continue/Retry — step title already shows above in the CURRENT card.
+		const buttonLabel = action.id === 'run_next_phase'
+			? (isRetry
+				? localize('surfacePlan.retryPhase', 'Retry')
+				: localize('surfacePlan.continuePhase', 'Continue'))
 			: action.label;
+		this.statusNextActionButton.textContent = buttonLabel;
 		this.statusNextActionButton.dataset.actionId = action.id;
 		this.statusNextActionButton.dataset.stepId = action.stepId;
 		this.statusNextActionButton.title = this.statusNextActionButton.disabled
@@ -1360,12 +1568,17 @@ export class SurfacePlanPanel extends Disposable {
 			return;
 		}
 		if (workstreamRunsAllCompleted(runs)) {
+			const completedKeys = runs.keys.map(entry => entry.key);
 			await this.writePhaseProgress({
 				...progress,
 				status: 'completed',
 				updatedAt: new Date().toISOString(),
 				message: localize('surfacePlan.workstreamsComplete', 'All Claude workstreams completed'),
 				inflightWorkstreamKeys: undefined,
+			});
+			this._onDidWorkstreamsComplete.fire({
+				surfaceId: options.surfaceId,
+				keys: completedKeys,
 			});
 			await this.applyPhaseProgressUpdate();
 			return;
@@ -1454,7 +1667,7 @@ export class SurfacePlanPanel extends Disposable {
 
 	private async persistResolvedWorkflow(steps: readonly SurfacePlanWorkflowStepState[]): Promise<void> {
 		const options = this.lastOptions;
-		if (!options?.workspaceFolder || !options.surfaceId || this.workflowWriteInFlight) {
+		if (!options?.workspaceFolder || !options.surfaceId || this.workflowWriteInFlight || !this.signalsHydrated) {
 			return;
 		}
 		const merged = mergeWorkflowSteps(options.surfaceId, steps, this.workflowDocument);
@@ -1704,9 +1917,33 @@ export class SurfacePlanPanel extends Disposable {
 				|| phaseInFlight
 			)
 		);
+		const currentStepId = status.steps.find(step => step.status === 'current')?.id
+			?? phaseInFlight
+			?? this.phaseProgressDocument?.stepId;
+		const workstreamsInflight = Boolean(this.phaseProgressDocument?.inflightWorkstreamKeys?.length);
+		const progressDoc = this.phaseProgressDocument;
+		const phaseStatuses = status.steps
+			.filter(step => step.kind === 'phase')
+			.map(step => {
+				if (progressDoc?.status === 'failed' && progressDoc.stepId === step.id) {
+					return { id: step.id, status: 'failed' as const };
+				}
+				return { id: step.id, status: step.status };
+			});
+		const phaseProgressNote = progressDoc
+			&& (progressDoc.status === 'running' || progressDoc.status === 'failed')
+			? (progressDoc.error?.trim() || progressDoc.message?.trim() || undefined)
+			: undefined;
+		const surfacePurpose = (options.surfacePurpose ?? this.lastOptions?.surface?.purpose)?.trim() || undefined;
 		const merged: SurfaceProposalTreeDocumentOptions = {
 			...options,
+			surfacePurpose,
 			hideRunWorkstreamsButton,
+			parallelClaudeWorkstreamsEnabled: this.parallelClaudeWorkstreamsEnabled,
+			currentStepId,
+			workstreamsInflight,
+			phaseStatuses,
+			phaseProgressNote,
 		};
 		this.lastTreeDocument = merged;
 		this.treeView.setDocument(merged);

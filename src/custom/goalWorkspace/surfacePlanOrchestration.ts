@@ -4,8 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 /**
- * Plan Steps hybrid routing: Custom AI orchestrates (narrate + DISPATCH marker);
- * Claude Code executes tool-heavy research / generate work via the existing PTY path.
+ * Plan Steps hybrid routing: Custom AI may narrate + DISPATCH when the workspace
+ * Agent Orchestrator provider is OpenAI-compatible or Ollama; Claude provider skips
+ * that turn and goes straight to the Claude Code PTY path.
  */
 
 export type SurfacePlanOrchestrationActionId =
@@ -126,7 +127,11 @@ export function buildSurfacePlanOrchestrationPrompt(brief: SurfacePlanOrchestrat
 export function buildClaudeDispatchNotification(
 	stepLabel: string,
 	usedFallback: boolean,
+	options?: { readonly claudeDirect?: boolean },
 ): string {
+	if (options?.claudeDirect) {
+		return `Sent step to Claude: ${stepLabel}`;
+	}
 	return usedFallback
 		? `Custom AI orchestration skipped or incomplete; sent step to Claude: ${stepLabel}`
 		: `Custom AI dispatched step to Claude: ${stepLabel}`;

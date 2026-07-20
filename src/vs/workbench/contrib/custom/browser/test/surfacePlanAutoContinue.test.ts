@@ -9,6 +9,7 @@ import {
 	buildSurfaceAutoContinueFingerprint,
 	decideSurfaceAutoContinue,
 	isClaudeOwnedAutoContinueStage,
+	isResearchAutoContinueStage,
 	SURFACE_AUTO_CONTINUE_COOLDOWN_MS,
 	SURFACE_AUTO_CONTINUE_STALL_MS,
 } from '../../../../../../custom/goalWorkspace/surfacePlanAutoContinue.js';
@@ -21,6 +22,13 @@ suite('surfacePlanAutoContinue', () => {
 		assert.strictEqual(isClaudeOwnedAutoContinueStage('research_survey'), true);
 		assert.strictEqual(isClaudeOwnedAutoContinueStage('plan_ready'), false);
 		assert.strictEqual(isClaudeOwnedAutoContinueStage('building', 'phase-1'), true);
+	});
+
+	test('research recipe stages are distinct from generate-phase stalls', () => {
+		assert.strictEqual(isResearchAutoContinueStage('research_map'), true);
+		assert.strictEqual(isResearchAutoContinueStage('research_survey'), true);
+		assert.strictEqual(isResearchAutoContinueStage('building'), false);
+		assert.strictEqual(isResearchAutoContinueStage('plan_ready'), false);
 	});
 
 	test('fingerprint changes when draft proposal appears', () => {

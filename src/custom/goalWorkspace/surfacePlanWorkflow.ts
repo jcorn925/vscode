@@ -86,14 +86,22 @@ export function mergeWorkflowSteps(
 	const now = new Date().toISOString();
 	const steps = resolvedSteps.map(step => {
 		const prior = existingById.get(step.id);
-		const completedAt = step.status === 'completed'
-			? (prior?.completedAt ?? (prior?.status === 'completed' ? prior.completedAt : now))
+		// Never demote durable completion when in-memory signals are still hydrating
+		// (missing plan/proposal would otherwise rewrite Steps back to "Start planning").
+		let status = step.status;
+		if (prior?.status === 'completed' && status !== 'completed' && status !== 'skipped') {
+			status = 'completed';
+		}
+		const completedAt = status === 'completed'
+			? (prior?.completedAt ?? now)
 			: undefined;
 		return {
 			...step,
+			status,
 			completedAt,
 		};
 	});
+	// Prefer an explicit current only when that step was not preserved as completed.
 	const current = steps.find(step => step.status === 'current');
 	return {
 		surfaceId,

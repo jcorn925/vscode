@@ -47,6 +47,11 @@ export function isClaudeOwnedAutoContinueStage(
 	return stageId === 'research_survey' || stageId === 'research_map';
 }
 
+/** Research recipe nudges only — generate phases use the Plan Next phase prompt. */
+export function isResearchAutoContinueStage(stageId: SurfacePlanWorkflowStageId): boolean {
+	return stageId === 'research_survey' || stageId === 'research_map';
+}
+
 export function buildSurfaceAutoContinueFingerprint(input: SurfaceAutoContinueFingerprintInput): string {
 	return [
 		input.stageId,

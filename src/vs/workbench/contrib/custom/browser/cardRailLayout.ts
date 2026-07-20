@@ -27,8 +27,8 @@ export const CARD_RAIL_MIN_WIDTH = 160;
 export const CARD_RAIL_MAX_WIDTH = 480;
 /** Below this width the rail collapses to a single card column. */
 export const CARD_RAIL_NARROW_WIDTH = 200;
-/** Shared idle delay for Console / Steps / Claude / AI chat auto-hide (exactly 1s). */
-export const CARD_RAIL_AUTO_HIDE_MS = 1000;
+/** Shared idle delay for Console / Steps / Claude / AI chat auto-hide (exactly 750ms). */
+export const CARD_RAIL_AUTO_HIDE_MS = 750;
 /** Pointer distance from the panel's left edge that re-shows a collapsed rail. */
 export const CARD_RAIL_REVEAL_EDGE_PX = 14;
 
@@ -356,6 +356,7 @@ export const CARD_RAIL_STYLESHEET = `
 	margin-top: 5px;
 }
 .custom-mode-card-rail-card-progress-track {
+	display: block;
 	flex: 1 1 auto;
 	min-width: 0;
 	height: 4px;
@@ -364,7 +365,10 @@ export const CARD_RAIL_STYLESHEET = `
 	overflow: hidden;
 }
 .custom-mode-card-rail-card-progress-bar {
+	/* Must be block — span defaults to inline, which ignores width/height. */
+	display: block;
 	height: 100%;
+	min-height: 4px;
 	border-radius: 999px;
 	background: var(--vscode-progressBar-background, var(--vscode-textLink-foreground, #3794ff));
 	width: 0%;
@@ -518,6 +522,26 @@ export function cardRailItemsEqual(a: readonly CardRailItem[], b: readonly CardR
 	return true;
 }
 
+/** True when card identity/layout slots match — values may still differ (safe for in-place patch). */
+export function cardRailStructureEqual(a: readonly CardRailItem[], b: readonly CardRailItem[]): boolean {
+	if (a.length !== b.length) {
+		return false;
+	}
+	for (let i = 0; i < a.length; i++) {
+		const left = a[i]!;
+		const right = b[i]!;
+		if (
+			left.id !== right.id
+			|| !!left.groupStart !== !!right.groupStart
+			|| (left.groupLabel ?? '') !== (right.groupLabel ?? '')
+			|| (left.assocGroup ?? '') !== (right.assocGroup ?? '')
+		) {
+			return false;
+		}
+	}
+	return true;
+}
+
 export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLayout {
 	const listeners = new DisposableStore();
 	const cardListeners = new DisposableStore();
@@ -597,6 +621,91 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 			button.classList.toggle('active', active);
 			button.setAttribute('aria-selected', String(active));
 		}
+	};
+
+	/** Patch labels/progress without destroying buttons (avoids selection/pointer glitches). */
+	const patchCardContents = (nextCards: readonly CardRailItem[]): boolean => {
+		for (const card of nextCards) {
+			const button = rail.querySelector<HTMLButtonElement>(
+				`button.custom-mode-card-rail-card[data-card-id="${CSS.escape(card.id)}"]`,
+			);
+			if (!button) {
+				return false;
+			}
+			const value = card.value.trim();
+			const progressPercent = typeof card.progressPercent === 'number' && Number.isFinite(card.progressPercent)
+				? Math.max(0, Math.min(100, Math.round(card.progressPercent)))
+				: undefined;
+			button.title = card.title ?? (value ? `${card.key}: ${value}` : card.key);
+
+			const keyEl = button.querySelector('.custom-mode-card-rail-card-key');
+			if (keyEl && keyEl.textContent !== card.key) {
+				keyEl.textContent = card.key;
+			}
+
+			let valueEl = button.querySelector('.custom-mode-card-rail-card-value') as HTMLElement | null;
+			if (value) {
+				if (!valueEl) {
+					valueEl = $('span.custom-mode-card-rail-card-value', undefined, value);
+					const progressEl = button.querySelector('.custom-mode-card-rail-card-progress');
+					if (progressEl) {
+						button.insertBefore(valueEl, progressEl);
+					} else {
+						button.appendChild(valueEl);
+					}
+				} else if (valueEl.textContent !== value) {
+					valueEl.textContent = value;
+				}
+			} else if (valueEl) {
+				valueEl.remove();
+			}
+
+			let progressRoot = button.querySelector('.custom-mode-card-rail-card-progress') as HTMLElement | null;
+			if (progressPercent !== undefined) {
+				const complete = progressPercent >= 100;
+				if (!progressRoot) {
+					const bar = $('span.custom-mode-card-rail-card-progress-bar') as HTMLElement;
+					bar.style.width = `${progressPercent}%`;
+					bar.classList.toggle('is-complete', complete);
+					const pct = $('span.custom-mode-card-rail-card-progress-pct', undefined, `${progressPercent}%`);
+					pct.classList.toggle('is-complete', complete);
+					progressRoot = $('span.custom-mode-card-rail-card-progress', {
+						'aria-hidden': 'true',
+					},
+						$('span.custom-mode-card-rail-card-progress-track', undefined, bar),
+						pct,
+					);
+					button.appendChild(progressRoot);
+				} else {
+					const bar = progressRoot.querySelector('.custom-mode-card-rail-card-progress-bar') as HTMLElement | null;
+					const pct = progressRoot.querySelector('.custom-mode-card-rail-card-progress-pct') as HTMLElement | null;
+					if (bar) {
+						bar.style.width = `${progressPercent}%`;
+						bar.classList.toggle('is-complete', complete);
+					}
+					if (pct) {
+						pct.textContent = `${progressPercent}%`;
+						pct.classList.toggle('is-complete', complete);
+					}
+				}
+			} else if (progressRoot) {
+				progressRoot.remove();
+			}
+
+			const pendingDot = button.querySelector('.custom-mode-card-rail-card-pending-dot');
+			if (card.pendingAction) {
+				button.classList.add('has-pending-action');
+				if (!pendingDot) {
+					button.appendChild($('span.custom-mode-card-rail-card-pending-dot', {
+						'aria-hidden': 'true',
+					}));
+				}
+			} else {
+				button.classList.remove('has-pending-action');
+				pendingDot?.remove();
+			}
+		}
+		return true;
 	};
 
 	/** Draw a blue stem from each assoc-group parent card down to its outlined child group. */
@@ -893,6 +1002,13 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 			if (cardRailItemsEqual(cards, next)) {
 				// Cards unchanged — still refresh active classes in case setActiveId ran first.
 				applyActiveClasses();
+				return;
+			}
+			// Same structure (ids/groups): patch labels in place so pointerdown selection isn't destroyed.
+			if (cardRailStructureEqual(cards, next) && patchCardContents(next)) {
+				cards = [...next];
+				applyActiveClasses();
+				scheduleAssocConnectors();
 				return;
 			}
 			cards = [...next];
