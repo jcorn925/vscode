@@ -9,7 +9,7 @@ import { mainWindow } from '../../../../base/browser/window.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Disposable, DisposableMap, DisposableStore, type IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
-import { RunOnceScheduler, timeout } from '../../../../base/common/async.js';
+import { disposableTimeout, RunOnceScheduler, timeout } from '../../../../base/common/async.js';
 import { Event } from '../../../../base/common/event.js';
 import { isMacintosh, isWeb, isWindows } from '../../../../base/common/platform.js';
 import { URI, UriComponents } from '../../../../base/common/uri.js';
@@ -186,6 +186,11 @@ import {
 	CONSOLE_HOME_DEFAULT_SECTION,
 	exclusiveConsoleHomeOpenStates,
 } from '../../../../../custom/goalWorkspace/consoleHomeAccordion.js';
+import {
+	consoleExampleBriefs,
+	consoleWorkflowStepDisplayLabel,
+	shouldShowConsoleFirstRun,
+} from './consoleFirstRunModel.js';
 import { resolveSurfacePendingPlanAction } from '../../../../../custom/goalWorkspace/surfacePlanPendingAction.js';
 import {
 	decideSurfaceAutoContinue,
@@ -583,6 +588,14 @@ class ModeShellContribution extends Disposable {
 	/** When true (and no surface open), Console section cards appear under the Console rail card. */
 	private consoleExpanded = true;
 	private uiConsoleHomeHost!: HTMLElement;
+	private uiConsoleFirstRunHero!: HTMLElement;
+	private uiFirstRunComposer!: HTMLElement;
+	private uiFirstRunBriefInput!: HTMLTextAreaElement;
+	private uiFirstRunAttachmentsNote!: HTMLElement;
+	private uiConsolePreflightPill!: HTMLButtonElement;
+	/** Docker guidance opened from the preflight pill while first-run would otherwise hide it. */
+	private consoleFirstRunDockerPeek = false;
+	private readonly firstRunFlashTimer = this._register(new MutableDisposable());
 	private uiConsoleStatusTracker!: HTMLElement;
 	private uiConsoleStatusRail!: HTMLElement;
 	private uiConsoleStatusLabel!: HTMLElement;
@@ -4490,6 +4503,276 @@ class ModeShellContribution extends Disposable {
 				/* Same role as Surface proposal-tree .sections — scroll all card content. */
 				overflow: auto;
 				padding-right: 4px;
+			}
+
+			/* First-run: the goal composer leads; the section stack waits until planning starts. */
+			.monaco-workbench .custom-mode-ui-console-home.custom-mode-first-run .custom-mode-ui-console-section-host,
+			.monaco-workbench .custom-mode-ui-console-home.custom-mode-first-run .custom-mode-ui-console-home-status {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run {
+				flex: 1 1 auto;
+				min-height: 0;
+				overflow: auto;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				padding: 40px 24px 32px;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-head {
+				text-align: center;
+				max-width: 560px;
+				margin-bottom: 20px;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-title {
+				font-size: 22px;
+				font-weight: 600;
+				margin-bottom: 6px;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-sub {
+				font-size: 12px;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-composer {
+				width: 100%;
+				max-width: 680px;
+				background: var(--vscode-editor-background);
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 10px;
+				padding: 12px;
+				box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+				transition: border-color 0.15s ease, box-shadow 0.15s ease;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-composer.flash {
+				border-color: var(--vscode-focusBorder);
+				box-shadow: 0 4px 18px rgba(0, 0, 0, 0.2);
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-brief {
+				width: 100%;
+				min-height: 84px;
+				resize: vertical;
+				border: none;
+				outline: none;
+				background: transparent;
+				color: var(--vscode-input-foreground, inherit);
+				font-family: inherit;
+				font-size: 13px;
+				line-height: 1.55;
+				padding: 4px;
+				box-sizing: border-box;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-brief::placeholder {
+				color: var(--vscode-input-placeholderForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-composer-foot {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				border-top: 1px solid var(--vscode-panel-border);
+				padding-top: 10px;
+				margin-top: 6px;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-attach {
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				background: none;
+				border: none;
+				border-radius: 6px;
+				padding: 4px 8px;
+				color: var(--vscode-descriptionForeground);
+				font-size: 12px;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-attach:hover {
+				background: var(--vscode-toolbar-hoverBackground);
+				color: inherit;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-attach-note {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+				margin-right: auto;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-submit {
+				margin-left: auto;
+				height: 28px;
+				padding: 0 16px;
+				border-radius: 6px;
+				border: 1px solid var(--vscode-button-border, transparent);
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+				font-size: 12px;
+				font-weight: 600;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-submit:hover {
+				background: var(--vscode-button-hoverBackground);
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-alt {
+				margin-top: 10px;
+				font-size: 12px;
+				color: var(--vscode-descriptionForeground);
+				display: flex;
+				align-items: baseline;
+				gap: 4px;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-import {
+				background: none;
+				border: none;
+				padding: 0;
+				font-size: 12px;
+				color: var(--vscode-textLink-foreground);
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-import:hover {
+				text-decoration: underline;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-gallery {
+				width: 100%;
+				max-width: 680px;
+				margin-top: 36px;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-gallery-head {
+				display: flex;
+				align-items: baseline;
+				gap: 8px;
+				margin-bottom: 10px;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-gallery-title {
+				font-size: 12px;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-gallery-hint {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-cards {
+				display: grid;
+				grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+				gap: 10px;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-card {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+				text-align: left;
+				background: none;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 10px;
+				padding: 12px;
+				color: inherit;
+				font-family: inherit;
+				cursor: pointer;
+				transition: border-color 0.12s ease, background-color 0.12s ease;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-card:hover {
+				background: var(--vscode-editor-background);
+				border-color: var(--vscode-focusBorder);
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-card:focus-visible {
+				outline: 2px solid var(--vscode-focusBorder);
+				outline-offset: 2px;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-card-title {
+				font-size: 12px;
+				font-weight: 600;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-card-goal {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-card-chips {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+				margin-top: 2px;
+			}
+
+			.monaco-workbench .custom-mode-ui-first-run-chip {
+				font-size: 10px;
+				color: var(--vscode-descriptionForeground);
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 999px;
+				padding: 1px 8px;
+			}
+
+			@media (prefers-reduced-motion: reduce) {
+				.monaco-workbench .custom-mode-ui-first-run-composer,
+				.monaco-workbench .custom-mode-ui-first-run-card {
+					transition: none;
+				}
+			}
+
+			/* Docker preflight pill — quiet status at the end of the journey strip. */
+			.monaco-workbench .custom-mode-console-preflight {
+				flex: 0 0 auto;
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				margin-left: 12px;
+				padding: 3px 10px;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 999px;
+				background: none;
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+				font-family: inherit;
+				white-space: nowrap;
+				cursor: default;
+			}
+
+			.monaco-workbench .custom-mode-console-preflight.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-console-preflight .custom-mode-console-preflight-glyph {
+				color: var(--vscode-charts-green);
+			}
+
+			.monaco-workbench .custom-mode-console-preflight.blocked {
+				cursor: pointer;
+				color: inherit;
+				border-color: var(--vscode-focusBorder);
+			}
+
+			.monaco-workbench .custom-mode-console-preflight.blocked .custom-mode-console-preflight-glyph {
+				color: var(--vscode-charts-yellow);
+			}
+
+			.monaco-workbench .custom-mode-console-preflight.blocked:hover {
+				background: var(--vscode-toolbar-hoverBackground);
 			}
 
 			/* Match Surface proposal-tree .section card chrome (exclusive <details> accordion). */
@@ -9413,9 +9696,21 @@ class ModeShellContribution extends Disposable {
 				void this.startAllSurfacesFromActions();
 			}
 		}));
+		this.uiConsolePreflightPill = $('button.custom-mode-console-preflight.hidden', {
+			type: 'button',
+		}) as HTMLButtonElement;
+		this._register(addDisposableListener(this.uiConsolePreflightPill, 'click', () => {
+			// Only actionable while blocked: open the Docker section for setup guidance,
+			// peeking past the first-run hero if it is currently hiding the sections.
+			if (this.uiConsoleHomeHost?.classList.contains('custom-mode-first-run')) {
+				this.consoleFirstRunDockerPeek = true;
+			}
+			this.openConsoleWithSection('docker');
+			this.renderConsoleWorkflowProgress();
+		}));
 		this.uiConsoleStatusTracker = $('div.custom-mode-surface-plan-status-tracker.hidden', {
 			'aria-live': 'polite',
-		}, this.uiConsoleStatusRail, this.uiConsoleStatusNextActionButton);
+		}, this.uiConsoleStatusRail, this.uiConsoleStatusNextActionButton, this.uiConsolePreflightPill);
 		const onConsoleStatusWheel = (event: WheelEvent) => this.handleConsoleStatusRailWheel(event);
 		this._register(addDisposableListener(this.uiConsoleStatusRail, 'wheel', onConsoleStatusWheel, { capture: true, passive: false }));
 		this._register(addDisposableListener(this.uiConsoleStatusTracker, 'wheel', onConsoleStatusWheel, { capture: true, passive: false }));
@@ -9436,8 +9731,10 @@ class ModeShellContribution extends Disposable {
 			this.uiWorkspacePlanBrandFields,
 			this.uiWorkspaceSettingsPanel,
 		);
+		this.uiConsoleFirstRunHero = this.createConsoleFirstRunHero();
 		this.uiConsoleHomeHost = $('div.custom-mode-ui-console-home', undefined,
 			this.uiConsoleStatusLabel,
+			this.uiConsoleFirstRunHero,
 			this.uiConsoleSectionHost,
 		);
 
@@ -9706,6 +10003,138 @@ class ModeShellContribution extends Disposable {
 		return root;
 	}
 
+	/**
+	 * First-run hero: the goal composer leads, example workspaces support.
+	 * Shown instead of the Console section stack until the workspace produces
+	 * its first planning artifact (see {@link shouldShowConsoleFirstRun}).
+	 */
+	private createConsoleFirstRunHero(): HTMLElement {
+		this.uiFirstRunBriefInput = $('textarea.custom-mode-ui-first-run-brief', {
+			rows: '4',
+			placeholder: localize(
+				'customMode.firstRunBriefPlaceholder',
+				'e.g. A boutique pilates studio that sells class packages online, takes bookings for sessions, and needs a simple marketing site to bring in new clients…',
+			),
+			'aria-label': localize('customMode.firstRunBriefAria', 'Describe your business'),
+		}) as HTMLTextAreaElement;
+		this._register(addDisposableListener(this.uiFirstRunBriefInput, 'keydown', (event: KeyboardEvent) => {
+			if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+				event.preventDefault();
+				void this.onFirstRunSubmit();
+			}
+		}));
+
+		const fileInput = $('input', { type: 'file', accept: '.pdf,application/pdf,image/*,.doc,.docx,.md,.txt', hidden: 'true', multiple: 'true' }) as HTMLInputElement;
+		const attachButton = $('button.custom-mode-ui-first-run-attach', {
+			type: 'button',
+		},
+			$('span.codicon' + ThemeIcon.asCSSSelector(Codicon.symbolFile)),
+			localize('customMode.firstRunAttach', 'Attach a brief — PDF, images, files'),
+		) as HTMLButtonElement;
+		this._register(addDisposableListener(attachButton, 'click', () => fileInput.click()));
+		this._register(addDisposableListener(fileInput, 'change', () => {
+			void this.addWorkspacePlanFiles(fileInput.files);
+			fileInput.value = '';
+		}));
+		this.uiFirstRunAttachmentsNote = $('span.custom-mode-ui-first-run-attach-note');
+
+		const submitButton = $('button.custom-mode-ui-first-run-submit', {
+			type: 'button',
+		}, localize('customMode.firstRunSubmit', 'Start planning')) as HTMLButtonElement;
+		this._register(addDisposableListener(submitButton, 'click', () => void this.onFirstRunSubmit()));
+
+		this.uiFirstRunComposer = $('div.custom-mode-ui-first-run-composer', undefined,
+			this.uiFirstRunBriefInput,
+			$('div.custom-mode-ui-first-run-composer-foot', undefined,
+				attachButton,
+				fileInput,
+				this.uiFirstRunAttachmentsNote,
+				submitButton,
+			),
+		);
+
+		const importButton = $('button.custom-mode-ui-first-run-import', {
+			type: 'button',
+		}, localize('customMode.firstRunImport', 'Import an existing repo instead')) as HTMLButtonElement;
+		this._register(addDisposableListener(importButton, 'click', () => void this.importSurfaceRepo()));
+
+		const cards = consoleExampleBriefs().map(example => {
+			const card = $('button.custom-mode-ui-first-run-card', {
+				type: 'button',
+				title: localize('customMode.firstRunCardTitle', 'Fill the brief with this example'),
+			},
+				$('div.custom-mode-ui-first-run-card-title', undefined, example.title),
+				$('div.custom-mode-ui-first-run-card-goal', undefined, example.goal),
+				$('div.custom-mode-ui-first-run-card-chips', undefined,
+					...example.surfaces.map(surface => $('span.custom-mode-ui-first-run-chip', undefined, surface)),
+				),
+			) as HTMLButtonElement;
+			this._register(addDisposableListener(card, 'click', () => this.applyFirstRunExample(example.brief)));
+			return card;
+		});
+
+		return $('div.custom-mode-ui-first-run.hidden', undefined,
+			$('div.custom-mode-ui-first-run-head', undefined,
+				$('div.custom-mode-ui-first-run-title', undefined, localize('customMode.firstRunTitle', 'What are you building?')),
+				$('div.custom-mode-ui-first-run-sub', undefined, localize(
+					'customMode.firstRunSub',
+					'Describe the business in your own words. Console drafts a plan, proposes the apps to build — your surfaces — and runs them for you.',
+				)),
+			),
+			this.uiFirstRunComposer,
+			$('div.custom-mode-ui-first-run-alt', undefined,
+				$('span', undefined, localize('customMode.firstRunAltPrefix', 'Already have code?')),
+				importButton,
+			),
+			$('div.custom-mode-ui-first-run-gallery', undefined,
+				$('div.custom-mode-ui-first-run-gallery-head', undefined,
+					$('div.custom-mode-ui-first-run-gallery-title', undefined, localize('customMode.firstRunGalleryTitle', 'Or explore an example')),
+					$('span.custom-mode-ui-first-run-gallery-hint', undefined, localize(
+						'customMode.firstRunGalleryHint',
+						'Selecting one fills in the brief — edit anything before you start.',
+					)),
+				),
+				$('div.custom-mode-ui-first-run-cards', undefined, ...cards),
+			),
+		);
+	}
+
+	private applyFirstRunExample(brief: string): void {
+		this.uiFirstRunBriefInput.value = brief;
+		this.uiFirstRunBriefInput.focus();
+		this.uiFirstRunComposer.classList.add('flash');
+		this.firstRunFlashTimer.value = disposableTimeout(() => this.uiFirstRunComposer.classList.remove('flash'), 900);
+	}
+
+	private async onFirstRunSubmit(): Promise<void> {
+		const brief = this.uiFirstRunBriefInput.value.trim();
+		if (!brief && this.workspacePlanAttachments.length === 0) {
+			this.notificationService.warn(localize(
+				'customMode.firstRunBriefRequired',
+				'Add a brief description or attach a planning file before starting.',
+			));
+			this.uiFirstRunBriefInput.focus();
+			return;
+		}
+		if (brief) {
+			this.uiWorkspacePlanIntentInput.value = brief;
+		}
+		await this.onWorkspacePlanSubmitClick();
+	}
+
+	/** Toggle the first-run hero vs. the Console section stack (progressive disclosure). */
+	private syncConsoleFirstRun(signals: ConsoleWorkflowSignals): void {
+		if (!this.uiConsoleHomeHost || !this.uiConsoleFirstRunHero) {
+			return;
+		}
+		if (signals.dockerReady !== false) {
+			this.consoleFirstRunDockerPeek = false;
+		}
+		const firstRun = shouldShowConsoleFirstRun(signals) && !this.consoleFirstRunDockerPeek;
+		this.uiConsoleHomeHost.classList.toggle('custom-mode-first-run', firstRun);
+		this.uiConsoleFirstRunHero.classList.toggle('hidden', !firstRun);
+	}
+
 	private createWorkspaceSurfacesHost(): HTMLElement {
 		this.uiWorkspaceSurfacesGrid = $('div.custom-mode-ui-workspace-surfaces-grid');
 		return $('div.custom-mode-ui-workspace-surfaces.hidden', undefined,
@@ -9752,6 +10181,11 @@ class ModeShellContribution extends Disposable {
 	private renderWorkspacePlanAttachments(): void {
 		this.workspacePlanAttachmentListeners.clear();
 		this.uiWorkspacePlanAttachmentList.replaceChildren();
+		if (this.uiFirstRunAttachmentsNote) {
+			this.uiFirstRunAttachmentsNote.textContent = this.workspacePlanAttachments.length === 0
+				? ''
+				: localize('customMode.firstRunAttachCount', '{0} attached', this.workspacePlanAttachments.length);
+		}
 		for (const attachment of this.workspacePlanAttachments) {
 			const remove = $('button.custom-mode-ui-surface-describe-attachment-remove', {
 				type: 'button',
@@ -10452,6 +10886,8 @@ class ModeShellContribution extends Disposable {
 		if (!this.uiConsoleStatusTracker || !this.uiConsoleStatusRail || !this.uiConsoleStatusLabel || !this.uiConsoleStatusNextActionButton) {
 			return;
 		}
+		const signals = this.collectConsoleWorkflowSignals();
+		this.syncConsoleFirstRun(signals);
 		const showSteps = this.isConsoleCardSelected();
 		this.uiConsoleStatusTracker.classList.toggle('hidden', !showSteps);
 		this.uiConsoleStatusLabel.classList.toggle('hidden', !showSteps);
@@ -10460,22 +10896,24 @@ class ModeShellContribution extends Disposable {
 			this.uiConsoleStatusRail.replaceChildren();
 			this.uiConsoleStatusLabel.textContent = '';
 			this.renderConsoleWorkflowNextAction(undefined);
+			this.renderConsolePreflightPill(undefined);
 			this.lastConsoleCenteredStepId = undefined;
 			this.syncStepsReopenAttention();
 			return;
 		}
-		const status = resolveConsoleWorkflowStatus(this.collectConsoleWorkflowSignals());
+		const status = resolveConsoleWorkflowStatus(signals);
 		this.uiConsoleStatusRail.replaceChildren();
-		for (let index = 0; index < status.steps.length; index++) {
-			const step = status.steps[index]!;
-			this.uiConsoleStatusRail.appendChild(this.createConsoleWorkflowProgressStep(step, index < status.steps.length - 1));
+		// Docker is preflight plumbing, not a journey step — it renders as a status pill.
+		const journeySteps = status.steps.filter(step => step.id !== 'docker');
+		for (let index = 0; index < journeySteps.length; index++) {
+			const step = journeySteps[index]!;
+			this.uiConsoleStatusRail.appendChild(this.createConsoleWorkflowProgressStep(step, index < journeySteps.length - 1));
 		}
 		this.renderConsoleWorkflowNextAction(status.nextAction);
-		this.uiConsoleStatusLabel.textContent = status.stageId === 'idle'
-			? localize('customMode.consoleWorkflowIdle', 'Kick off workspace planning to start the Console lifecycle.')
-			: status.stageId === 'docker'
-				? localize('customMode.consoleWorkflowDocker', 'Start Docker Desktop (with MCP Toolkit) to continue Workspace steps.')
-				: '';
+		this.renderConsolePreflightPill(signals);
+		this.uiConsoleStatusLabel.textContent = status.stageId === 'docker'
+			? localize('customMode.consoleWorkflowDocker', 'Start Docker Desktop (with MCP Toolkit) to continue Workspace steps.')
+			: '';
 		const focusStepId = status.nextAction?.stepId
 			?? status.steps.find(step => step.status === 'current')?.id;
 		if (focusStepId && focusStepId !== this.lastConsoleCenteredStepId) {
@@ -10537,31 +10975,51 @@ class ModeShellContribution extends Disposable {
 		}
 	}
 
+	/** Docker preflight pill: quiet status when ready, actionable when blocking. */
+	private renderConsolePreflightPill(signals: ConsoleWorkflowSignals | undefined): void {
+		const pill = this.uiConsolePreflightPill;
+		if (!pill) {
+			return;
+		}
+		if (!signals) {
+			pill.classList.add('hidden');
+			return;
+		}
+		const blocked = signals.dockerReady === false;
+		pill.classList.remove('hidden');
+		pill.classList.toggle('blocked', blocked);
+		pill.disabled = !blocked;
+		pill.replaceChildren(
+			$('span.custom-mode-console-preflight-glyph', { 'aria-hidden': 'true' }, blocked ? '●' : '✓'),
+			$('span', undefined, blocked
+				? localize('customMode.preflightDockerBlocked', 'Start Docker Desktop')
+				: localize('customMode.preflightDockerReady', 'Docker ready')),
+		);
+		pill.title = blocked
+			? localize('customMode.consoleWorkflowDocker', 'Start Docker Desktop (with MCP Toolkit) to continue Workspace steps.')
+			: localize('customMode.preflightDockerReadyTitle', 'Docker Desktop (with MCP Toolkit) is running');
+	}
+
 	private createConsoleWorkflowProgressStep(step: ConsoleWorkflowStepState, withConnector: boolean): HTMLElement {
 		const statusLabel = step.status === 'completed'
 			? localize('surfacePlan.statusCompleted', 'Done')
 			: step.status === 'current'
 				? localize('surfacePlan.statusCurrent', 'Current')
 				: localize('surfacePlan.statusUpcoming', 'Upcoming');
+		const displayLabel = consoleWorkflowStepDisplayLabel(step.id, step.label);
 		const stepEl = $('div.custom-mode-surface-plan-status-step', {
 			role: 'listitem',
 			'data-step-id': step.id,
 			'data-status': step.status,
 			'aria-current': step.status === 'current' ? 'step' : undefined,
-			title: step.label,
+			title: displayLabel,
 		},
 			$('div.custom-mode-surface-plan-status-label', undefined, statusLabel),
-			$('div.custom-mode-surface-plan-status-value', undefined, step.label),
+			$('div.custom-mode-surface-plan-status-value', undefined, displayLabel),
 		);
 		stepEl.classList.toggle('completed', step.status === 'completed');
 		stepEl.classList.toggle('current', step.status === 'current');
 		stepEl.classList.toggle('pending', step.status === 'pending' || step.status === 'skipped');
-		if (step.id === 'docker') {
-			stepEl.style.cursor = 'pointer';
-			addDisposableListener(stepEl, 'click', () => {
-				this.openConsoleWithSection('docker');
-			});
-		}
 		if (withConnector) {
 			stepEl.appendChild($('div.custom-mode-surface-plan-status-connector', { 'aria-hidden': 'true' }));
 		}
@@ -10900,19 +11358,19 @@ class ModeShellContribution extends Disposable {
 		// Subtitles only on surface-related cards (Surfaces / Surface rows / sections).
 		const cards: CardRailItem[] = [
 			{
-				id: 'code',
-				key: localize('customMode.workspaceHomeCodeKey', 'Code'),
-				value: '',
-				title: localize('customMode.codeTabTitle', 'Open Code editor'),
-				groupLabel: this.getWorkspaceSectionLabel(),
-			},
-			{
 				id: 'console',
 				key: localize('customMode.workspaceHomeConsoleKey', 'Console'),
 				value: '',
 				title: this.consoleExpanded && !openSurfaceId
 					? localize('customMode.workspaceHomeConsoleCollapse', 'Collapse Console sections')
 					: localize('customMode.workspaceHomeConsoleOpen', 'Open Console'),
+				groupLabel: this.getWorkspaceSectionLabel(),
+			},
+			{
+				id: 'code',
+				key: localize('customMode.workspaceHomeCodeKey', 'Code'),
+				value: '',
+				title: localize('customMode.codeTabTitle', 'Open Code editor'),
 			},
 		];
 

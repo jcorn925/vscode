@@ -89,6 +89,10 @@ extensions/vscode-colorize-tests/test/colorize-fixtures/test.js
 extensions/vscode-colorize-tests/test/colorize-fixtures/test6916.js
 extensions/yaml/build/update-grammar.js
 gulpfile.mjs
+mcp/workflow-advisor/analyzer.js
+mcp/workflow-advisor/guidance.js
+mcp/workflow-advisor/server.js
+mcp/workflow-advisor/test/analyzer.test.js
 scripts/chat-simulation/common/perf-scenarios.js
 scripts/chat-simulation/common/utils.js
 scripts/chat-simulation/merge-ci-summary.js

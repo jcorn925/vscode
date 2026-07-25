@@ -30,6 +30,13 @@
 			"args": [
 				"${workspaceFolder}/scripts/ix_graph_mcp.py"
 			]
+		},
+		"goalconsole-workflow-advisor": {
+			"type": "stdio",
+			"command": "node",
+			"args": [
+				"${workspaceFolder}/mcp/workflow-advisor/server.js"
+			]
 		}
 	},
 	"inputs": []

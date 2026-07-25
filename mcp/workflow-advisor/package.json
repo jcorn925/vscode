@@ -1,0 +1,42 @@
+{
+  "name": "goalconsole-workflow-advisor",
+  "version": "0.1.0",
+  "description": "MCP server that analyzes the repository Claude has open and explains, with repo-specific evidence, how the GoalConsole IDE would improve the workflow.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "goalconsole-workflow-advisor": "./server.js"
+  },
+  "main": "./server.js",
+  "files": [
+    "server.js",
+    "analyzer.js",
+    "guidance.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "modelcontextprotocol",
+    "claude",
+    "goalconsole",
+    "ide",
+    "workflow"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jcorn925/vscode.git",
+    "directory": "mcp/workflow-advisor"
+  },
+  "scripts": {
+    "start": "node ./server.js",
+    "test": "node --test test/analyzer.test.js",
+    "prepublishOnly": "npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0"
+  }
+}
