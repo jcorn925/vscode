@@ -22,7 +22,7 @@ import { DisposableStore, toDisposable } from '../../../../base/common/lifecycle
  * ```
  */
 
-export const CARD_RAIL_DEFAULT_WIDTH = 220;
+export const CARD_RAIL_DEFAULT_WIDTH = 260;
 export const CARD_RAIL_MIN_WIDTH = 160;
 export const CARD_RAIL_MAX_WIDTH = 480;
 /** Below this width the rail collapses to a single card column. */
@@ -110,6 +110,12 @@ export interface CardRailLayout {
 	reveal(): void;
 	/** True when the auto-hide card column is collapsed to the edge tab. */
 	isCollapsed(): boolean;
+	/**
+	 * Suspend or resume the idle auto-hide. Disabling expands the rail and keeps it
+	 * open (e.g. while landing content shows and the cards are the primary content);
+	 * re-enabling restarts the idle hide clock. No-op without `autoHideMs`.
+	 */
+	setAutoHideEnabled(enabled: boolean): void;
 	setWidth(width: number): void;
 	getWidth(): number;
 	dispose(): void;
@@ -340,8 +346,10 @@ export const CARD_RAIL_STYLESHEET = `
 	text-transform: uppercase;
 	color: var(--vscode-descriptionForeground);
 	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	word-break: break-word;
 	max-width: 100%;
 }
 .custom-mode-card-rail-card.active .custom-mode-card-rail-card-key {
@@ -1058,6 +1066,7 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 
 	let revealCollapsedRail: (() => void) | undefined;
 	let isRailCollapsed = (): boolean => false;
+	let applyAutoHideEnabled: ((enabled: boolean) => void) | undefined;
 	const autoHideMs = typeof options.autoHideMs === 'number' && options.autoHideMs > 0
 		? options.autoHideMs
 		: undefined;
@@ -1066,6 +1075,7 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 		let collapsed = false;
 		let hoveringCards = false;
 		let hideTimer: number | undefined;
+		let autoHideEnabled = true;
 		isRailCollapsed = () => collapsed;
 
 		const clearHideTimer = (): void => {
@@ -1093,9 +1103,20 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 			setCollapsed(false);
 		};
 		revealCollapsedRail = showCards;
+		applyAutoHideEnabled = enabled => {
+			if (autoHideEnabled === enabled) {
+				return;
+			}
+			autoHideEnabled = enabled;
+			if (enabled) {
+				scheduleHide();
+			} else {
+				showCards();
+			}
+		};
 
 		const scheduleHide = (): void => {
-			if (hoveringCards || root.classList.contains('resizing')) {
+			if (!autoHideEnabled || hoveringCards || root.classList.contains('resizing')) {
 				return;
 			}
 			clearHideTimer();
@@ -1212,6 +1233,9 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 		},
 		isCollapsed() {
 			return isRailCollapsed();
+		},
+		setAutoHideEnabled(enabled) {
+			applyAutoHideEnabled?.(enabled);
 		},
 		setWidth(next) {
 			applyWidth(next, true);

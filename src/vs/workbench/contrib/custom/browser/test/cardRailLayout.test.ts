@@ -37,6 +37,8 @@ suite('cardRailLayout', () => {
 		assert.strictEqual(layout.rail.querySelectorAll('button.custom-mode-card-rail-card').length, 2);
 		assert.match(CARD_RAIL_STYLESHEET, /\.custom-mode-card-rail-cards\s*\{[^}]*grid-template-columns:\s*1fr 1fr/s);
 		assert.match(CARD_RAIL_STYLESHEET, /\.custom-mode-card-rail-assoc\s*\{[^}]*grid-template-columns:\s*1fr 1fr/s);
+		// Card keys wrap to two lines instead of clipping to "DEPL…".
+		assert.match(CARD_RAIL_STYLESHEET, /\.custom-mode-card-rail-card-key\s*\{[^}]*-webkit-line-clamp:\s*2/s);
 		assert.ok(layout.rail.querySelector('button[data-card-id="plan"]')?.classList.contains('active'));
 		assert.strictEqual(layout.contentHost.contains(content), true);
 
@@ -395,6 +397,29 @@ suite('cardRailLayout', () => {
 		await new Promise<void>(resolve => setTimeout(resolve, 40));
 		assert.ok(layout.root.classList.contains('collapsed'));
 		layout.rail.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+		assert.ok(!layout.root.classList.contains('collapsed'));
+		layout.dispose();
+	});
+
+	test('setAutoHideEnabled(false) keeps the rail open and re-enabling collapses it', async () => {
+		const layout = createCardRailLayout({
+			cards: [{ id: 'plan', key: 'Plan', value: 'plan.md' }],
+			onSelect: () => { },
+			autoHideMs: 20,
+		});
+		layout.setAutoHideEnabled(false);
+		await new Promise<void>(resolve => setTimeout(resolve, 40));
+		assert.ok(!layout.root.classList.contains('collapsed'));
+		// Pointer leave while disabled must not restart the hide clock.
+		layout.rail.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+		layout.rail.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }));
+		await new Promise<void>(resolve => setTimeout(resolve, 40));
+		assert.ok(!layout.root.classList.contains('collapsed'));
+		layout.setAutoHideEnabled(true);
+		await new Promise<void>(resolve => setTimeout(resolve, 40));
+		assert.ok(layout.root.classList.contains('collapsed'));
+		// Disabling while collapsed expands immediately.
+		layout.setAutoHideEnabled(false);
 		assert.ok(!layout.root.classList.contains('collapsed'));
 		layout.dispose();
 	});

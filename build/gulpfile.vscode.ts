@@ -615,6 +615,13 @@ function prepareCopilotRipgrepShimTask(platform: string, arch: string, destinati
 		const appNodeModulesDir = path.join(appBase, 'node_modules');
 
 		const builtInCopilotExtensionDir = path.join(appBase, 'extensions', 'copilot');
+		// Local OSS packaging does not download the Copilot VSIX into
+		// `.build/extensions/copilot` (CI does via downloadCopilotVsix.ts).
+		// Skip the shim when that built-in extension was not packaged.
+		if (!fs.existsSync(builtInCopilotExtensionDir)) {
+			console.log(`[prepareCopilotRipgrepShim] Skipping: built-in copilot extension not present at ${builtInCopilotExtensionDir}`);
+			return;
+		}
 		prepareBuiltInCopilotRipgrepShim(platform, arch, builtInCopilotExtensionDir, appNodeModulesDir);
 	};
 }

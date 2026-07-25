@@ -20,9 +20,11 @@ import { ITerminalService } from '../../vs/workbench/contrib/terminal/browser/te
 import { IStorageService, StorageScope, StorageTarget } from '../../vs/platform/storage/common/storage.js';
 import { INotificationService, Severity } from '../../vs/platform/notification/common/notification.js';
 import { ILogService } from '../../vs/platform/log/common/log.js';
-import { ILifecycleService } from '../../vs/workbench/services/lifecycle/common/lifecycle.js';
+import { ILifecycleService, LifecyclePhase } from '../../vs/workbench/services/lifecycle/common/lifecycle.js';
 import { IOpenerService } from '../../vs/platform/opener/common/opener.js';
 import { localize } from '../../vs/nls.js';
+import { DockerAvailabilityStatus, IDockerAvailabilityService, isDockerAvailabilityReady } from '../docker/DockerAvailabilityService.js';
+import { shouldNotifyIxDockerFailure } from './ixDockerNotifyPolicy.js';
 import {
 	buildIxInstallScriptCommand,
 	buildShellEnvPreamble,
@@ -105,6 +107,8 @@ export interface IIxIntegrationService {
 export const IIxIntegrationService = createDecorator<IIxIntegrationService>('ixIntegrationService');
 
 const STORAGE_IX_CLI = 'custom.ix/resolvedCliPath';
+/** One-shot flag so the Docker start-failure toast fires once, not on every launch. */
+const STORAGE_IX_DOCKER_FAILURE_NOTIFIED = 'custom.ix/dockerStartFailedNotified';
 
 const OUTPUT_TAIL = 16_384;
 
@@ -332,6 +336,7 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@ILogService private readonly logService: ILogService,
+		@IDockerAvailabilityService private readonly dockerAvailabilityService: IDockerAvailabilityService,
 	) {
 		super();
 
@@ -339,6 +344,12 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 			return;
 		}
 
+		// Self-heal: when Docker comes up after a skipped/failed Docker step, rerun the pipeline.
+		this._register(this.dockerAvailabilityService.onDidChangeStatus(status => {
+			if (isDockerAvailabilityReady(status)) {
+				this.scheduleStart();
+			}
+		}));
 		this._register(this.workspaceContextService.onDidChangeWorkbenchState(() => this.scheduleStart()));
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.scheduleStart()));
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
@@ -348,7 +359,9 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}));
 		this._register(this.lifecycleService.onWillShutdown(() => this.disposeWatchers()));
 
-		this.scheduleStart();
+		// No auto-start work (CLI resolve, `ix docker start`, watchers) before the workbench
+		// has restored — startup should not pay for Ix warm-up.
+		void this.lifecycleService.when(LifecyclePhase.Restored).then(() => this.scheduleStart());
 	}
 
 	getState(): IxIntegrationState {
@@ -1185,6 +1198,17 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 		}
 
 		this.beginStep(STEP_DOCKER);
+		const dockerStatus = this.dockerAvailabilityService.getStatus();
+		if (dockerStatus === DockerAvailabilityStatus.Missing || dockerStatus === DockerAvailabilityStatus.McpToolkitMissing) {
+			// Docker is definitively down — don't run `ix docker start` just to fail, and
+			// don't toast: the pipeline step and Docker rail card carry the state, and the
+			// availability listener reruns the pipeline once Docker comes up.
+			const detail = localize('ix.error.dockerUnavailable', 'Docker is not running. Start Docker Desktop — Ix retries automatically once Docker is available.');
+			this.completeStep(STEP_DOCKER, 'error', detail);
+			this.markRemainingIdleStepsSkipped();
+			this.setPhase('error', detail);
+			return;
+		}
 		try {
 			const dockerStarted = await this.ensureIxDockerStarted(primary, ix, { ui: 'pipeline', stepId: STEP_DOCKER, skipIfReachable: true });
 			if (gen !== this.pipelineGeneration) {
@@ -1198,13 +1222,19 @@ export class IxIntegrationService extends Disposable implements IIxIntegrationSe
 				this.completeStep(STEP_DOCKER, 'error', detail);
 				this.markRemainingIdleStepsSkipped();
 				this.setPhase('error', detail);
-				this.notificationService.notify({
-					severity: Severity.Error,
-					message: localize('ix.notify.docker', 'Ix Docker backend failed to start. Make sure Docker is running, then retry.'),
-				});
+				const alreadyNotified = this.storageService.get(STORAGE_IX_DOCKER_FAILURE_NOTIFIED, StorageScope.APPLICATION) === '1';
+				if (shouldNotifyIxDockerFailure(this.dockerAvailabilityService.getStatus(), alreadyNotified)) {
+					this.storageService.store(STORAGE_IX_DOCKER_FAILURE_NOTIFIED, '1', StorageScope.APPLICATION, StorageTarget.MACHINE);
+					this.notificationService.notify({
+						severity: Severity.Error,
+						message: localize('ix.notify.docker', 'Ix Docker backend failed to start. Make sure Docker is running, then retry.'),
+					});
+				}
 				return;
 			}
 			this.completeStep(STEP_DOCKER, 'success');
+			// A working Docker step re-arms the one-shot failure toast for real regressions.
+			this.storageService.remove(STORAGE_IX_DOCKER_FAILURE_NOTIFIED, StorageScope.APPLICATION);
 		} catch (e) {
 			if (gen !== this.pipelineGeneration) {
 				return;
