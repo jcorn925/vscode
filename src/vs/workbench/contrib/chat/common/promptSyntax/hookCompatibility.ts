@@ -9,7 +9,7 @@ import { IHookCommand, toHookType } from './hookSchema.js';
 import { parseClaudeHooks, extractHookCommandsFromItem } from './hookClaudeCompat.js';
 import { resolveCopilotCliHookType } from './hookCopilotCliCompat.js';
 import { HookType } from './hookTypes.js';
-import { getDefaultChatProviderName } from '../chatBranding.js';
+import { getDefaultChatProviderName } from '../../../../services/chat/common/chatBranding.js';
 
 /**
  * Represents a hook source with its original and normalized properties.

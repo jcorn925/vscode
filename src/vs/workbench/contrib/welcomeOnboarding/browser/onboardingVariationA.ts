@@ -47,7 +47,7 @@ import {
 	parseGheInstanceInput,
 } from '../common/onboardingTypes.js';
 import { IOnboardingService } from '../common/onboardingService.js';
-import { getDefaultChatProviderName } from '../../chat/common/chatBranding.js';
+import { getDefaultChatProviderName } from '../../../services/chat/common/chatBranding.js';
 
 type OnboardingStepViewClassification = {
 	owner: 'cwebster-99';

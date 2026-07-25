@@ -11,7 +11,7 @@ import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { foreground, listActiveSelectionForeground, registerColor, transparent } from '../../../../../platform/theme/common/colorRegistry.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { isAgentHostTarget, SessionType } from '../../common/chatSessionsService.js';
-import { getDefaultChatProviderName } from '../../common/chatBranding.js';
+import { getDefaultChatProviderName } from '../../../../services/chat/common/chatBranding.js';
 
 export enum AgentSessionProviders {
 	Local = SessionType.Local,
@@ -186,7 +186,9 @@ export function getAgentSessionProviderDescription(provider: AgentSessionTarget)
 		case AgentSessionProviders.Claude:
 			return localize('chat.session.providerDescription.claude', "Delegate tasks to the Claude Agent SDK using models included in your {0} subscription. The agent iterates via chat and works interactively to implement changes on your main workspace.", getDefaultChatProviderName());
 		case AgentSessionProviders.Codex:
-			return localize('chat.session.providerDescription.codex', "Opens a new Codex session in the editor. Codex sessions can be managed from the chat sessions view.");
+			return localize('chat.session.providerDescription.codex', "Open a new Codex session using the Codex extension from OpenAI. Codex sessions can be managed from the chat sessions view.");
+		case AgentSessionProviders.AgentHostCodex:
+			return localize('chat.session.providerDescription.agentHostCodex', "Delegate tasks to the Codex App Server using the Codex models included in your GitHub Copilot subscription. The agent iterates via chat and works interactively to implement changes on your main workspace.");
 		case AgentSessionProviders.Growth:
 			return localize('chat.session.providerDescription.growth', "Learn about Copilot features.");
 		case AgentSessionProviders.AgentHostCopilot:

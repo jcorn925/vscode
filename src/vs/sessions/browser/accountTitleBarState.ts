@@ -9,7 +9,7 @@ import { localize } from '../../nls.js';
 import { ChatEntitlement, IChatSentiment, IQuotaSnapshot } from '../../workbench/services/chat/common/chatEntitlementService.js';
 import { IDefaultAccountService } from '../../platform/defaultAccount/common/defaultAccount.js';
 import { IAuthenticationService } from '../../workbench/services/authentication/common/authentication.js';
-import { getDefaultChatProviderName } from '../../workbench/contrib/chat/common/chatBranding.js';
+import { getDefaultChatProviderName } from '../../workbench/services/chat/common/chatBranding.js';
 
 export interface IResolvedAccountInfo {
 	readonly accountName: string;

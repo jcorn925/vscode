@@ -17,7 +17,7 @@ import { ChatEntitlement, IChatEntitlementService, IChatSentiment } from '../../
 import { IChatResponseErrorDetails } from '../../common/chatService/chatService.js';
 import { IChatErrorDetailsPart, IChatResponseViewModel } from '../../common/model/chatViewModel.js';
 import { ChatQuotaExceededPart } from '../../browser/widget/chatContentParts/chatQuotaExceededPart.js';
-import { getDefaultChatProviderName } from '../../common/chatBranding.js';
+import { getDefaultChatProviderName } from '../../../../services/chat/common/chatBranding.js';
 
 
 function createMockEntitlementService(entitlement: ChatEntitlement): IChatEntitlementService {

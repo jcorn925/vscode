@@ -14,7 +14,7 @@ import { NotebookSetting } from '../../notebook/common/notebookCommon.js';
 import { CONTEXT_ACCESSIBILITY_MODE_ENABLED } from '../../../../platform/accessibility/common/accessibility.js';
 import { URI } from '../../../../base/common/uri.js';
 import product from '../../../../platform/product/common/product.js';
-import { getDefaultChatProviderName } from '../../chat/common/chatBranding.js';
+import { getDefaultChatProviderName } from '../../../services/chat/common/chatBranding.js';
 
 interface IGettingStartedContentProvider {
 	(): string;

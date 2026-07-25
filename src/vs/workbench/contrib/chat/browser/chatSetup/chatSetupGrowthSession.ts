@@ -20,7 +20,7 @@ import { IAgentSession } from '../agentSessions/agentSessionsModel.js';
 import { ISessionOpenerParticipant, ISessionOpenOptions, sessionOpenerRegistry } from '../agentSessions/agentSessionsOpener.js';
 import { IChatWidgetService } from '../chat.js';
 import { CHAT_OPEN_ACTION_ID, IChatViewOpenOptions } from '../actions/chatActions.js';
-import { getDefaultChatProviderName } from '../../common/chatBranding.js';
+import { getDefaultChatProviderName } from '../../../../services/chat/common/chatBranding.js';
 
 /**
  * Core-side growth session controller that shows a single "attention needed"

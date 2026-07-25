@@ -16,7 +16,7 @@ import { ScrollbarVisibility } from '../../../../base/common/scrollable.js';
 import { basename } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
-import { getDefaultChatProviderName } from '../../chat/common/chatBranding.js';
+import { getDefaultChatProviderName } from '../../../services/chat/common/chatBranding.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
@@ -70,6 +70,7 @@ const MAX_WALKTHROUGHS = 10;
 const WELCOME_CHAT_INPUT_LAYOUT_HEIGHT = 150;
 const WELCOME_CHAT_INPUT_RESERVED_LIST_HEIGHT = 50;
 const WELCOME_CHAT_INPUT_RESERVED_CHROME_HEIGHT = 72;
+const WELCOME_COMPACT_HEIGHT = 800;
 // Mirror ChatWidget's compact-surface sizing so the hidden list reservation and input chrome do not collapse the editor.
 const WELCOME_CHAT_INPUT_MAX_HEIGHT_OVERRIDE = WELCOME_CHAT_INPUT_LAYOUT_HEIGHT + WELCOME_CHAT_INPUT_RESERVED_LIST_HEIGHT + WELCOME_CHAT_INPUT_RESERVED_CHROME_HEIGHT;
 
@@ -566,6 +567,8 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			getHoverPosition: () => HoverPosition.BELOW,
 			trackActiveEditorSession: () => false,
 			source: 'welcomeView',
+			itemHeight: AgentSessionsListDelegate.ITEM_HEIGHT,
+			sectionHeight: AgentSessionsListDelegate.SECTION_HEIGHT,
 			notifySessionOpened: () => {
 				const isProjectionEnabled = this.configurationService.getValue<boolean>(ChatConfiguration.AgentSessionProjectionEnabled);
 				if (!isProjectionEnabled) {
@@ -803,6 +806,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		this.lastDimension = dimension;
 		this.container.style.height = `${dimension.height}px`;
 		this.container.style.width = `${dimension.width}px`;
+		this.container.classList.toggle('height-constrained', dimension.height <= WELCOME_COMPACT_HEIGHT);
 
 		// Layout chat widget
 		this.layoutChatWidget();

@@ -18,7 +18,7 @@ import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions
 import { localize, localize2 } from '../../../../../nls.js';
 import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
 import { EditorContextKeys } from '../../../../../editor/common/editorContextKeys.js';
-import { getDefaultChatProviderName } from '../../common/chatBranding.js';
+import { getDefaultChatProviderName } from '../../../../services/chat/common/chatBranding.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
@@ -57,7 +57,7 @@ import { CHAT_CATEGORY, CHAT_SETUP_ACTION_ID, CHAT_SETUP_SUPPORT_ANONYMOUS_ACTIO
 import { ChatViewContainerId, IChatWidget, IChatWidgetService } from '../chat.js';
 import { ChatInputNotificationSeverity, IChatInputNotificationService } from '../widget/input/chatInputNotificationService.js';
 import { chatViewsWelcomeRegistry } from '../viewsWelcome/chatViewsWelcome.js';
-import { buildUpgradeUrlWithRedirect, ChatSetupAnonymous, ChatSetupStrategy, refreshTokens } from './chatSetup.js';
+import { buildUpgradeUrlWithRedirect, ChatSetupAnonymous, ChatSetupStrategy, IChatSetupCommandOptions, IChatSetupResult, refreshTokens } from './chatSetup.js';
 import { ChatSetupController } from './chatSetupController.js';
 import { GrowthSessionController, registerGrowthSession } from './chatSetupGrowthSession.js';
 import { AICodeActionsHelper, AINewSymbolNamesProvider, ChatCodeActionsProvider, SetupAgent } from './chatSetupProviders.js';
@@ -242,7 +242,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 				});
 			}
 
-			override async run(accessor: ServicesAccessor, mode?: ChatModeKind | string, options?: { forceSignInDialog?: boolean; additionalScopes?: readonly string[]; forceAnonymous?: ChatSetupAnonymous; inputValue?: string; dialogIcon?: ThemeIcon; dialogTitle?: string; setupStrategy?: ChatSetupStrategy; disableCloseButton?: boolean; onSignInStarted?: () => void }): Promise<boolean> {
+			override async run(accessor: ServicesAccessor, mode?: ChatModeKind | string, options?: IChatSetupCommandOptions): Promise<boolean | IChatSetupResult> {
 				const widgetService = accessor.get(IChatWidgetService);
 				const instantiationService = accessor.get(IInstantiationService);
 				const dialogService = accessor.get(IDialogService);
@@ -270,8 +270,12 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 				}
 
 				const setup = ChatSetup.getInstance(instantiationService, context, controller);
-				const { success } = await setup.run(options);
-				if (success === false && !lifecycleService.willShutdown) {
+				const result = await setup.run(options);
+				if (options?.returnResult) {
+					return result;
+				}
+				const { success } = result;
+				if (success === false && !result.errorAlreadyHandled && !lifecycleService.willShutdown) {
 					const { confirmed } = await dialogService.confirm({
 						type: Severity.Error,
 						message: localize('setupErrorDialog', "Chat setup failed. Would you like to try again?"),

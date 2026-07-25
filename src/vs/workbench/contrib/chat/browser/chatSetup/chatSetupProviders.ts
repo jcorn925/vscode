@@ -18,7 +18,7 @@ import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/cont
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import product from '../../../../../platform/product/common/product.js';
-import { getDefaultChatProviderName } from '../../common/chatBranding.js';
+import { getDefaultChatProviderName } from '../../../../services/chat/common/chatBranding.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IWorkspaceTrustManagementService } from '../../../../../platform/workspace/common/workspaceTrust.js';
 import { IWorkbenchEnvironmentService } from '../../../../services/environment/common/environmentService.js';
@@ -535,7 +535,7 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 		await chatService.resendRequest(requestModel, {
 			...widget?.getModeRequestOptions(),
 			modeInfo,
-			userSelectedModelId: widget?.input?.currentLanguageModel
+			...widget?.getSelectedModelRequestOptions()
 		});
 	}
 
