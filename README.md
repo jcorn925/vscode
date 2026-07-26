@@ -1,8 +1,11 @@
-# GoalConsole.ai
+# Babadaba
 
-GoalConsole.ai is a custom Code - OSS fork for turning business intent into working product surfaces. It keeps the familiar editor and workbench foundation, then adds goal workspaces, guided surface planning, launch guidance, milestone evaluation, and agent context for building multi-surface products.
+> Works so well you'll say "Babadaba."
+
+Babadaba is a custom Code - OSS fork for turning business intent into working product surfaces. It keeps the familiar editor and workbench foundation, then adds goal workspaces, guided surface planning, launch guidance, milestone evaluation, and agent context for building multi-surface products.
 
 - Purpose: [.agent/PROJECT_PURPOSE.md](.agent/PROJECT_PURPOSE.md)
+- Live IDE demo (read-only, in the browser): [https://goalconsole-demo.vercel.app](https://goalconsole-demo.vercel.app)
 - Local landing page: [docs/ide-purpose/index.html](docs/ide-purpose/index.html)
 - Published landing page (GitHub Pages): [https://jcorn925.github.io/vscode/](https://jcorn925.github.io/vscode/)
 - Legacy Vercel URL ([ide-purpose.vercel.app](https://ide-purpose.vercel.app/)) may lag until redeployed from `docs/ide-purpose`
@@ -19,7 +22,7 @@ npm ci
 # 2. Compile the client, built-in extensions, and Copilot bits
 npm run compile
 
-# 3. Start GoalConsole.ai (downloads Electron on first run if needed)
+# 3. Start Babadaba (downloads Electron on first run if needed)
 ./scripts/code.sh
 ```
 

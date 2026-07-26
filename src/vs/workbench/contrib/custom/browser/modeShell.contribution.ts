@@ -14214,6 +14214,12 @@ class ModeShellContribution extends Disposable {
 			this.showClaudeTerminalForKey(key, options);
 			return;
 		}
+		if (!this.terminalService.isProcessSupportRegistered) {
+			// Terminals cannot launch here (e.g. web without a remote) — show the empty
+			// state without a spinner instead of failing kickoff on every UI sync.
+			this.showClaudeTerminalEmpty(key);
+			return;
+		}
 		if (this.claudeTerminalEnsureInFlightByKey.has(key)) {
 			this.showClaudeTerminalEmpty(key, { starting: true });
 			return;
