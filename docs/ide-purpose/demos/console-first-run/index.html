@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Console First-Run Preview - GoalConsole.ai</title>
+	<style>
+		/* ============ tokens ============ */
+		:root {
+			/* light */
+			--bg: #f4f6f9;
+			--surface: #ffffff;
+			--recessed: #eef1f5;
+			--border: #dfe4eb;
+			--border-strong: #c9d1dc;
+			--text: #1d2433;
+			--muted: #5c6779;
+			--faint: #8a94a6;
+			--accent: #0f62d6;
+			--accent-hover: #0b56be;
+			--accent-fg: #ffffff;
+			--accent-soft: #e8f0fc;
+			--good: #1f8a5b;
+			--good-soft: #e3f3ea;
+			--busy: #b07a14;
+			--busy-soft: #f9f0dc;
+			--note: #b3550e;
+			--note-fg: #ffffff;
+			--shadow: 0 1px 2px rgba(29, 36, 51, .06), 0 4px 16px rgba(29, 36, 51, .07);
+			--shadow-lift: 0 2px 4px rgba(29, 36, 51, .08), 0 10px 28px rgba(29, 36, 51, .11);
+
+			/* ramps — spacing on the ramp only: 2 4 6 8 12 16 20 24 32 40 */
+			--r-control: 4px;   /* buttons, inputs, chips */
+			--r-inner: 6px;     /* cards, containers inside a surface */
+			--r-outer: 8px;     /* floating surfaces */
+			color-scheme: light;
+		}
+		@media (prefers-color-scheme: dark) {
+			:root {
+				--bg: #16181d;
+				--surface: #1e2127;
+				--recessed: #191c22;
+				--border: #2c313b;
+				--border-strong: #3a4150;
+				--text: #e4e8f0;
+				--muted: #97a0b2;
+				--faint: #6b7486;
+				--accent: #2f7de1;
+				--accent-hover: #4a90ea;
+				--accent-fg: #ffffff;
+				--accent-soft: #1d2c44;
+				--good: #43b581;
+				--good-soft: #1b2f26;
+				--busy: #d9a53a;
+				--busy-soft: #33290f;
+				--note: #e0762a;
+				--note-fg: #16181d;
+				--shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .35);
+				--shadow-lift: 0 2px 4px rgba(0, 0, 0, .35), 0 12px 32px rgba(0, 0, 0, .45);
+				color-scheme: dark;
+			}
+		}
+
+		/* ============ base ============ */
+		* { box-sizing: border-box; }
+		body {
+			margin: 0;
+			background: var(--bg);
+			color: var(--text);
+			font: 400 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Ubuntu, "Helvetica Neue", sans-serif;
+			-webkit-font-smoothing: antialiased;
+		}
+		button { font: inherit; color: inherit; }
+		:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-control); }
+
+		/* ============ preview chrome (not part of the mockup) ============ */
+		.preview-bar {
+			display: flex; align-items: center; gap: 12px;
+			padding: 8px 20px;
+			border-bottom: 1px solid var(--border);
+			background: var(--surface);
+			position: sticky; top: 0; z-index: 30;
+		}
+		.preview-bar .brand {
+			display: inline-flex; align-items: center; gap: 8px;
+			color: var(--text); text-decoration: none; font-weight: 600;
+		}
+		.preview-bar .brand-mark {
+			width: 14px; height: 14px; border-radius: 4px;
+			background: linear-gradient(135deg, var(--accent), var(--good));
+		}
+		.preview-bar .tag {
+			font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+			color: var(--accent);
+			background: var(--accent-soft);
+			border-radius: 999px;
+			padding: 2px 10px;
+		}
+		.preview-bar h1 { font-size: 13px; font-weight: 600; margin: 0; }
+		.preview-bar .spacer { flex: 1; }
+		.preview-bar .back-link { color: var(--muted); text-decoration: none; font-size: 12px; }
+		.preview-bar .back-link:hover { color: var(--text); text-decoration: underline; }
+		.notes-toggle {
+			display: inline-flex; align-items: center; gap: 6px;
+			background: none; border: 1px solid var(--border-strong);
+			border-radius: var(--r-control);
+			padding: 4px 12px; cursor: pointer; color: var(--muted);
+		}
+		.notes-toggle:hover { background: var(--recessed); color: var(--text); }
+		.notes-toggle .dot {
+			width: 14px; height: 14px; border-radius: 50%;
+			background: var(--note); color: var(--note-fg);
+			font-size: 9px; font-weight: 600; line-height: 14px; text-align: center;
+		}
+		body.notes-on .notes-toggle { border-color: var(--note); color: var(--text); }
+
+		/* ============ journey strip ============ */
+		.journey {
+			display: flex; align-items: center; gap: 24px;
+			padding: 12px 32px;
+			border-bottom: 1px solid var(--border);
+			background: var(--surface);
+			overflow-x: auto;
+		}
+		.steps { display: flex; align-items: center; gap: 20px; flex: 1; min-width: 0; }
+		.step { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+		.step .num {
+			width: 18px; height: 18px; border-radius: 50%;
+			border: 1px solid var(--border-strong);
+			color: var(--faint);
+			font-size: 10px; font-weight: 600; line-height: 17px; text-align: center;
+			flex: none;
+		}
+		.step .lbl { color: var(--faint); }
+		.step.active .num { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+		.step.active .lbl { color: var(--text); font-weight: 600; }
+		.step-sep { width: 20px; height: 1px; background: var(--border-strong); flex: none; }
+		.preflight {
+			display: inline-flex; align-items: center; gap: 6px;
+			font-size: 11px; color: var(--muted);
+			border: 1px solid var(--border);
+			border-radius: 999px;
+			padding: 3px 10px;
+			white-space: nowrap;
+		}
+		.preflight .ok { color: var(--good); font-weight: 600; }
+
+		/* ============ stage ============ */
+		.stage {
+			max-width: 880px;
+			margin: 0 auto;
+			padding: 40px 24px 64px;
+		}
+
+		/* composer — the one thing that leads */
+		.composer-head { text-align: center; margin-bottom: 24px; }
+		.composer-head h2 {
+			font-size: 24px; font-weight: 600; margin: 0 0 8px;
+			text-wrap: balance;
+		}
+		.composer-head p {
+			margin: 0 auto; max-width: 56ch;
+			color: var(--muted); font-size: 13px;
+		}
+		.composer {
+			background: var(--surface);
+			border: 1px solid var(--border);
+			border-radius: var(--r-inner);
+			box-shadow: var(--shadow);
+			padding: 16px;
+			transition: box-shadow .15s ease, border-color .15s ease;
+		}
+		.composer.flash { border-color: var(--accent); box-shadow: var(--shadow-lift); }
+		.composer textarea {
+			width: 100%;
+			min-height: 92px;
+			resize: vertical;
+			border: none; background: none; color: var(--text);
+			font: inherit; font-size: 14px; line-height: 1.55;
+			padding: 4px;
+		}
+		.composer textarea:focus { outline: none; }
+		.composer textarea::placeholder { color: var(--faint); }
+		.composer-foot {
+			display: flex; align-items: center; gap: 8px;
+			border-top: 1px solid var(--border);
+			padding-top: 12px; margin-top: 8px;
+		}
+		.btn {
+			border: none; border-radius: var(--r-control);
+			padding: 6px 16px; cursor: pointer;
+			background: none;
+		}
+		.btn.primary {
+			background: var(--accent); color: var(--accent-fg); font-weight: 600;
+		}
+		.btn.primary:hover { background: var(--accent-hover); }
+		.btn.quiet { color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+		.btn.quiet:hover { background: var(--recessed); color: var(--text); }
+		.btn.quiet svg { width: 14px; height: 14px; flex: none; }
+		.composer-foot .spacer { flex: 1; }
+		.alt-path { font-size: 12px; color: var(--muted); text-align: center; margin-top: 12px; }
+		.alt-path button {
+			background: none; border: none; padding: 0; cursor: pointer;
+			color: var(--accent); font-size: 12px;
+		}
+		.alt-path button:hover { text-decoration: underline; }
+
+		/* gallery — supports, doesn't lead */
+		.gallery { margin-top: 48px; }
+		.gallery-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+		.gallery-head h3 {
+			font-size: 13px; font-weight: 600; margin: 0;
+		}
+		.gallery-head span { font-size: 12px; color: var(--faint); }
+		.cards {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+			gap: 12px;
+		}
+		.card {
+			text-align: left;
+			background: none;
+			border: 1px solid var(--border);
+			border-radius: var(--r-inner);
+			padding: 16px;
+			cursor: pointer;
+			display: flex; flex-direction: column; gap: 8px;
+			transition: border-color .12s ease, background-color .12s ease;
+			position: relative;
+		}
+		.card:hover { background: var(--surface); border-color: var(--border-strong); }
+		.card h4 { margin: 0; font-size: 13px; font-weight: 600; }
+		.card .goal { margin: 0; color: var(--muted); font-size: 12px; }
+		.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+		.chip {
+			font-size: 11px; color: var(--muted);
+			border: 1px solid var(--border);
+			border-radius: 999px;
+			padding: 1px 8px;
+		}
+		.chip.live { color: var(--good); border-color: transparent; background: var(--good-soft); font-weight: 600; }
+		.chip.building { color: var(--busy); border-color: transparent; background: var(--busy-soft); font-weight: 600; }
+		.card .state {
+			display: flex; align-items: center; gap: 6px;
+			font-size: 11px; color: var(--faint); margin-top: auto; padding-top: 4px;
+		}
+		.card .state .open-hint { margin-left: auto; color: var(--accent); font-weight: 600; opacity: 0; transition: opacity .12s ease; }
+		.card:hover .state .open-hint { opacity: 1; }
+		.pulse {
+			width: 6px; height: 6px; border-radius: 50%; background: var(--busy); flex: none;
+			animation: pulse 1.6s ease-in-out infinite;
+		}
+		@keyframes pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+		@media (prefers-reduced-motion: reduce) {
+			.pulse { animation: none; }
+			.composer, .card { transition: none; }
+		}
+
+		/* progressive-disclosure ghost */
+		.later {
+			margin-top: 48px;
+			text-align: center;
+			font-size: 12px;
+			color: var(--faint);
+			border-top: 1px dashed var(--border);
+			padding-top: 16px;
+		}
+
+		/* ============ design notes ============ */
+		.note-pin {
+			display: none;
+			position: absolute;
+			width: 18px; height: 18px; border-radius: 50%;
+			background: var(--note); color: var(--note-fg);
+			font-size: 10px; font-weight: 600; line-height: 18px; text-align: center;
+			box-shadow: var(--shadow);
+			z-index: 20;
+		}
+		body.notes-on .note-pin { display: block; }
+		.notes-panel { display: none; max-width: 880px; margin: 0 auto; padding: 0 24px 64px; }
+		body.notes-on .notes-panel { display: block; }
+		.notes-panel h3 {
+			font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+			color: var(--note); margin: 0 0 12px;
+		}
+		.note-item {
+			display: flex; gap: 12px;
+			padding: 12px 0;
+			border-top: 1px solid var(--border);
+		}
+		.note-item .n {
+			width: 18px; height: 18px; border-radius: 50%; flex: none;
+			background: var(--note); color: var(--note-fg);
+			font-size: 10px; font-weight: 600; line-height: 18px; text-align: center;
+			margin-top: 1px;
+		}
+		.note-item p { margin: 0; color: var(--muted); max-width: 70ch; }
+		.note-item strong { color: var(--text); font-weight: 600; }
+	</style>
+</head>
+<body>
+
+	<div class="preview-bar">
+		<a class="brand" href="../../" aria-label="GoalConsole.ai purpose page">
+			<span class="brand-mark" aria-hidden="true"></span>
+			<span>GoalConsole.ai</span>
+		</a>
+		<span class="tag">Interactive preview</span>
+		<h1>Console first-run entry</h1>
+		<div class="spacer"></div>
+		<a class="back-link" href="../../">Purpose</a>
+		<a class="back-link" href="https://github.com/jcorn925/vscode">Repository</a>
+		<button class="notes-toggle" id="notesToggle" aria-pressed="false">
+			<span class="dot">5</span> Design notes
+		</button>
+	</div>
+
+	<!-- ============ the mockup ============ -->
+	<div class="journey" style="position: relative;">
+		<span class="note-pin" style="top: 10px; left: 12px;">3</span>
+		<div class="steps">
+			<div class="step active"><span class="num">1</span><span class="lbl">Describe your business</span></div>
+			<div class="step-sep"></div>
+			<div class="step"><span class="num">2</span><span class="lbl">Review the plan</span></div>
+			<div class="step-sep"></div>
+			<div class="step"><span class="num">3</span><span class="lbl">Approve surfaces</span></div>
+			<div class="step-sep"></div>
+			<div class="step"><span class="num">4</span><span class="lbl">Apps running</span></div>
+		</div>
+		<span class="preflight"><span class="ok">✓</span> Docker ready</span>
+	</div>
+
+	<div class="stage">
+		<div class="composer-head" style="position: relative;">
+			<span class="note-pin" style="top: -6px; right: 8%;">2</span>
+			<h2>What are you building?</h2>
+			<p>Describe the business in your own words. Console drafts a plan, proposes the apps to build — your <em>surfaces</em> — and runs them for you.</p>
+		</div>
+
+		<div class="composer" id="composer" style="position: relative;">
+			<span class="note-pin" style="top: -9px; left: -9px;">1</span>
+			<textarea id="brief" rows="4" placeholder="e.g. A boutique pilates studio that sells class packages online, takes bookings for sessions, and needs a simple marketing site to bring in new clients…"></textarea>
+			<div class="composer-foot">
+				<button class="btn quiet" type="button">
+					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M10.5 4.5 5.9 9.1a1.8 1.8 0 0 0 2.5 2.5l5-5a3.2 3.2 0 0 0-4.5-4.5l-5 5a4.6 4.6 0 0 0 6.5 6.5l4.1-4.1"/></svg>
+					Attach a brief — PDF, images, files
+				</button>
+				<div class="spacer"></div>
+				<button class="btn primary" type="button">Start planning</button>
+			</div>
+		</div>
+		<p class="alt-path">Already have code? <button type="button">Import an existing repo instead</button></p>
+
+		<div class="gallery" style="position: relative;">
+			<span class="note-pin" style="top: -6px; left: -9px;">4</span>
+			<div class="gallery-head">
+				<h3>Or explore an example</h3>
+				<span>pre-built workspaces — plans, surfaces, and runs included</span>
+			</div>
+			<div class="cards">
+				<button class="card" type="button" data-brief="A boutique pilates studio that sells class packages online, takes bookings for sessions, and needs a simple marketing site to bring in new clients.">
+					<h4>Booking studio</h4>
+					<p class="goal">Class packages, session booking, and a marketing site for a boutique pilates studio.</p>
+					<div class="chip-row">
+						<span class="chip live">● marketing-site · live</span>
+						<span class="chip building">◐ booking · building</span>
+						<span class="chip">analytics</span>
+					</div>
+					<div class="state"><span class="pulse"></span> Opens mid-flight — watch the plan finish building <span class="open-hint">Use this example →</span></div>
+				</button>
+				<button class="card" type="button" data-brief="An AI support desk for a SaaS product: grounded Q&A over our knowledge base, booking and portal redirects, out-of-scope escalation to a human, deployed publicly.">
+					<h4>AI support desk</h4>
+					<p class="goal">Grounded Q&amp;A over a knowledge base, with human escalation and a public deploy.</p>
+					<div class="chip-row">
+						<span class="chip">support-chat</span>
+						<span class="chip">admin-console</span>
+						<span class="chip">eval-harness</span>
+					</div>
+					<div class="state">Plan approved — surfaces ready to start <span class="open-hint">Use this example →</span></div>
+				</button>
+				<button class="card" type="button" data-brief="An online store for a small ceramics brand: a product catalog with checkout, order tracking for customers, and a dashboard where I manage inventory and orders.">
+					<h4>Online store</h4>
+					<p class="goal">Catalog and checkout for a ceramics brand, plus an order-management dashboard.</p>
+					<div class="chip-row">
+						<span class="chip">storefront</span>
+						<span class="chip">checkout</span>
+						<span class="chip">orders-dashboard</span>
+					</div>
+					<div class="state">Fresh plan — nothing built yet <span class="open-hint">Use this example →</span></div>
+				</button>
+				<button class="card" type="button" data-brief="A marketing analytics agency that needs a client reporting portal, campaign dashboards pulling from ad platforms, and a lead-capture site for new business.">
+					<h4>Analytics agency</h4>
+					<p class="goal">Client reporting portal, campaign dashboards, and a lead-capture site.</p>
+					<div class="chip-row">
+						<span class="chip">client-portal</span>
+						<span class="chip">dashboards</span>
+						<span class="chip">lead-capture</span>
+					</div>
+					<div class="state">Fresh plan — nothing built yet <span class="open-hint">Use this example →</span></div>
+				</button>
+			</div>
+		</div>
+
+		<p class="later" style="position: relative;">
+			<span class="note-pin" style="top: 8px; left: -9px;">5</span>
+			Plan, rules, brand, and settings appear here once planning starts.
+		</p>
+	</div>
+
+	<!-- ============ design notes ============ -->
+	<div class="notes-panel">
+		<h3>Design notes</h3>
+		<div class="note-item"><span class="n">1</span><p><strong>One thing leads.</strong> The goal composer is the only elevated surface at rest — the single center of attention. Everything else (examples, import, preflight) is quiet chrome that supports it.</p></div>
+		<div class="note-item"><span class="n">2</span><p><strong>The interface explains itself.</strong> The entry point opens with "What are you building?" — the product vocabulary (<em>surfaces</em>) is introduced in one clause at the moment it's needed, not assumed.</p></div>
+		<div class="note-item"><span class="n">3</span><p><strong>The journey strip speaks in user outcomes.</strong> Describe → Review plan → Approve surfaces → Apps running. "Docker ready" is plumbing, not milestone #1 — it's demoted to a preflight status pill on the right, present but quiet.</p></div>
+		<div class="note-item"><span class="n">4</span><p><strong>Examples support, they don't lead.</strong> Clicking a card pre-fills the brief (try it). In the full product, cards open a pre-generated workspace, and the "Booking studio" card opens <em>mid-flight</em> — one surface live, one building — so the first thing a new user sees is the loop itself: goal → plan → running app.</p></div>
+		<div class="note-item"><span class="n">5</span><p><strong>Progressive disclosure.</strong> Description, Docker, Plan, Rules, Dev Loop, Brand, and Settings don't render at rest in an empty workspace — chrome has to earn its place. They appear when planning produces something to configure. The ghost line above marks where they'll land, so the layout doesn't reflow surprisingly.</p></div>
+	</div>
+
+	<script>
+		const toggle = document.getElementById('notesToggle');
+		toggle.addEventListener('click', () => {
+			const on = document.body.classList.toggle('notes-on');
+			toggle.setAttribute('aria-pressed', String(on));
+		});
+
+		const brief = document.getElementById('brief');
+		const composer = document.getElementById('composer');
+		document.querySelectorAll('.card').forEach(card => {
+			card.addEventListener('click', () => {
+				brief.value = card.dataset.brief;
+				brief.focus();
+				composer.classList.add('flash');
+				composer.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+				setTimeout(() => composer.classList.remove('flash'), 900);
+			});
+		});
+	</script>
+
+</body>
+</html>
