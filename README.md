@@ -6,10 +6,11 @@ Babadaba is a custom Code - OSS fork for turning business intent into working pr
 
 - Purpose: [.agent/PROJECT_PURPOSE.md](.agent/PROJECT_PURPOSE.md)
 - Live IDE demo (read-only, in the browser): [https://goalconsole-demo.vercel.app](https://goalconsole-demo.vercel.app)
-- Local landing page: [docs/ide-purpose/index.html](docs/ide-purpose/index.html)
-- Published landing page (GitHub Pages): [https://jcorn925.github.io/vscode/](https://jcorn925.github.io/vscode/)
-- Legacy Vercel URL ([ide-purpose.vercel.app](https://ide-purpose.vercel.app/)) may lag until redeployed from `docs/ide-purpose`
+- Landing page (canonical, Vercel): [https://ide-purpose.vercel.app](https://ide-purpose.vercel.app/) — deploy with `npx vercel deploy --prod` from `docs/ide-purpose`
+- Local landing page source: [docs/ide-purpose/index.html](docs/ide-purpose/index.html)
 - Milestones: [.agent/milestones.json](.agent/milestones.json)
+
+This repo is private; the old public fork (`jcorn925/vscode`) is archived, and its GitHub Pages site is frozen at the pre-detach state.
 
 ## Compile and start
 

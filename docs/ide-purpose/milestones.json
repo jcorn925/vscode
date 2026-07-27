@@ -1,0 +1,155 @@
+{
+	"version": 1,
+	"description": "Custom VS Code fork milestones evaluated by .agents/skills/milestone-evaluator.",
+	"milestones": [
+		{
+			"id": "goal-workspace",
+			"title": "Goal workspace manifest and planning",
+			"description": "Goal workspaces load workspace.goal.json, expose surfaces, and support cross-app workflow planning.",
+			"paths": [
+				"src/custom/goalWorkspace/ConsoleService.ts",
+				"src/custom/goalWorkspace/examples/workspace.goal.json",
+				"src/vs/workbench/contrib/custom/browser/goalWorkspace.contribution.ts"
+			],
+			"checks": [
+				{ "type": "fileExists", "path": "src/custom/goalWorkspace/ConsoleService.ts" },
+				{ "type": "fileExists", "path": "src/custom/goalWorkspace/examples/workspace.goal.json" },
+				{ "type": "testGrep", "pattern": "ConsoleService", "script": "scripts/test.sh" }
+			]
+		},
+		{
+			"id": "startup-guide",
+			"title": "Startup setup guide",
+			"description": "First-run startup guide validates Node, Docker, Ix CLI, and workspace readiness with auto-fix actions.",
+			"paths": [
+				"src/custom/startup/StartupGuideService.ts",
+				"src/vs/workbench/contrib/custom/browser/startupGuide.contribution.ts",
+				"src/vs/workbench/contrib/custom/browser/setupGuidePanel.ts"
+			],
+			"checks": [
+				{ "type": "fileExists", "path": "src/custom/startup/StartupGuideService.ts" },
+				{ "type": "fileExists", "path": "src/vs/workbench/contrib/custom/browser/setupGuidePanel.ts" }
+			]
+		},
+		{
+			"id": "app-launch-guide",
+			"title": "App launch guide",
+			"description": "UI tab guides localhost dev server setup for goal workspace surfaces.",
+			"paths": [
+				"src/custom/appLaunch/AppLaunchGuideService.ts",
+				"src/vs/workbench/contrib/custom/browser/appLaunchGuide.contribution.ts"
+			],
+			"checks": [
+				{ "type": "fileExists", "path": "src/vs/workbench/contrib/custom/browser/appLaunchGuide.contribution.ts" }
+			]
+		},
+		{
+			"id": "ix-integration",
+			"title": "Ix CLI integration",
+			"description": "Mode shell can install and run Ix CLI for discovery, mapping, and watch workflows.",
+			"paths": [
+				"src/custom/ix/IxIntegrationService.ts",
+				"src/vs/workbench/contrib/custom/browser/ix.contribution.ts"
+			],
+			"checks": [
+				{ "type": "fileExists", "path": "src/custom/ix/IxIntegrationService.ts" },
+				{ "type": "fileExists", "path": "src/vs/workbench/contrib/custom/browser/ix.contribution.ts" }
+			]
+		},
+		{
+			"id": "default-project-bootstrap",
+			"title": "Default project bootstrap",
+			"description": "Code mode auto-clones and opens the configured default project when no workspace is open.",
+			"paths": [
+				"src/vs/workbench/contrib/custom/browser/defaultProjectBootstrap.contribution.ts",
+				"src/vs/workbench/contrib/custom/browser/defaultProjectBootstrap.ts"
+			],
+			"checks": [
+				{ "type": "fileExists", "path": "src/vs/workbench/contrib/custom/browser/defaultProjectBootstrap.contribution.ts" }
+			]
+		},
+		{
+			"id": "custom-mode-shell",
+			"title": "Custom mode shell",
+			"description": "Mode shell hosts Process, UI, and goal workspace tabs with setup guides and Ix workflows.",
+			"paths": [
+				"src/vs/workbench/contrib/custom/browser/modeShell.contribution.ts"
+			],
+			"checks": [
+				{ "type": "fileExists", "path": "src/vs/workbench/contrib/custom/browser/modeShell.contribution.ts" }
+			]
+		},
+		{
+			"id": "ai-branding",
+			"title": "AI branding (no GitHub Copilot mentions)",
+			"description": "User-facing UI uses product.json provider branding instead of hardcoded GitHub Copilot strings.",
+			"paths": [
+				"src/vs/workbench/contrib/chat/common/chatBranding.ts",
+				"src/vs/workbench/contrib/welcomeOnboarding/browser/onboardingVariationA.ts",
+				"product.json"
+			],
+			"checks": [
+				{ "type": "fileExists", "path": "src/vs/workbench/contrib/chat/common/chatBranding.ts" },
+				{
+					"type": "rgAbsent",
+					"pattern": "Sign in to use GitHub Copilot",
+					"paths": [
+						"src/vs/workbench/contrib/welcomeOnboarding",
+						"src/vs/workbench/contrib/chat/browser/chatSetup",
+						"src/vs/workbench/contrib/chat/browser/chatStatus"
+					]
+				}
+			]
+		},
+		{
+			"id": "custom-ai",
+			"title": "Custom AI goal-workspace agent",
+			"description": "Custom AI chat agent uses product system prompt, goal-workspace context, editFile and planCrossAppWorkflow tools.",
+			"paths": [
+				"src/custom/ai/browser/customAiChatAgent.ts",
+				"src/custom/ai/browser/customAiEditFileTool.ts",
+				"src/custom/ai/browser/customAiPlanCrossAppWorkflowTool.ts",
+				"src/vs/workbench/contrib/custom/browser/customAi.contribution.ts"
+			],
+			"checks": [
+				{ "type": "fileExists", "path": "src/custom/ai/browser/customAiChatAgent.ts" },
+				{ "type": "fileExists", "path": "src/custom/ai/browser/customAiPlanCrossAppWorkflowTool.ts" },
+				{ "type": "testGrep", "pattern": "CustomAiChatAgent", "script": "scripts/test.sh" },
+				{
+					"type": "rgAbsent",
+					"pattern": "You are a helpful coding assistant inside VS Code",
+					"paths": ["src/vs/workbench/contrib/custom/browser/customAi.contribution.ts"]
+				}
+			]
+		},
+		{
+			"id": "compile-health",
+			"title": "TypeScript compile health",
+			"description": "Custom fork sources type-check cleanly.",
+			"paths": [
+				"src/custom",
+				"src/vs/workbench/contrib/custom"
+			],
+			"checks": [
+				{ "type": "npmScript", "script": "compile-check-ts-native" }
+			]
+		},
+		{
+			"id": "surface-blueprint-generation",
+			"title": "Surface blueprint plan-verify loop",
+			"description": "Surface creation uses subsystem templates, persisted blueprints, Ix-backed verification, and auto-repair handoff.",
+			"paths": [
+				"src/custom/goalWorkspace/surfaceBlueprintVerify.ts",
+				"src/custom/goalWorkspace/surfaceBlueprintTemplateRegistry.ts",
+				"src/custom/ai/browser/customAiVerifySurfaceBlueprintTool.ts",
+				"src/vs/workbench/contrib/custom/browser/surfaceBlueprint.contribution.ts",
+				".agents/skills/surface-blueprint-evaluator/SKILL.md"
+			],
+			"checks": [
+				{ "type": "fileExists", "path": "src/custom/goalWorkspace/surfaceBlueprintVerify.ts" },
+				{ "type": "fileExists", "path": ".agents/skills/surface-blueprint-evaluator/SKILL.md" },
+				{ "type": "testGrep", "pattern": "surfaceBlueprintVerify", "script": "scripts/test.sh" }
+			]
+		}
+	]
+}

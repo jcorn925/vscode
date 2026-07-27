@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Project Purpose - Babadaba</title>
+	<style>
+		:root {
+			--bg: #f4f6f9;
+			--surface: #ffffff;
+			--border: #dfe4eb;
+			--text: #1d2433;
+			--muted: #5c6779;
+			--accent: #0f62d6;
+			color-scheme: light;
+		}
+		@media (prefers-color-scheme: dark) {
+			:root {
+				--bg: #16181d;
+				--surface: #1e2127;
+				--border: #2c313b;
+				--text: #e4e8f0;
+				--muted: #97a0b2;
+				--accent: #2f7de1;
+				color-scheme: dark;
+			}
+		}
+		* { box-sizing: border-box; }
+		body {
+			margin: 0;
+			background: var(--bg);
+			color: var(--text);
+			font: 400 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+			-webkit-font-smoothing: antialiased;
+		}
+		header {
+			display: flex; align-items: center; gap: 12px;
+			padding: 14px 24px;
+			border-bottom: 1px solid var(--border);
+			background: var(--surface);
+		}
+		header a {
+			display: inline-flex; align-items: center; gap: 8px;
+			color: var(--text); text-decoration: none; font-weight: 600;
+		}
+		header .mark {
+			width: 14px; height: 14px; border-radius: 4px;
+			background: linear-gradient(135deg, var(--accent), #43b581);
+		}
+		main {
+			max-width: 72ch;
+			margin: 0 auto;
+			padding: 40px 24px 80px;
+		}
+		h1 { font-size: 28px; line-height: 1.25; }
+		h2 { font-size: 20px; margin-top: 2em; }
+		li { margin: 6px 0; }
+		code {
+			background: var(--surface);
+			border: 1px solid var(--border);
+			border-radius: 4px;
+			padding: 1px 5px;
+			font-size: 13px;
+		}
+		a { color: var(--accent); }
+		.muted { color: var(--muted); }
+	</style>
+</head>
+<body>
+	<header>
+		<a href="./" aria-label="Babadaba home"><span class="mark" aria-hidden="true"></span>Babadaba</a>
+	</header>
+	<main>
+		<h1>Project Purpose</h1>
+
+		<p>Babadaba is a custom fork of Code - OSS focused on turning VS Code into a goal-command center for building, launching, and iterating on multi-surface products with agent assistance.</p>
+
+		<p>Babadaba keeps the strengths of VS Code as an editor and workbench, then adds opinionated product-building workflows on top: goal workspace manifests, startup readiness checks, app launch guidance, Ix CLI integration, custom mode surfaces, and a custom AI agent that understands cross-app planning and repo-local context.</p>
+
+		<h2>Product Thesis</h2>
+
+		<p>Modern product work often spans more than one code surface. A single goal can involve a frontend, backend, automation, documentation, deployment setup, and design decisions. Traditional editor workflows expose those pieces as files and terminals, but they do not always preserve the user's higher-level intent.</p>
+
+		<p>Babadaba treats the user's goal as a first-class workspace object. The workbench should help the user understand what exists, what is ready, what needs to be launched, and how a change in one surface affects the others.</p>
+
+		<h2>Intended User Experience</h2>
+
+		<p>Babadaba should feel like VS Code for people building an outcome rather than only editing a repository. Users should be able to:</p>
+
+		<ul>
+			<li>Open or bootstrap a useful default project without unnecessary setup friction.</li>
+			<li>Load a <code>workspace.goal.json</code> manifest that describes product surfaces and workflows.</li>
+			<li>See readiness guidance for required tools such as Node, Docker, Ix, and local services.</li>
+			<li>Launch and inspect app surfaces from guided UI flows.</li>
+			<li>Ask a custom AI agent for help that is aware of the goal workspace and can plan across app boundaries.</li>
+			<li>Keep product, process, and implementation context connected inside the workbench.</li>
+		</ul>
+
+		<h2>Design Principles</h2>
+
+		<ul>
+			<li>Preserve VS Code's architecture and extension patterns wherever possible.</li>
+			<li>Prefer explicit goal and surface metadata over implicit assumptions about the repository.</li>
+			<li>Make setup state visible and actionable instead of burying it in terminal output.</li>
+			<li>Support agentic workflows without hiding the underlying files, commands, or evidence.</li>
+			<li>Keep custom behavior isolated in clearly named contributions.</li>
+			<li>Use milestone checks to keep the fork's product direction testable.</li>
+		</ul>
+
+		<h2>Current Focus Areas</h2>
+
+		<p>The active milestone set lives in <a href="./milestones.json">milestones.json</a> and currently emphasizes:</p>
+
+		<ul>
+			<li>Goal workspace manifests and planning.</li>
+			<li>Startup setup guidance.</li>
+			<li>App launch guidance for local product surfaces.</li>
+			<li>Ix CLI integration for discovery and mapping workflows.</li>
+			<li>Default project bootstrap behavior.</li>
+			<li>Custom mode shell surfaces.</li>
+			<li>AI branding decoupled from GitHub Copilot wording.</li>
+			<li>A custom AI goal-workspace agent.</li>
+			<li>TypeScript compile health for fork-specific sources.</li>
+		</ul>
+
+		<h2>Success Criteria</h2>
+
+		<p>Babadaba is succeeding when a user can move from intent to working product surface with less context loss than in a plain editor. The product should make project state legible, help the user launch and inspect real app surfaces, and allow AI assistance to reason about the whole goal workspace instead of only isolated files.</p>
+
+		<p>Implementation work should be judged by whether it strengthens that loop: define the goal, understand the surfaces, prepare the environment, launch the work, make a change, and verify the result.</p>
+	</main>
+</body>
+</html>
