@@ -87,6 +87,8 @@ extensions/vscode-api-tests/testWorkspace/far.js
 extensions/vscode-api-tests/testWorkspace/worker.js
 extensions/vscode-colorize-tests/test/colorize-fixtures/test.js
 extensions/vscode-colorize-tests/test/colorize-fixtures/test6916.js
+docs/web-demo/demo-ext/extension.js
+docs/web-demo/example-workspace/apps/marketing/next.config.mjs
 extensions/yaml/build/update-grammar.js
 gulpfile.mjs
 mcp/workflow-advisor/analyzer.js

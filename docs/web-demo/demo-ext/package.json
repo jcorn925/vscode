@@ -1,0 +1,36 @@
+{
+	"name": "goalconsole-demo-data",
+	"private": true,
+	"displayName": "Babadaba Demo Workspace",
+	"description": "Read-only in-memory file system seeded with the personal training example goal workspace.",
+	"publisher": "goalconsole",
+	"version": "0.0.1",
+	"license": "MIT",
+	"engines": {
+		"vscode": "^1.90.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"onFileSystem:gcdemo"
+	],
+	"capabilities": {
+		"virtualWorkspaces": true,
+		"untrustedWorkspaces": {
+			"supported": true
+		}
+	},
+	"contributes": {
+		"resourceLabelFormatters": [
+			{
+				"scheme": "gcdemo",
+				"formatting": {
+					"workspaceSuffix": "Babadaba Demo",
+					"label": "${path}"
+				}
+			}
+		]
+	},
+	"browser": "./extension.js"
+}

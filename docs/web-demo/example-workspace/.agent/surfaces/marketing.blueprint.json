@@ -1,0 +1,64 @@
+{
+	"version": 1,
+	"surfaceId": "marketing",
+	"surfaceName": "Marketing Site",
+	"templateId": "marketing",
+	"status": "verified",
+	"subsystems": [
+		{
+			"id": "hero",
+			"label": "Marketing Hero UI",
+			"kind": "route",
+			"paths": [
+				"apps/marketing/app",
+				"apps/marketing/app/page.tsx"
+			]
+		},
+		{
+			"id": "offers",
+			"label": "Offers UI",
+			"kind": "route",
+			"paths": [
+				"apps/marketing/app/offers"
+			]
+		},
+		{
+			"id": "lead-capture",
+			"label": "Lead Capture UI",
+			"kind": "route",
+			"paths": [
+				"apps/marketing/app/contact",
+				"apps/marketing/components/lead"
+			]
+		},
+		{
+			"id": "marketing-layout",
+			"label": "Marketing Layout UI",
+			"kind": "component",
+			"paths": [
+				"apps/marketing/app/layout.tsx",
+				"apps/marketing/components/layout"
+			]
+		}
+	],
+	"manifest": {
+		"capabilities": [
+			"display-offers",
+			"lead-capture"
+		],
+		"events": [
+			"lead.created",
+			"offer.viewed"
+		],
+		"entities": [
+			"Lead",
+			"Offer"
+		],
+		"ixSubsystems": [
+			"Marketing UI",
+			"Lead Capture UI"
+		]
+	},
+	"createdAt": "2026-07-01T22:22:25.963Z",
+	"verifiedAt": "2026-07-01T22:24:34.296Z"
+}

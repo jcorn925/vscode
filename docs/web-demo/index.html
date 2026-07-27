@@ -1,0 +1,67 @@
+<!-- Copyright (C) Microsoft Corporation. All rights reserved. -->
+<!DOCTYPE html>
+<html>
+	<head>
+		<script>
+			performance.mark('code/didStartRenderer');
+		</script>
+		<meta charset="utf-8" />
+
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-title" content="Babadaba Demo">
+		<title>Babadaba — Live Demo</title>
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
+
+		<!-- Workbench Configuration (filled at runtime for the current origin) -->
+		<meta id="vscode-workbench-web-configuration" data-settings="">
+
+		<!-- Workbench Auth Session -->
+		<meta id="vscode-workbench-auth-session" data-settings="">
+
+		<link rel="stylesheet" href="./out/vs/code/browser/workbench/workbench.css">
+
+		<script>
+			(function () {
+				const config = {
+					productConfiguration: {
+						nameShort: 'Babadaba Demo',
+						nameLong: 'Babadaba — Live Demo',
+						applicationName: 'goalconsole-demo',
+						embedderIdentifier: 'goalconsole-demo',
+						reportIssueUrl: 'https://github.com/jcorn925/vscode/issues'
+					},
+					folderUri: { scheme: 'gcdemo', path: '/personal-training' },
+					additionalBuiltinExtensions: [{
+						scheme: window.location.protocol.replace(':', ''),
+						authority: window.location.host,
+						path: '/demo-ext'
+					}],
+					enableWorkspaceTrust: false,
+					callbackRoute: '/callback',
+					configurationDefaults: {
+						'workbench.startupEditor': 'none',
+						'files.readonlyInclude': { 'gcdemo:/**': true }
+					}
+				};
+				document.getElementById('vscode-workbench-web-configuration')
+					.setAttribute('data-settings', JSON.stringify(config));
+			})();
+		</script>
+	</head>
+
+	<body aria-label="">
+	</body>
+
+	<!-- Startup (do not modify order of script tags!) -->
+	<script>
+		const baseUrl = new URL('.', window.location.href).toString().replace(/\/$/, '');
+		globalThis._VSCODE_FILE_ROOT = baseUrl + '/out/';
+	</script>
+	<script>
+		performance.mark('code/willLoadWorkbenchMain');
+	</script>
+	<script type="module" src="./out/nls.messages.js"></script>
+	<script type="module" src="./out/vs/code/browser/workbench/workbench.js"></script>
+</html>

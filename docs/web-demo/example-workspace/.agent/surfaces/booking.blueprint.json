@@ -1,0 +1,72 @@
+{
+	"version": 1,
+	"surfaceId": "booking",
+	"surfaceName": "Booking",
+	"templateId": "booking",
+	"status": "failed",
+	"subsystems": [
+		{
+			"id": "package-selection",
+			"label": "Package Selection UI",
+			"kind": "route",
+			"paths": [
+				"apps/booking/app/packages"
+			]
+		},
+		{
+			"id": "scheduling",
+			"label": "Scheduling UI",
+			"kind": "route",
+			"paths": [
+				"apps/booking/app/schedule"
+			]
+		},
+		{
+			"id": "checkout",
+			"label": "Checkout UI",
+			"kind": "route",
+			"paths": [
+				"apps/booking/app/checkout"
+			]
+		},
+		{
+			"id": "intake",
+			"label": "Intake Forms UI",
+			"kind": "route",
+			"paths": [
+				"apps/booking/app/intake",
+				"apps/booking/components/intake"
+			]
+		},
+		{
+			"id": "booking-layout",
+			"label": "Booking Layout UI",
+			"kind": "component",
+			"paths": [
+				"apps/booking/app/layout.tsx"
+			]
+		}
+	],
+	"manifest": {
+		"capabilities": [
+			"package-selection",
+			"schedule-session",
+			"checkout"
+		],
+		"events": [
+			"booking.started",
+			"booking.completed"
+		],
+		"entities": [
+			"Lead",
+			"Booking",
+			"TrainingPackage"
+		],
+		"ixSubsystems": [
+			"Package Selection UI",
+			"Scheduling UI",
+			"Checkout UI"
+		]
+	},
+	"createdAt": "2026-07-03T18:19:42.071Z"
+}

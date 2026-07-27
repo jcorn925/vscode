@@ -1,0 +1,46 @@
+{
+	"goal": {
+		"id": "personal-training-business",
+		"name": "Online Personal Training Business",
+		"description": "Acquire clients and run coaching operations across workspace surfaces.",
+		"northStarMetric": "active_paid_clients"
+	},
+	"surfaces": [
+		{
+			"id": "marketing",
+			"name": "Marketing Site",
+			"path": "apps/marketing",
+			"type": "web",
+			"localUrl": "http://localhost:3001",
+			"devCommand": "pnpm dev",
+			"capabilities": [
+				"display-offers",
+				"lead-capture"
+			],
+			"events": [
+				"lead.created",
+				"offer.viewed"
+			],
+			"entities": [
+				"Lead",
+				"Offer"
+			],
+			"ixSubsystems": [
+				"Marketing UI",
+				"Lead Capture UI"
+			]
+		}
+	],
+	"shared": {
+		"domain": "packages/domain",
+		"events": "packages/events",
+		"ui": "packages/ui",
+		"auth": "packages/auth",
+		"workflows": "workflows"
+	},
+	"brand": {
+		"primaryColor": "#2563eb",
+		"secondaryColor": "#0f172a",
+		"accentColor": "#f59e0b"
+	}
+}

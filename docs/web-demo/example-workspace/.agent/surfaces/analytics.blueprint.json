@@ -1,0 +1,64 @@
+{
+	"version": 1,
+	"surfaceId": "analytics",
+	"surfaceName": "Analytics",
+	"templateId": "analytics",
+	"status": "draft",
+	"subsystems": [
+		{
+			"id": "funnel",
+			"label": "Funnel Dashboard UI",
+			"kind": "route",
+			"paths": [
+				"apps/analytics/app/funnel",
+				"apps/analytics/app/dashboard"
+			]
+		},
+		{
+			"id": "revenue",
+			"label": "Revenue Reporting UI",
+			"kind": "route",
+			"paths": [
+				"apps/analytics/app/revenue"
+			]
+		},
+		{
+			"id": "kpi",
+			"label": "North Star KPI UI",
+			"kind": "route",
+			"paths": [
+				"apps/analytics/app/kpi",
+				"apps/analytics/app/metrics"
+			]
+		},
+		{
+			"id": "reports",
+			"label": "Analytics Reports UI",
+			"kind": "route",
+			"paths": [
+				"apps/analytics/app/reports"
+			]
+		}
+	],
+	"manifest": {
+		"capabilities": [
+			"package-analytics",
+			"conversion",
+			"revenue"
+		],
+		"events": [
+			"analytics.report.viewed"
+		],
+		"entities": [
+			"Metric",
+			"Campaign",
+			"Subscription"
+		],
+		"ixSubsystems": [
+			"Funnel Dashboard UI",
+			"Revenue Reporting UI",
+			"North Star KPI UI"
+		]
+	},
+	"createdAt": "2026-07-03T18:39:36.639Z"
+}
