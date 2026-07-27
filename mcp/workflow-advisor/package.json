@@ -1,11 +1,11 @@
 {
-  "name": "goalconsole-workflow-advisor",
+  "name": "babadaba-workflow-advisor",
   "version": "0.1.0",
-  "description": "MCP server that analyzes the repository Claude has open and explains, with repo-specific evidence, how the GoalConsole IDE would improve the workflow.",
+  "description": "MCP server that analyzes the repository Claude has open and explains, with repo-specific evidence, how the Babadaba IDE would improve the workflow.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "goalconsole-workflow-advisor": "./server.js"
+    "babadaba-workflow-advisor": "./server.js"
   },
   "main": "./server.js",
   "files": [
@@ -19,7 +19,7 @@
     "mcp",
     "modelcontextprotocol",
     "claude",
-    "goalconsole",
+    "babadaba",
     "ide",
     "workflow"
   ],

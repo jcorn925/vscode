@@ -1,0 +1,68 @@
+{
+	"surfaceId": "marketing",
+	"updatedAt": "2026-07-27T17:25:55.614Z",
+	"currentStepId": "intent",
+	"steps": [
+		{
+			"id": "confirm_surface",
+			"label": "Confirm surface",
+			"kind": "stage",
+			"status": "completed",
+			"completedAt": "2026-07-26T21:48:37.561Z"
+		},
+		{
+			"id": "intent",
+			"label": "Describe what to build",
+			"kind": "stage",
+			"status": "current"
+		},
+		{
+			"id": "research_survey",
+			"label": "Claude surveying reference repos",
+			"kind": "stage",
+			"status": "pending"
+		},
+		{
+			"id": "awaiting_repo_selection",
+			"label": "Select research context repos",
+			"kind": "stage",
+			"status": "pending"
+		},
+		{
+			"id": "research_map",
+			"label": "Claude cloning, mapping, and drafting",
+			"kind": "stage",
+			"status": "pending"
+		},
+		{
+			"id": "plan_ready",
+			"label": "Review plan and proposal",
+			"kind": "stage",
+			"status": "pending"
+		},
+		{
+			"id": "lock_plan",
+			"label": "Lock plan and start build",
+			"kind": "action",
+			"status": "pending"
+		},
+		{
+			"id": "verify_graph",
+			"label": "Code Graph",
+			"kind": "action",
+			"status": "pending"
+		},
+		{
+			"id": "enable_preview",
+			"label": "Enable Preview",
+			"kind": "action",
+			"status": "pending"
+		},
+		{
+			"id": "deployed",
+			"label": "Deployed",
+			"kind": "action",
+			"status": "pending"
+		}
+	]
+}

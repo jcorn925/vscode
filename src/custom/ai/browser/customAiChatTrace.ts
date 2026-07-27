@@ -479,7 +479,7 @@ export function buildLangfuseIngestionRequest(event: unknown, options: LangfuseT
 		body: {
 			batch,
 			metadata: {
-				source: 'goalconsole-custom-ai',
+				source: 'babadaba-custom-ai',
 				sdk: 'custom-ai-chat-trace',
 			},
 		},

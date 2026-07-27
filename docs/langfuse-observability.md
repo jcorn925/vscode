@@ -1,6 +1,6 @@
 # Langfuse Observability
 
-GoalConsole can mirror sanitized Custom AI trace events to Langfuse while continuing to write local JSONL traces under `.agent/observability/custom-ai-chat.jsonl`.
+Babadaba can mirror sanitized Custom AI trace events to Langfuse while continuing to write local JSONL traces under `.agent/observability/custom-ai-chat.jsonl`.
 The Langfuse export uses a trace + observation hierarchy so model rounds and tool calls are visible as first-class observations.
 
 ## Start Langfuse Locally
@@ -13,11 +13,11 @@ docker compose up -d
 
 Open `http://localhost:3000` and sign in with the local user configured in `infra/langfuse/.env`.
 
-The checked-in `.env.example` seeds a local `GoalConsole` project with deterministic development keys:
+The checked-in `.env.example` seeds a local `Babadaba` project with deterministic development keys:
 
 ```bash
-LANGFUSE_PUBLIC_KEY=pk-lf-goalconsole-local
-LANGFUSE_SECRET_KEY=sk-lf-goalconsole-local
+LANGFUSE_PUBLIC_KEY=pk-lf-babadaba-local
+LANGFUSE_SECRET_KEY=sk-lf-babadaba-local
 LANGFUSE_BASE_URL=http://localhost:3000
 ```
 
@@ -25,13 +25,13 @@ For any shared or production instance, replace every placeholder secret in `.env
 
 If you already run Redis locally, the compose file defaults the host Redis port to `16379` while still using `6379` inside the Docker network. Other exposed host ports can be changed in `infra/langfuse/.env`.
 
-## Enable GoalConsole Export
+## Enable Babadaba Export
 
 Launch the workbench with Langfuse credentials in the process environment:
 
 ```bash
-export LANGFUSE_PUBLIC_KEY=pk-lf-goalconsole-local
-export LANGFUSE_SECRET_KEY=sk-lf-goalconsole-local
+export LANGFUSE_PUBLIC_KEY=pk-lf-babadaba-local
+export LANGFUSE_SECRET_KEY=sk-lf-babadaba-local
 export LANGFUSE_BASE_URL=http://localhost:3000
 ```
 

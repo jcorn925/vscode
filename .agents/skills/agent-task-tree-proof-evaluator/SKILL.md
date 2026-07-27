@@ -1,6 +1,6 @@
 ---
 name: agent-task-tree-proof-evaluator
-description: Evaluate whether the Persistent Task-Tree Agent Loop works in the running GoalConsole/VS Code fork, with screenshot-backed evidence. Use when asked to prove the task-tree feature works, audit runtime behavior, compare UI state to persisted .agent/task-trees JSON, capture screenshots for reasoning, or produce an evidence-based score for task-tree generation, persistence, resume, continue, pause, retry, skip, and surface-panel progress behavior.
+description: Evaluate whether the Persistent Task-Tree Agent Loop works in the running Babadaba/VS Code fork, with screenshot-backed evidence. Use when asked to prove the task-tree feature works, audit runtime behavior, compare UI state to persisted .agent/task-trees JSON, capture screenshots for reasoning, or produce an evidence-based score for task-tree generation, persistence, resume, continue, pause, retry, skip, and surface-panel progress behavior.
 ---
 
 # Agent Task Tree Proof Evaluator
@@ -56,13 +56,13 @@ If a command is too expensive or blocked, report that directly and substitute th
 
 ### 3. Prepare Runtime Evidence
 
-Use the `launch` skill when evaluating the running VS Code/GoalConsole workbench.
+Use the `launch` skill when evaluating the running VS Code/Babadaba workbench.
 
 Launch an isolated throwaway workspace when possible:
 
 ```bash
-mkdir -p /tmp/goalconsole-task-tree-proof
-TMPDIR=/tmp .agents/skills/launch/scripts/launch.sh -- /tmp/goalconsole-task-tree-proof
+mkdir -p /tmp/babadaba-task-tree-proof
+TMPDIR=/tmp .agents/skills/launch/scripts/launch.sh -- /tmp/babadaba-task-tree-proof
 ```
 
 If macOS socket path length errors occur, force a shorter `TMPDIR`, such as `/tmp`.

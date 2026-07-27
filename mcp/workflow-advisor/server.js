@@ -15,18 +15,18 @@ import {
 import { analyzeRepo } from './analyzer.js';
 import { ASSISTANT_GUIDANCE, buildCapabilityMap, buildCaveats } from './guidance.js';
 
-const TOOL_NAME = 'goalconsole_workflow_assessment';
+const TOOL_NAME = 'babadaba_workflow_assessment';
 const PROMPT_NAME = 'workflow-assessment';
 
 const server = new Server(
-	{ name: 'goalconsole-workflow-advisor', version: '0.1.0' },
+	{ name: 'babadaba-workflow-advisor', version: '0.1.0' },
 	{ capabilities: { tools: {}, prompts: {} } },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
 	tools: [{
 		name: TOOL_NAME,
-		description: 'Analyzes a repository and returns repo-specific facts plus a grounded map of which GoalConsole IDE capabilities would improve the workflow there. Use whenever the user asks how GoalConsole (the goal-workspace IDE) would help, improve, or fit their current project or workflow. Pass the root of the repo the user has open.',
+		description: 'Analyzes a repository and returns repo-specific facts plus a grounded map of which Babadaba IDE capabilities would improve the workflow there. Use whenever the user asks how Babadaba (the goal-workspace IDE) would help, improve, or fit their current project or workflow. Pass the root of the repo the user has open.',
 		inputSchema: {
 			type: 'object',
 			properties: {
@@ -54,7 +54,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
 server.setRequestHandler(ListPromptsRequestSchema, async () => ({
 	prompts: [{
 		name: PROMPT_NAME,
-		description: 'Ask how the GoalConsole IDE would improve the workflow for the currently open repository.',
+		description: 'Ask how the Babadaba IDE would improve the workflow for the currently open repository.',
 		arguments: [{ name: 'repoPath', description: 'Repository root to assess', required: false }],
 	}],
 }));
@@ -69,7 +69,7 @@ server.setRequestHandler(GetPromptRequestSchema, async request => {
 			role: 'user',
 			content: {
 				type: 'text',
-				text: `How would the GoalConsole IDE improve my current workflow? Call the ${TOOL_NAME} tool${repoPath ? ` with repoPath "${repoPath}"` : ' on the repository I have open'} and base your answer strictly on what it detects.`,
+				text: `How would the Babadaba IDE improve my current workflow? Call the ${TOOL_NAME} tool${repoPath ? ` with repoPath "${repoPath}"` : ' on the repository I have open'} and base your answer strictly on what it detects.`,
 			},
 		}],
 	};
@@ -79,7 +79,7 @@ function renderAssessment(facts) {
 	const capabilityMap = buildCapabilityMap(facts);
 	const caveats = buildCaveats(facts);
 	const lines = [
-		'# GoalConsole workflow assessment (grounded input)',
+		'# Babadaba workflow assessment (grounded input)',
 		'',
 		'## Detected repository facts',
 		'```json',

@@ -31,7 +31,7 @@
 				"${workspaceFolder}/scripts/ix_graph_mcp.py"
 			]
 		},
-		"goalconsole-workflow-advisor": {
+		"babadaba-workflow-advisor": {
 			"type": "stdio",
 			"command": "node",
 			"args": [

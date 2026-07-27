@@ -1,0 +1,7 @@
+{
+	"version": 1,
+	"surfaceId": "marketing",
+	"updatedAt": "2026-07-26T22:16:32.721Z",
+	"regions": [],
+	"message": "Ix returned no subsystems for this workspace. Run `ix map --all-items .` (and ensure the Ix backend is up), then refresh."
+}

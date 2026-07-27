@@ -71,7 +71,7 @@ test('classifies greenfield, single app, goal workspace, and library repos', () 
 			singleAppVercel: singleApp.deploy.vercel,
 			goalWorkspace: goalWorkspace.classification,
 			goalSurfaces: goalWorkspace.goalWorkspace.surfaces,
-			goalCaveat: buildCaveats(goalWorkspace).some(caveat => caveat.includes('already uses GoalConsole')),
+			goalCaveat: buildCaveats(goalWorkspace).some(caveat => caveat.includes('already uses Babadaba')),
 			library: library.classification,
 		},
 		{

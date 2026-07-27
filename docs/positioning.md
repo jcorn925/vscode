@@ -1,4 +1,4 @@
-# Positioning: GoalConsole vs. Other Dev Tools
+# Positioning: Babadaba vs. Other Dev Tools
 
 *Working notes from a positioning discussion, 2026-07-25. Premise: the IDE is currently strongest at (1) creating new projects from scratch — GitHub scanning with proposal graphs — and (2) LLM action visibility — surface cards and steps lists.*
 

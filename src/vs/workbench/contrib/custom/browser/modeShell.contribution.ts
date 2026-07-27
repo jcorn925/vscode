@@ -59,6 +59,15 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { INativeEnvironmentService } from '../../../../platform/environment/common/environment.js';
+import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
+import { IThemeService } from '../../../../platform/theme/common/themeService.js';
+import { BabadabaStage, deriveBabadabaStageState, type BabadabaStageState, type IBabadabaStageNode } from './babadabaStage.js';
+import {
+	babadabaHubHasAttention,
+	buildBabadabaHubGraph,
+	type BabadabaHubActionId,
+	type BabadabaHubNode,
+} from './babadabaHubGraph.js';
 import { createUiClickOverlayScript, UiClickOverlayMessage } from './uiClickOverlayScript.js';
 import { ChatSendResult, IChatService, ResponseModelState, type IChatModelReference } from '../../chat/common/chatService/chatService.js';
 import { IChatWidgetService } from '../../chat/browser/chat.js';
@@ -207,6 +216,16 @@ import {
 	type SurfacePlanWorkflowProgress,
 } from '../../../../../custom/goalWorkspace/surfacePlanWorkflowStatus.js';
 import { shouldAutoStartSurfacePreview } from '../../../../../custom/goalWorkspace/surfacePreviewAutoStart.js';
+import {
+	deleteSurfaceUiSnapshot,
+	preferredSurfaceUiSnapshotSource,
+	readSurfaceUiSnapshotSidecar,
+	resolveSurfaceUiSnapshotForCard,
+	shouldCaptureSurfaceUiSnapshot,
+	surfaceUiSnapshotUrlsMatch,
+	writeSurfaceUiSnapshot,
+	type SurfaceUiSnapshotSource,
+} from '../../../../../custom/goalWorkspace/surfaceUiSnapshot.js';
 import {
 	brandFolderResource,
 	deleteGoalWorkspaceSurface,
@@ -600,6 +619,11 @@ class ModeShellContribution extends Disposable {
 	private uiConsoleStatusRail!: HTMLElement;
 	private uiConsoleStatusLabel!: HTMLElement;
 	private uiConsoleStatusNextActionButton!: HTMLButtonElement;
+	private uiBabadabaSteps!: HTMLElement;
+	private uiBabadabaStepsParent!: HTMLElement;
+	private uiBabadabaStepsChildren!: HTMLElement;
+	private readonly babadabaStepsListeners = this._register(new DisposableStore());
+	private lastBabadabaHubNodes: readonly BabadabaHubNode[] = [];
 	private uiConsoleSectionHost!: HTMLElement;
 	private lastConsoleCenteredStepId: string | undefined;
 	private uiWorkspacePlanBrandFields!: HTMLElement;
@@ -633,6 +657,11 @@ class ModeShellContribution extends Disposable {
 	private describeAppDraftHydrating = false;
 	private readonly describeAppDraftAutosaveScheduler = this._register(new RunOnceScheduler(() => void this.persistDescribeAppDraft(), 400));
 	private uiWorkspacePlanStrip!: HTMLElement;
+	private uiBabadabaStageHost: HTMLElement | undefined;
+	private babadabaStage: BabadabaStage | undefined;
+	private babadabaStageState: BabadabaStageState = 'idle';
+	/** Whether the workspace root has a .git directory; undefined until probed. */
+	private workspaceHasGitRepo: boolean | undefined;
 	private uiWorkspacePlanIntentInput!: HTMLTextAreaElement;
 	private uiWorkspacePlanAttachmentList!: HTMLElement;
 	private uiWorkspacePlanSubmitButton!: HTMLButtonElement;
@@ -643,6 +672,14 @@ class ModeShellContribution extends Disposable {
 	private uiWorkspaceSurfacesHost!: HTMLElement;
 	private uiWorkspaceSurfacesGrid!: HTMLElement;
 	private readonly workspaceSurfaceCardListeners = this._register(new DisposableStore());
+	/** In-flight UI snapshot captures keyed by surface id (debounce concurrent loads). */
+	private readonly surfaceUiSnapshotCaptureInFlight = new Set<string>();
+	/** Object URLs for surface-card snapshot previews — revoked on card rebuild. */
+	private readonly surfaceUiSnapshotObjectUrls: string[] = [];
+	private readonly surfaceUiSnapshotCaptureScheduler = this._register(new RunOnceScheduler(
+		() => void this.maybeCaptureSurfaceUiSnapshot(),
+		900,
+	));
 	private uiWorkspaceSuggestedHost!: HTMLElement;
 	private uiWorkspaceSuggestedGrid!: HTMLElement;
 	private uiWorkspaceSuggestedCreateButton!: HTMLButtonElement;
@@ -682,6 +719,9 @@ class ModeShellContribution extends Disposable {
 	private readonly uiSurfaceEmptyFolders: HTMLElement;
 	private readonly uiSurfaceEmptyActions: HTMLElement;
 	private readonly emptyOpenableFolderListeners = this._register(new DisposableStore());
+	private readonly workspaceSwitcherListeners = this._register(new DisposableStore());
+	private workspaceSwitcherPopover: HTMLElement | undefined;
+	private workspaceSwitcherOpenGeneration = 0;
 	private readonly goalOverviewListeners = this._register(new DisposableStore());
 	private emptyOpenableFoldersEnabled = false;
 	private readonly uiSurfaceButtons = new Map<string, HTMLButtonElement>();
@@ -805,6 +845,8 @@ class ModeShellContribution extends Disposable {
 		@IPluginGitService private readonly pluginGitService: IPluginGitService,
 		@IHoverService private readonly hoverService: IHoverService,
 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
+		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
+		@IThemeService private readonly themeService: IThemeService,
 	) {
 		super();
 		ModeShellContribution.activeInstance = this;
@@ -813,6 +855,7 @@ class ModeShellContribution extends Disposable {
 				ModeShellContribution.activeInstance = undefined;
 			}
 			this.clearSurfaceAutoContinueTimer();
+			this.revokeSurfaceUiSnapshotObjectUrls();
 		}));
 
 		this._processChatDismissed = this.storageService.get(STORAGE_PROCESS_CHAT_DISMISSED, StorageScope.PROFILE) === '1';
@@ -1238,9 +1281,16 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-ui-steps-host {
 				display: flex;
-				flex-direction: column;
+				flex-direction: row;
+				align-items: stretch;
 				min-width: 0;
 				width: 100%;
+				gap: 0;
+			}
+
+			.monaco-workbench .custom-mode-ui-steps-host > .custom-mode-surface-plan-status-tracker {
+				flex: 1 1 auto;
+				min-width: 0;
 			}
 
 			.monaco-workbench .custom-mode-ui-steps-host > .custom-mode-surface-plan-status-tracker.hidden {
@@ -4790,6 +4840,278 @@ class ModeShellContribution extends Disposable {
 				margin-top: 12px;
 			}
 
+			/* Babadaba stage — the workspace presence band above the Surfaces section.
+			 * Same chrome as its sibling section panels; the character canvas fills it. */
+			.monaco-workbench .custom-mode-ui-console-section-host > .custom-mode-ui-babadaba-stage {
+				position: relative;
+				flex: 0 0 auto;
+				height: 208px;
+				margin: 0 0 12px;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 7px;
+				overflow: hidden;
+				background:
+					radial-gradient(120% 90% at 62% 88%, color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 5%, transparent), transparent 55%),
+					var(--vscode-editor-background);
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage.hidden {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage > canvas {
+				position: absolute;
+				inset: 0;
+				width: 100%;
+				height: 100%;
+				display: block;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-copy {
+				position: absolute;
+				left: 16px;
+				top: 12px;
+				max-width: 30%;
+				pointer-events: none;
+				z-index: 1;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-wordmark {
+				font-size: 13px;
+				font-weight: 600;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-step {
+				margin-top: 2px;
+				font-size: 11px;
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-step.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-status {
+				margin-top: 1px;
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-nodes {
+				position: absolute;
+				inset: 0;
+				pointer-events: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node {
+				position: absolute;
+				transform: translate(-50%, -50%);
+				display: flex;
+				align-items: center;
+				gap: 5px;
+				max-width: 180px;
+				padding: 3px 9px;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 4px;
+				background: var(--vscode-editor-background);
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+				line-height: 16px;
+				white-space: nowrap;
+				pointer-events: auto;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node.is-far {
+				transform: translate(-50%, -50%) scale(0.92);
+				opacity: 0.75;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node.is-passive {
+				cursor: default;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node:not(.is-passive):hover {
+				color: var(--vscode-foreground);
+				background: var(--vscode-toolbar-hoverBackground, var(--vscode-editor-background));
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: 1px;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node-label {
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node-dot {
+				flex: 0 0 auto;
+				width: 5px;
+				height: 5px;
+				border-radius: 999px;
+				background: var(--vscode-descriptionForeground);
+				opacity: 0.45;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node.is-active {
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node.is-active .custom-mode-ui-babadaba-stage-node-dot {
+				background: var(--vscode-testing-iconPassed, #73c991);
+				opacity: 1;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node.is-building {
+				color: var(--vscode-foreground);
+				border-color: color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 45%, var(--vscode-panel-border));
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node.is-building .custom-mode-ui-babadaba-stage-node-dot {
+				background: var(--vscode-testing-iconPassed, #73c991);
+				opacity: 1;
+				animation: custom-mode-babadaba-node-pulse 1.6s ease-in-out infinite;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node.is-attention .custom-mode-ui-babadaba-stage-node-dot {
+				background: var(--vscode-editorWarning-foreground, #cca700);
+				opacity: 1;
+			}
+
+			.monaco-workbench .custom-mode-ui-babadaba-stage-node.has-progress::after {
+				content: '';
+				position: absolute;
+				left: 8px;
+				right: 8px;
+				bottom: 1px;
+				height: 2px;
+				border-radius: 2px;
+				background: linear-gradient(
+					to right,
+					var(--vscode-testing-iconPassed, #73c991) var(--babadaba-node-progress, 0%),
+					transparent var(--babadaba-node-progress, 0%)
+				);
+				opacity: 0.7;
+			}
+
+			@keyframes custom-mode-babadaba-node-pulse {
+				0%, 100% { opacity: 1; }
+				50% { opacity: 0.35; }
+			}
+
+			@media (prefers-reduced-motion: reduce) {
+				.monaco-workbench .custom-mode-ui-babadaba-stage-node.is-building .custom-mode-ui-babadaba-stage-node-dot {
+					animation: none;
+				}
+			}
+
+			.monaco-workbench.reduce-motion .custom-mode-ui-babadaba-stage-node.is-building .custom-mode-ui-babadaba-stage-node-dot {
+				animation: none;
+			}
+
+			/* Babadaba workspace-manager block in the Console Steps panel. */
+			.monaco-workbench .custom-mode-babadaba-steps {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+				flex: 0 0 auto;
+				min-width: 180px;
+				max-width: 240px;
+				padding: 6px 8px 6px 10px;
+				border-right: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.28));
+				box-sizing: border-box;
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps.hidden {
+				display: none !important;
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-parent {
+				font-size: 11px;
+				font-weight: 600;
+				color: var(--vscode-foreground);
+				letter-spacing: 0.02em;
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-parent-detail {
+				font-weight: 400;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-children {
+				display: flex;
+				flex-direction: column;
+				gap: 2px;
+				max-height: 88px;
+				overflow: auto;
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-child {
+				display: flex;
+				align-items: center;
+				gap: 6px;
+				width: 100%;
+				padding: 3px 6px;
+				border: 0;
+				border-radius: 4px;
+				background: transparent;
+				color: var(--vscode-descriptionForeground);
+				font-size: 11px;
+				line-height: 16px;
+				text-align: left;
+				cursor: pointer;
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-child.is-passive {
+				cursor: default;
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-child:not(.is-passive):hover,
+			.monaco-workbench .custom-mode-babadaba-steps-child:not(.is-passive):focus-visible {
+				color: var(--vscode-foreground);
+				background: var(--vscode-list-hoverBackground);
+				outline: none;
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-child-dot {
+				flex: 0 0 auto;
+				width: 5px;
+				height: 5px;
+				border-radius: 999px;
+				background: var(--vscode-descriptionForeground);
+				opacity: 0.45;
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-child.is-active {
+				color: var(--vscode-foreground);
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-child.is-active .custom-mode-babadaba-steps-child-dot {
+				background: var(--vscode-testing-iconPassed, #73c991);
+				opacity: 1;
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-child.is-building .custom-mode-babadaba-steps-child-dot {
+				background: var(--vscode-testing-iconPassed, #73c991);
+				opacity: 1;
+				animation: custom-mode-babadaba-node-pulse 1.6s ease-in-out infinite;
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-child.is-attention .custom-mode-babadaba-steps-child-dot {
+				background: var(--vscode-editorWarning-foreground, #cca700);
+				opacity: 1;
+			}
+
+			.monaco-workbench .custom-mode-babadaba-steps-child-label {
+				min-width: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
 			.monaco-workbench .custom-mode-ui-console-section-host > .custom-mode-ui-workspace-home-panel > summary.custom-mode-ui-surface-starters-header {
 				display: flex;
 				align-items: center;
@@ -4933,6 +5255,38 @@ class ModeShellContribution extends Disposable {
 
 			.monaco-workbench .custom-mode-ui-workspace-surfaces-card-badge {
 				color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-surfaces-card-media {
+				position: relative;
+				width: 100%;
+				height: 148px;
+				margin: 0;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 8px;
+				overflow: hidden;
+				background: color-mix(in srgb, var(--vscode-editor-background) 88%, var(--vscode-foreground));
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-surfaces-card-media.hidden {
+				display: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-surfaces-card-media-img {
+				display: block;
+				width: 100%;
+				height: 100%;
+				object-fit: cover;
+				object-position: top center;
+				pointer-events: none;
+			}
+
+			.monaco-workbench .custom-mode-ui-workspace-surfaces-card-purpose.has-snapshot {
+				display: -webkit-box;
+				-webkit-box-orient: vertical;
+				-webkit-line-clamp: 2;
+				line-clamp: 2;
+				overflow: hidden;
 			}
 
 			.monaco-workbench .custom-mode-ui-workspace-surfaces-card-progress {
@@ -6032,6 +6386,106 @@ class ModeShellContribution extends Disposable {
 				font-size: 11px;
 				color: var(--vscode-descriptionForeground);
 				word-break: break-all;
+			}
+
+			.monaco-workbench .custom-mode-workspace-switcher-popover {
+				position: fixed;
+				z-index: 2800;
+				display: flex;
+				flex-direction: column;
+				width: min(280px, calc(100vw - 24px));
+				max-height: min(360px, 55vh);
+				padding: 8px;
+				border-radius: 8px;
+				background: var(--vscode-editorWidget-background);
+				border: 1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border));
+				box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+				color: var(--vscode-foreground);
+				box-sizing: border-box;
+			}
+
+			.monaco-workbench .custom-mode-workspace-switcher-heading {
+				padding: 4px 8px 6px;
+				font-size: 11px;
+				font-weight: 600;
+				letter-spacing: 0.04em;
+				text-transform: uppercase;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-workspace-switcher-list {
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+				flex: 1 1 auto;
+				min-height: 0;
+				overflow: auto;
+			}
+
+			.monaco-workbench .custom-mode-workspace-switcher-item {
+				display: flex;
+				flex-direction: column;
+				align-items: flex-start;
+				gap: 2px;
+				width: 100%;
+				padding: 8px 10px;
+				border: 0;
+				border-radius: 6px;
+				background: transparent;
+				color: var(--vscode-foreground);
+				cursor: pointer;
+				text-align: left;
+			}
+
+			.monaco-workbench .custom-mode-workspace-switcher-item:hover,
+			.monaco-workbench .custom-mode-workspace-switcher-item:focus-visible {
+				background: var(--vscode-list-hoverBackground);
+				outline: none;
+			}
+
+			.monaco-workbench .custom-mode-workspace-switcher-item-name {
+				font-size: 12px;
+				font-weight: 600;
+				max-width: 100%;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.monaco-workbench .custom-mode-workspace-switcher-item-path {
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+				max-width: 100%;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.monaco-workbench .custom-mode-workspace-switcher-empty {
+				padding: 10px 8px;
+				font-size: 12px;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.monaco-workbench .custom-mode-workspace-switcher-create {
+				display: block;
+				width: 100%;
+				margin-top: 8px;
+				padding: 8px 10px;
+				border: 1px solid var(--vscode-button-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.35)));
+				border-radius: 6px;
+				background: var(--vscode-button-secondaryBackground, transparent);
+				color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+				cursor: pointer;
+				font-size: 12px;
+				font-weight: 600;
+				text-align: center;
+			}
+
+			.monaco-workbench .custom-mode-workspace-switcher-create:hover,
+			.monaco-workbench .custom-mode-workspace-switcher-create:focus-visible {
+				background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+				outline: none;
 			}
 
 			.monaco-workbench .custom-mode-ui-surface-empty-actions {
@@ -8104,8 +8558,14 @@ class ModeShellContribution extends Disposable {
 			const asRecord = (v: unknown): Record<string, unknown> | undefined => (v && typeof v === 'object') ? (v as Record<string, unknown>) : undefined;
 
 			webview.addEventListener('did-start-loading', () => log('did-start-loading'));
-			webview.addEventListener('did-stop-loading', () => log('did-stop-loading'));
-			webview.addEventListener('did-finish-load', () => log('did-finish-load'));
+			webview.addEventListener('did-stop-loading', () => {
+				log('did-stop-loading');
+				this.surfaceUiSnapshotCaptureScheduler.schedule();
+			});
+			webview.addEventListener('did-finish-load', () => {
+				log('did-finish-load');
+				this.surfaceUiSnapshotCaptureScheduler.schedule();
+			});
 			webview.addEventListener('dom-ready', async () => {
 				log('dom-ready');
 				try {
@@ -8117,7 +8577,10 @@ class ModeShellContribution extends Disposable {
 				}
 			});
 			webview.addEventListener('did-navigate', (e: unknown) => log('did-navigate', asRecord(e)?.url ? String(asRecord(e)?.url) : undefined));
-			webview.addEventListener('did-navigate-in-page', (e: unknown) => log('did-navigate-in-page', asRecord(e)?.url ? String(asRecord(e)?.url) : undefined));
+			webview.addEventListener('did-navigate-in-page', (e: unknown) => {
+				log('did-navigate-in-page', asRecord(e)?.url ? String(asRecord(e)?.url) : undefined);
+				this.surfaceUiSnapshotCaptureScheduler.schedule();
+			});
 
 			this._register(addDisposableListener(this.uiBrowser as unknown as HTMLElement, 'console-message', (e: unknown) => {
 				const evt = asRecord(e);
@@ -8850,6 +9313,12 @@ class ModeShellContribution extends Disposable {
 			// Console visibility is also toggled in renderConsoleWorkflowProgress.
 			this.uiConsoleStatusTracker.classList.toggle('hidden', !showConsole);
 		}
+		if (this.uiBabadabaSteps) {
+			if (this.uiBabadabaSteps.parentElement !== this.uiStepsHost) {
+				this.uiStepsHost.insertBefore(this.uiBabadabaSteps, this.uiStepsHost.firstChild);
+			}
+			this.uiBabadabaSteps.classList.toggle('hidden', !showConsole);
+		}
 
 		if (!active) {
 			this.clearStepsHideTimer();
@@ -8875,7 +9344,7 @@ class ModeShellContribution extends Disposable {
 		if (openSurfaceId) {
 			attentionLabel = this.surfacePendingActionById.get(openSurfaceId);
 		} else if (this.isConsoleCardSelected()) {
-			// Console Steps: surface-level pending/in-progress, Start Apps, or an incomplete lifecycle step.
+			// Console Steps: surface-level pending/in-progress, Start Apps, hub attention, or an incomplete lifecycle step.
 			attentionLabel = [...this.surfacePendingActionById.values()][0];
 			if (!attentionLabel) {
 				const status = resolveConsoleWorkflowStatus(this.collectConsoleWorkflowSignals());
@@ -8886,6 +9355,9 @@ class ModeShellContribution extends Disposable {
 						attentionLabel = current.label;
 					}
 				}
+			}
+			if (!attentionLabel && babadabaHubHasAttention(this.lastBabadabaHubNodes)) {
+				attentionLabel = localize('customMode.babadabaStepsAttention', 'Workspace manager needs attention');
 			}
 		}
 		const hasAttention = Boolean(attentionLabel) && !this.uiStepsReopenBtn.classList.contains('hidden');
@@ -9717,11 +10189,37 @@ class ModeShellContribution extends Disposable {
 		// Capture on the Steps host so padding / chevrons still pan the visible rail.
 		this._register(addDisposableListener(this.uiStepsHost, 'wheel', onConsoleStatusWheel, { capture: true, passive: false }));
 		this._register(addDisposableListener(this.uiStepsPane, 'wheel', onConsoleStatusWheel, { capture: true, passive: false }));
+		this.uiBabadabaStepsParent = $('div.custom-mode-babadaba-steps-parent', undefined,
+			localize('customMode.babadabaStepsParent', 'Babadaba'),
+			$('span.custom-mode-babadaba-steps-parent-detail', undefined,
+				localize('customMode.babadabaStepsParentDetail', ' · Workspace manager')),
+		);
+		this.uiBabadabaStepsChildren = $('div.custom-mode-babadaba-steps-children', {
+			role: 'list',
+			'aria-label': localize('customMode.babadabaStepsChildrenAria', 'Systems Babadaba manages'),
+		});
+		this.uiBabadabaSteps = $('div.custom-mode-babadaba-steps.hidden', {
+			'aria-label': localize('customMode.babadabaStepsAria', 'Babadaba workspace manager'),
+		}, this.uiBabadabaStepsParent, this.uiBabadabaStepsChildren);
 		// Console Steps share the shell top panel with Surface plan Steps.
+		this.uiStepsHost.appendChild(this.uiBabadabaSteps);
 		this.uiStepsHost.appendChild(this.uiConsoleStatusTracker);
 		this.uiConsoleStatusLabel = $('div.custom-mode-ui-console-home-status');
+		// Babadaba stage: workspace-manager hub (surfaces + integrations).
+		this.uiBabadabaStageHost = $('div.custom-mode-ui-babadaba-stage.hidden');
+		this.babadabaStage = this._register(new BabadabaStage(this.uiBabadabaStageHost, () => this.accessibilityService.isMotionReduced()));
+		this._register(this.themeService.onDidColorThemeChange(() => this.babadabaStage?.refreshTheme()));
+		this._register(this.accessibilityService.onDidChangeReducedMotion(() => this.babadabaStage?.refreshTheme()));
+		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		if (workspaceRoot) {
+			this.fileService.exists(joinPath(workspaceRoot, '.git')).then(exists => {
+				this.workspaceHasGitRepo = exists;
+				this.renderConsoleWorkflowProgress();
+			}, () => undefined);
+		}
 		// Stack order matches Console section rail cards: Surfaces (default) → Description → Docker → Plan → Rules → Dev Loop → Brand → Settings.
 		this.uiConsoleSectionHost = $('div.custom-mode-ui-console-section-host', undefined,
+			this.uiBabadabaStageHost,
 			this.uiSurfaceSetupSurfacesBody,
 			this.uiWorkspaceDescriptionPanel,
 			this.uiWorkspaceDockerPanel,
@@ -9774,6 +10272,7 @@ class ModeShellContribution extends Disposable {
 			onOpenHref: url => {
 				void this.openerService.open(URI.parse(url), { openExternal: true });
 			},
+			onGroupLabelAction: anchor => this.toggleWorkspaceSwitcherMenu(anchor),
 			cards: this.getWorkspaceHomeCards(),
 			onHoverParent: id => this.onWorkspaceHomeRailHoverParent(id),
 			onSelect: id => {
@@ -9853,7 +10352,10 @@ class ModeShellContribution extends Disposable {
 				this.uiSurfaceEmptyState,
 			],
 		});
-		this._register({ dispose: () => this.uiWorkspaceHomeCardRail.dispose() });
+		this._register({ dispose: () => {
+			this.closeWorkspaceSwitcherMenu();
+			this.uiWorkspaceHomeCardRail.dispose();
+		} });
 		// Landing/empty copy may have been set before the rail mounted — keep the rail
 		// pinned open in that case instead of arming the mount-time hide clock.
 		this.uiWorkspaceHomeCardRail.setAutoHideEnabled(this.uiSurfaceEmptyState.classList.contains('hidden'));
@@ -10882,11 +11384,138 @@ class ModeShellContribution extends Disposable {
 		};
 	}
 
+	/**
+	 * Feed the Babadaba stage (and Steps children) from the shared hub graph:
+	 * every surface plus Ix / Docker / GitHub / Vercel.
+	 */
+	private updateBabadabaStage(signals: ConsoleWorkflowSignals): void {
+		if (!this.babadabaStage || !this.uiBabadabaStageHost) {
+			return;
+		}
+		const surfaces = this.consoleService.getSurfaces();
+		const graph = buildBabadabaHubGraph({
+			signals,
+			surfaces: surfaces.map(surface => ({
+				id: surface.id,
+				name: surface.name,
+				productionUrl: surface.productionUrl,
+				ixSubsystems: surface.ixSubsystems,
+				hasIxMeta: Boolean(surface.ix),
+			})),
+			surfaceProgressById: this.surfaceProgressById,
+			startedSurfaceIds: this.startedSurfaceServers,
+			workspaceHasGitRepo: this.workspaceHasGitRepo,
+		});
+		const { nodes: hubNodes, surfaceCount, completeCount } = graph;
+		this.lastBabadabaHubNodes = hubNodes;
+		const allComplete = surfaceCount > 0 && completeCount >= surfaceCount;
+		this.babadabaStageState = deriveBabadabaStageState(this.babadabaStageState, Boolean(signals.anySurfaceBuilding), allComplete);
+		// Hub stays visible on Console home even before surfaces exist (integrations-only ring).
+		this.uiBabadabaStageHost.classList.remove('hidden');
+
+		const workflow = resolveConsoleWorkflowStatus(signals);
+		const currentStep = workflow.steps.find(step => step.status === 'current');
+		const stepLabel = currentStep ? consoleWorkflowStepDisplayLabel(currentStep.id, currentStep.label) : undefined;
+
+		const nodes: IBabadabaStageNode[] = hubNodes.map(node => ({
+			id: node.id,
+			label: node.label,
+			state: node.state,
+			progress: node.progress,
+			detail: node.detail,
+			open: node.actionId
+				? () => this.activateBabadabaHubNode(node)
+				: undefined,
+		}));
+
+		this.babadabaStage.setStatus({ state: this.babadabaStageState, surfaceCount, completeCount, stepLabel, nodes });
+		this.renderBabadabaSteps(hubNodes, stepLabel);
+	}
+
+	/** Shared click handler for canvas chips and Steps children. */
+	private activateBabadabaHubNode(node: BabadabaHubNode): void {
+		const actionId = node.actionId as BabadabaHubActionId | undefined;
+		if (!actionId) {
+			return;
+		}
+		switch (actionId) {
+			case 'open_surface':
+				if (node.targetId) {
+					void this.openWorkspaceSuggestedSurfacePlan(node.targetId);
+				}
+				return;
+			case 'open_ix':
+				this.openConsoleWithSection('workspacePlan');
+				return;
+			case 'open_docker':
+				this.openConsoleWithSection('docker');
+				return;
+			case 'open_github':
+				this.openConsoleWithSection('settings');
+				return;
+			case 'open_vercel':
+				if (node.href) {
+					void this.openerService.open(URI.parse(node.href));
+				}
+				return;
+		}
+	}
+
+	/** Console Steps: Babadaba parent + spoke children from the same hub graph. */
+	private renderBabadabaSteps(nodes: readonly BabadabaHubNode[], stepLabel: string | undefined): void {
+		if (!this.uiBabadabaSteps || !this.uiBabadabaStepsChildren || !this.uiBabadabaStepsParent) {
+			return;
+		}
+		const show = this.isConsoleCardSelected();
+		this.uiBabadabaSteps.classList.toggle('hidden', !show);
+		if (!show) {
+			this.babadabaStepsListeners.clear();
+			this.uiBabadabaStepsChildren.replaceChildren();
+			return;
+		}
+
+		clearNode(this.uiBabadabaStepsParent);
+		this.uiBabadabaStepsParent.append(
+			localize('customMode.babadabaStepsParent', 'Babadaba'),
+			$('span.custom-mode-babadaba-steps-parent-detail', undefined,
+				stepLabel
+					? localize('customMode.babadabaStepsParentDetailStep', ' · {0}', stepLabel)
+					: localize('customMode.babadabaStepsParentDetail', ' · Workspace manager')),
+		);
+
+		this.babadabaStepsListeners.clear();
+		this.uiBabadabaStepsChildren.replaceChildren();
+		for (const node of nodes) {
+			const child = $('button.custom-mode-babadaba-steps-child', {
+				type: 'button',
+				role: 'listitem',
+				title: node.detail ?? node.label,
+				'aria-label': node.detail
+					? localize('customMode.babadabaStepsChildAria', '{0}: {1}', node.label, node.detail)
+					: node.label,
+			},
+				$('span.custom-mode-babadaba-steps-child-dot', { 'aria-hidden': 'true' }),
+				$('span.custom-mode-babadaba-steps-child-label', undefined, node.label),
+			) as HTMLButtonElement;
+			child.classList.toggle('is-active', node.state === 'active');
+			child.classList.toggle('is-building', node.state === 'building');
+			child.classList.toggle('is-attention', node.state === 'attention');
+			child.classList.toggle('is-passive', !node.actionId);
+			if (node.actionId) {
+				this.babadabaStepsListeners.add(addDisposableListener(child, 'click', () => {
+					this.activateBabadabaHubNode(node);
+				}));
+			}
+			this.uiBabadabaStepsChildren.appendChild(child);
+		}
+	}
+
 	private renderConsoleWorkflowProgress(): void {
 		if (!this.uiConsoleStatusTracker || !this.uiConsoleStatusRail || !this.uiConsoleStatusLabel || !this.uiConsoleStatusNextActionButton) {
 			return;
 		}
 		const signals = this.collectConsoleWorkflowSignals();
+		this.updateBabadabaStage(signals);
 		this.syncConsoleFirstRun(signals);
 		const showSteps = this.isConsoleCardSelected();
 		this.uiConsoleStatusTracker.classList.toggle('hidden', !showSteps);
@@ -11356,6 +11985,7 @@ class ModeShellContribution extends Disposable {
 			? surfaceIdFromRailParentId(displayParent)
 			: undefined;
 		// Subtitles only on surface-related cards (Surfaces / Surface rows / sections).
+		const workspaceLabel = this.getWorkspaceSectionLabel();
 		const cards: CardRailItem[] = [
 			{
 				id: 'console',
@@ -11364,7 +11994,13 @@ class ModeShellContribution extends Disposable {
 				title: this.consoleExpanded && !openSurfaceId
 					? localize('customMode.workspaceHomeConsoleCollapse', 'Collapse Console sections')
 					: localize('customMode.workspaceHomeConsoleOpen', 'Open Console'),
-				groupLabel: this.getWorkspaceSectionLabel(),
+				groupLabel: workspaceLabel,
+				groupLabelAction: true,
+				groupLabelActionAriaLabel: localize(
+					'customMode.workspaceSwitcherAria',
+					'Switch workspace, current: {0}',
+					workspaceLabel,
+				),
 			},
 			{
 				id: 'code',
@@ -11745,6 +12381,7 @@ class ModeShellContribution extends Disposable {
 
 	private renderWorkspaceSurfaces(): void {
 		this.workspaceSurfaceCardListeners.clear();
+		this.revokeSurfaceUiSnapshotObjectUrls();
 		this.uiWorkspaceSurfacesGrid.replaceChildren();
 		const surfaces = this.orderedWorkspaceSurfaces();
 		if (!surfaces.length) {
@@ -11755,6 +12392,12 @@ class ModeShellContribution extends Disposable {
 		const openId = this.getOpenSurfaceId();
 		for (const surface of surfaces) {
 			this.uiWorkspaceSurfacesGrid.appendChild(this.createWorkspaceSurfaceCard(surface, openId === surface.id));
+		}
+	}
+
+	private revokeSurfaceUiSnapshotObjectUrls(): void {
+		for (const url of this.surfaceUiSnapshotObjectUrls.splice(0)) {
+			URL.revokeObjectURL(url);
 		}
 	}
 
@@ -11783,8 +12426,14 @@ class ModeShellContribution extends Disposable {
 				localize('customMode.workspaceSurfaceBadge', 'Surface')),
 		);
 		card.appendChild(top);
+		const media = $('div.custom-mode-ui-workspace-surfaces-card-media.hidden', {
+			'aria-hidden': 'true',
+		}) as HTMLElement;
+		card.appendChild(media);
+		let purposeEl: HTMLElement | undefined;
 		if (surface.purpose) {
-			card.appendChild($('div.custom-mode-ui-workspace-suggested-card-purpose', undefined, surface.purpose));
+			purposeEl = $('div.custom-mode-ui-workspace-suggested-card-purpose.custom-mode-ui-workspace-surfaces-card-purpose', undefined, surface.purpose);
+			card.appendChild(purposeEl);
 		}
 		card.appendChild(this.createWorkspaceSurfaceProgressEl(surface.id, progress));
 		const chips = [
@@ -11801,7 +12450,142 @@ class ModeShellContribution extends Disposable {
 		this.workspaceSurfaceCardListeners.add(addDisposableListener(card, 'click', () => {
 			void this.openWorkspaceSuggestedSurfacePlan(surface.id);
 		}));
+		void this.hydrateWorkspaceSurfaceCardSnapshot(surface, media, purposeEl);
 		return card;
+	}
+
+	private async hydrateWorkspaceSurfaceCardSnapshot(
+		surface: WorkspaceSurface,
+		mediaHost: HTMLElement,
+		purposeEl: HTMLElement | undefined,
+	): Promise<void> {
+		const preferred = preferredSurfaceUiSnapshotSource(surface);
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!preferred || !workspaceFolder) {
+			return;
+		}
+		const resolved = await resolveSurfaceUiSnapshotForCard(
+			this.fileService,
+			workspaceFolder,
+			surface.id,
+			preferred.url,
+		);
+		if (!resolved || !mediaHost.isConnected) {
+			return;
+		}
+		try {
+			const content = await this.fileService.readFile(resolved.image);
+			if (!mediaHost.isConnected) {
+				return;
+			}
+			const blob = new Blob([content.value.buffer as BlobPart], { type: 'image/jpeg' });
+			const objectUrl = URL.createObjectURL(blob);
+			this.surfaceUiSnapshotObjectUrls.push(objectUrl);
+			const img = $('img.custom-mode-ui-workspace-surfaces-card-media-img', {
+				src: objectUrl,
+				alt: '',
+				draggable: 'false',
+			}) as HTMLImageElement;
+			mediaHost.replaceChildren(img);
+			mediaHost.classList.remove('hidden');
+			purposeEl?.classList.add('has-snapshot');
+		} catch {
+			// Missing/unreadable cache — keep purpose-first layout.
+		}
+	}
+
+	private maybeCaptureSurfaceUiSnapshot(): void {
+		if (isWeb) {
+			return;
+		}
+		const surface = this.getSelectedSurface();
+		const preferred = surface ? preferredSurfaceUiSnapshotSource(surface) : undefined;
+		if (!surface || !preferred) {
+			return;
+		}
+		if (!this.embeddedUiShowsSurfacePreview(preferred.url)) {
+			return;
+		}
+		const current = this.getEmbeddedUiUrl();
+		if (!current || current === 'about:blank' || current.startsWith('chrome-error://')) {
+			return;
+		}
+		if (preferred.kind === 'local' && !this.appReachable) {
+			return;
+		}
+		// Deployed snapshots only when Deployed (or any load of production origin) is showing.
+		// Local snapshots only when there is no productionUrl (preferred already enforces that).
+		if (preferred.kind === 'deployed' && !this.urlsShareOrigin(current, preferred.url)) {
+			return;
+		}
+		void this.captureAndPersistSurfaceUiSnapshot(surface, preferred);
+	}
+
+	private async captureAndPersistSurfaceUiSnapshot(
+		surface: WorkspaceSurface,
+		preferred: SurfaceUiSnapshotSource,
+	): Promise<void> {
+		const workspaceFolder = this.getWorkspaceFolderUri();
+		if (!workspaceFolder || this.surfaceUiSnapshotCaptureInFlight.has(surface.id)) {
+			return;
+		}
+		this.surfaceUiSnapshotCaptureInFlight.add(surface.id);
+		try {
+			const sidecar = await readSurfaceUiSnapshotSidecar(this.fileService, workspaceFolder, surface.id);
+			if (sidecar && !surfaceUiSnapshotUrlsMatch(sidecar.sourceUrl, preferred.url)) {
+				await deleteSurfaceUiSnapshot(this.fileService, workspaceFolder, surface.id);
+			} else if (!shouldCaptureSurfaceUiSnapshot(sidecar, preferred.url, Date.now())) {
+				return;
+			}
+			if (!this.embeddedUiShowsSurfacePreview(preferred.url)) {
+				return;
+			}
+			const bytes = await this.captureEmbeddedUiSnapshotBytes();
+			if (!bytes?.byteLength) {
+				return;
+			}
+			await writeSurfaceUiSnapshot(this.fileService, workspaceFolder, surface.id, {
+				imageBytes: bytes,
+				sourceUrl: preferred.url,
+				kind: preferred.kind,
+			});
+			this.pushUiRuntimeLog(`[surface-snapshot] saved ${preferred.kind} for ${surface.id}`);
+			this.renderWorkspaceSurfaces();
+		} catch (e: unknown) {
+			const err = e as { message?: string } | undefined;
+			this.pushUiRuntimeLog(`[surface-snapshot] failed ${surface.id}: ${String(err?.message ?? e)}`);
+		} finally {
+			this.surfaceUiSnapshotCaptureInFlight.delete(surface.id);
+		}
+	}
+
+	private async captureEmbeddedUiSnapshotBytes(): Promise<Uint8Array | undefined> {
+		if (isWeb || !this.isWebviewElement(this.uiBrowser)) {
+			return undefined;
+		}
+		const webview = this.uiBrowser as unknown as {
+			capturePage?: () => Promise<{
+				isEmpty?: () => boolean;
+				toJPEG?: (quality: number) => Uint8Array;
+				toPNG?: () => Uint8Array;
+			}>;
+		};
+		if (typeof webview.capturePage !== 'function') {
+			return undefined;
+		}
+		try {
+			const image = await webview.capturePage();
+			if (image?.isEmpty?.()) {
+				return undefined;
+			}
+			if (typeof image?.toJPEG !== 'function') {
+				return undefined;
+			}
+			const jpeg = image.toJPEG(80);
+			return jpeg?.byteLength ? jpeg : undefined;
+		} catch {
+			return undefined;
+		}
 	}
 
 	private createWorkspaceSurfaceProgressEl(
@@ -18106,6 +18890,143 @@ class ModeShellContribution extends Disposable {
 		}));
 		this.uiSurfaceEmptyActions.append(openFolderBtn, newWorkspaceBtn);
 		this.uiSurfaceEmptyActions.classList.remove('hidden');
+	}
+
+	private toggleWorkspaceSwitcherMenu(anchor: HTMLElement): void {
+		if (this.workspaceSwitcherPopover) {
+			this.closeWorkspaceSwitcherMenu();
+			return;
+		}
+		void this.openWorkspaceSwitcherMenu(anchor);
+	}
+
+	private closeWorkspaceSwitcherMenu(): void {
+		this.workspaceSwitcherOpenGeneration++;
+		this.workspaceSwitcherListeners.clear();
+		const openAnchors = this.uiWorkspaceHomeCardRail?.rail.querySelectorAll(
+			'.custom-mode-card-rail-group-label.is-action[aria-expanded="true"]',
+		);
+		openAnchors?.forEach(el => el.setAttribute('aria-expanded', 'false'));
+		this.workspaceSwitcherPopover?.remove();
+		this.workspaceSwitcherPopover = undefined;
+	}
+
+	private positionWorkspaceSwitcherPopover(anchor: HTMLElement, popover: HTMLElement): void {
+		const rect = anchor.getBoundingClientRect();
+		const margin = 8;
+		const width = Math.min(280, mainWindow.innerWidth - margin * 2);
+		let left = rect.left;
+		if (left + width > mainWindow.innerWidth - margin) {
+			left = Math.max(margin, mainWindow.innerWidth - margin - width);
+		}
+		popover.style.width = `${width}px`;
+		popover.style.left = `${left}px`;
+		popover.style.top = `${rect.bottom + 6}px`;
+		const popoverHeight = popover.getBoundingClientRect().height;
+		if (rect.bottom + 6 + popoverHeight > mainWindow.innerHeight - margin && rect.top > popoverHeight + margin) {
+			popover.style.top = `${Math.max(margin, rect.top - popoverHeight - 6)}px`;
+		}
+	}
+
+	private async openWorkspaceSwitcherMenu(anchor: HTMLElement): Promise<void> {
+		const generation = ++this.workspaceSwitcherOpenGeneration;
+		this.workspaceSwitcherListeners.clear();
+		anchor.setAttribute('aria-expanded', 'true');
+
+		const list = $('div.custom-mode-workspace-switcher-list', {
+			role: 'none',
+		});
+		list.appendChild(
+			$('div.custom-mode-workspace-switcher-empty', undefined,
+				localize('customMode.workspaceSwitcherLoading', 'Loading workspaces…')),
+		);
+
+		const createBtn = $('button.custom-mode-workspace-switcher-create', {
+			type: 'button',
+			role: 'menuitem',
+		}, localize('customMode.workspaceSwitcherCreate', '+ Create Workspace')) as HTMLButtonElement;
+		this.workspaceSwitcherListeners.add(addDisposableListener(createBtn, 'click', () => {
+			this.closeWorkspaceSwitcherMenu();
+			void this.defaultProjectService.openFallbackWorkspace();
+		}));
+
+		const popover = $('div.custom-mode-workspace-switcher-popover', {
+			role: 'menu',
+			'aria-label': localize('customMode.workspaceSwitcherMenuAria', 'Workspaces'),
+		},
+			$('div.custom-mode-workspace-switcher-heading', undefined,
+				localize('customMode.workspaceSwitcherHeading', 'Workspaces')),
+			list,
+			createBtn,
+		);
+		// Critical layout inline so the menu stays visible even if stylesheet scope drifts.
+		popover.style.position = 'fixed';
+		popover.style.zIndex = '2800';
+		this.workspaceSwitcherPopover = popover;
+		// Styles are scoped under `.monaco-workbench`; body is a sibling, not a descendant.
+		this.container.appendChild(popover);
+		this.positionWorkspaceSwitcherPopover(anchor, popover);
+
+		this.workspaceSwitcherListeners.add(addDisposableListener(mainWindow.document, 'pointerdown', (event: PointerEvent) => {
+			const target = event.target;
+			if (!(target instanceof Node)) {
+				return;
+			}
+			if (popover.contains(target)) {
+				return;
+			}
+			if (target instanceof Element && target.closest('.custom-mode-card-rail-group-label.is-action')) {
+				return;
+			}
+			this.closeWorkspaceSwitcherMenu();
+		}));
+		this.workspaceSwitcherListeners.add(addDisposableListener(mainWindow.document, 'keydown', (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				this.closeWorkspaceSwitcherMenu();
+				anchor.focus();
+			}
+		}));
+		this.workspaceSwitcherListeners.add(toDisposable(() => {
+			if (this.workspaceSwitcherPopover === popover) {
+				popover.remove();
+				this.workspaceSwitcherPopover = undefined;
+			}
+		}));
+
+		const folders = await this.collectOpenableFolders();
+		if (generation !== this.workspaceSwitcherOpenGeneration || this.workspaceSwitcherPopover !== popover) {
+			return;
+		}
+
+		clearNode(list);
+		if (folders.length === 0) {
+			list.appendChild(
+				$('div.custom-mode-workspace-switcher-empty', undefined,
+					localize('customMode.workspaceSwitcherEmpty', 'No other workspaces yet.')),
+			);
+		} else {
+			for (const folder of folders) {
+				const button = $('button.custom-mode-workspace-switcher-item', {
+					type: 'button',
+					role: 'menuitem',
+					title: folder.fullPath,
+					'aria-label': localize('customMode.workspaceSwitcherOpenAria', 'Open workspace {0}', folder.name),
+				},
+					$('span.custom-mode-workspace-switcher-item-name', undefined, folder.name),
+					$('span.custom-mode-workspace-switcher-item-path', undefined, folder.parentPath || folder.fullPath),
+				) as HTMLButtonElement;
+				this.workspaceSwitcherListeners.add(addDisposableListener(button, 'click', () => {
+					this.closeWorkspaceSwitcherMenu();
+					void this.hostService.openWindow([folder.openable], {
+						forceReuseWindow: true,
+						remoteAuthority: folder.remoteAuthority ?? null,
+					});
+				}));
+				list.appendChild(button);
+			}
+		}
+		this.positionWorkspaceSwitcherPopover(anchor, popover);
 	}
 
 	private async collectOpenableFolders(): Promise<Array<{

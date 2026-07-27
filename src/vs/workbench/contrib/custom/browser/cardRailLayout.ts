@@ -4,7 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, clearNode, getWindow } from '../../../../base/browser/dom.js';
+import { Codicon } from '../../../../base/common/codicons.js';
 import { DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 
 /**
  * Shared left 2-col card rail + right content host — the single card column for the
@@ -53,6 +55,13 @@ export interface CardRailItem {
 	/** Optional section title rendered above the group gap (implies a group break). */
 	readonly groupLabel?: string;
 	/**
+	 * When true with `groupLabel`, render an interactive label (name + chevron) that
+	 * fires `onGroupLabelAction` instead of a static section title.
+	 */
+	readonly groupLabelAction?: boolean;
+	/** Accessible name for the interactive group label button (defaults to the label text). */
+	readonly groupLabelActionAriaLabel?: string;
+	/**
 	 * Consecutive cards sharing this id are wrapped in a blue association outline
 	 * (e.g. Console sections, or a surface's Rules/Plan/… cards).
 	 */
@@ -74,6 +83,11 @@ export interface CardRailLayoutOptions {
 	readonly onHoverParent?: (id: string | undefined) => void;
 	/** Open an external URL from a card value link (Preview / Deployed). */
 	readonly onOpenHref?: (url: string) => void;
+	/**
+	 * Fired when an interactive group label (`groupLabelAction`) is activated.
+	 * `anchor` is the label button for positioning menus/popovers.
+	 */
+	readonly onGroupLabelAction?: (anchor: HTMLElement) => void;
 	readonly content?: HTMLElement | readonly HTMLElement[];
 	readonly ariaLabel?: string;
 	readonly className?: string;
@@ -489,6 +503,50 @@ export const CARD_RAIL_STYLESHEET = `
 	overflow-wrap: anywhere;
 	word-break: break-word;
 }
+.custom-mode-card-rail-group-label.is-action {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	width: 100%;
+	box-sizing: border-box;
+	margin: 8px 0 0;
+	padding: 2px 4px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	pointer-events: auto;
+	cursor: pointer;
+	text-align: left;
+	appearance: none;
+	-webkit-appearance: none;
+}
+.custom-mode-card-rail-group-label.is-action:hover,
+.custom-mode-card-rail-group-label.is-action:focus-visible {
+	background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
+	color: var(--vscode-foreground);
+	outline: none;
+}
+.custom-mode-card-rail-group-label.is-action[aria-expanded="true"] {
+	color: var(--vscode-foreground);
+}
+.custom-mode-card-rail-group-label-text {
+	min-width: 0;
+	flex: 1 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.custom-mode-card-rail-group-label-chevron {
+	flex: 0 0 auto;
+	font-size: 12px;
+	line-height: 1;
+	opacity: 0.75;
+}
+.custom-mode-card-rail-group-label.is-action[aria-expanded="true"] .custom-mode-card-rail-group-label-chevron {
+	transform: rotate(180deg);
+}
 /* Extra air between Console/Code and Surfaces (and later rail groups). */
 .custom-mode-card-rail-group-label:not(:first-child) {
 	margin-top: 28px;
@@ -592,6 +650,8 @@ export function cardRailItemsEqual(a: readonly CardRailItem[], b: readonly CardR
 			|| (left.href ?? '') !== (right.href ?? '')
 			|| !!left.groupStart !== !!right.groupStart
 			|| (left.groupLabel ?? '') !== (right.groupLabel ?? '')
+			|| !!left.groupLabelAction !== !!right.groupLabelAction
+			|| (left.groupLabelActionAriaLabel ?? '') !== (right.groupLabelActionAriaLabel ?? '')
 			|| (left.assocGroup ?? '') !== (right.assocGroup ?? '')
 			|| !!left.pendingAction !== !!right.pendingAction
 			|| (left.progressPercent ?? -1) !== (right.progressPercent ?? -1)
@@ -614,6 +674,7 @@ export function cardRailStructureEqual(a: readonly CardRailItem[], b: readonly C
 			left.id !== right.id
 			|| !!left.groupStart !== !!right.groupStart
 			|| (left.groupLabel ?? '') !== (right.groupLabel ?? '')
+			|| !!left.groupLabelAction !== !!right.groupLabelAction
 			|| (left.assocGroup ?? '') !== (right.assocGroup ?? '')
 		) {
 			return false;
@@ -934,10 +995,31 @@ export function createCardRailLayout(options: CardRailLayoutOptions): CardRailLa
 			if (card.groupLabel) {
 				assocHost = undefined;
 				assocGroupId = undefined;
-				rail.appendChild($('div.custom-mode-card-rail-group-label', {
-					'aria-hidden': 'true',
-					title: card.groupLabel,
-				}, card.groupLabel));
+				if (card.groupLabelAction && options.onGroupLabelAction) {
+					const labelButton = $('button.custom-mode-card-rail-group-label.is-action', {
+						type: 'button',
+						title: card.groupLabel,
+						'aria-haspopup': 'menu',
+						'aria-expanded': 'false',
+						'aria-label': card.groupLabelActionAriaLabel?.trim() || card.groupLabel,
+					},
+						$('span.custom-mode-card-rail-group-label-text', undefined, card.groupLabel),
+						$('span.custom-mode-card-rail-group-label-chevron.codicon' + ThemeIcon.asCSSSelector(Codicon.chevronDown), {
+							'aria-hidden': 'true',
+						}),
+					) as HTMLButtonElement;
+					cardListeners.add(addDisposableListener(labelButton, 'click', (event: MouseEvent) => {
+						event.preventDefault();
+						event.stopPropagation();
+						options.onGroupLabelAction?.(labelButton);
+					}));
+					rail.appendChild(labelButton);
+				} else {
+					rail.appendChild($('div.custom-mode-card-rail-group-label', {
+						'aria-hidden': 'true',
+						title: card.groupLabel,
+					}, card.groupLabel));
+				}
 			} else if (card.groupStart) {
 				assocHost = undefined;
 				assocGroupId = undefined;

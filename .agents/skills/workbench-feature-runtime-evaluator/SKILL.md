@@ -1,11 +1,11 @@
 ---
 name: workbench-feature-runtime-evaluator
-description: Evaluate whether a VS Code/GoalConsole workbench feature actually works at runtime, with screenshot proof, console/runtime evidence, DOM checks, and prioritized findings. Use when auditing blank screens, broken workbench startup, generated surface previews, goal-workspace UI flows, or any feature whose correctness depends on the running Electron workbench.
+description: Evaluate whether a VS Code/Babadaba workbench feature actually works at runtime, with screenshot proof, console/runtime evidence, DOM checks, and prioritized findings. Use when auditing blank screens, broken workbench startup, generated surface previews, goal-workspace UI flows, or any feature whose correctness depends on the running Electron workbench.
 ---
 
 # Workbench Feature Runtime Evaluator
 
-Evaluate a feature in the running GoalConsole/VS Code workbench using real runtime evidence. This skill is for proving whether a feature works, not just whether code looks plausible.
+Evaluate a feature in the running Babadaba/VS Code workbench using real runtime evidence. This skill is for proving whether a feature works, not just whether code looks plausible.
 
 Always include screenshots as evidence when a UI can run. A report without screenshots is incomplete unless launch is impossible; in that case, explain exactly what blocked screenshot capture.
 

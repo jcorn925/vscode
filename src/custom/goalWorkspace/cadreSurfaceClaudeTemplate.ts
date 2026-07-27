@@ -534,7 +534,7 @@ export function buildSurfaceSchemaRegenPrompt(options: {
  * not enough — without this file Claude reports "no MCP servers connected."
  *
  * ``ixGraphScriptAbsPath`` must be an absolute path to ``scripts/ix_graph_mcp.py``
- * in the GoalConsole / Code OSS checkout (Console cwd is not the product root).
+ * in the Babadaba / Code OSS checkout (Console cwd is not the product root).
  */
 export function buildCadreClaudeMcpJson(ixGraphScriptAbsPath: string): string {
 	return `${JSON.stringify({

@@ -139,7 +139,7 @@ export function createSurfaceExtensibilityRegistry(): ISurfaceExtensibilityRegis
 }
 
 export const Extensions = {
-	SurfaceExtensibility: 'goalConsole.surfaceExtensibility',
+	SurfaceExtensibility: 'babadaba.surfaceExtensibility',
 };
 
 export const SurfaceExtensibilityRegistry: ISurfaceExtensibilityRegistry = new SurfaceExtensibilityRegistryImpl();

@@ -7,7 +7,7 @@ description: Evaluate whether the VS Code custom Console workspace UI implementa
 
 Evaluate the implemented Console workspace UI against the approved design direction for the surface builder. This skill is a review workflow: gather evidence, compare against the target design, identify gaps, and produce prioritized findings.
 
-Use **name-agnostic Console terminology** in reports: refer to `ConsoleService`, `ConsoleWorkspace`, workspace manifest (`workspace.goal.json`), and the **workspace tab** (folder name in the top bar). Avoid product-specific labels like "GoalConsole" unless quoting user-visible copy.
+Use **name-agnostic Console terminology** in reports: refer to `ConsoleService`, `ConsoleWorkspace`, workspace manifest (`workspace.goal.json`), and the **workspace tab** (folder name in the top bar). Avoid product-specific labels like "Babadaba" unless quoting user-visible copy.
 
 ## Target Design
 

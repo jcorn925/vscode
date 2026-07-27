@@ -141,7 +141,7 @@ function classify(facts) {
 }
 
 /**
- * Extracts deterministic, repo-specific facts used to ground a GoalConsole
+ * Extracts deterministic, repo-specific facts used to ground a Babadaba
  * workflow assessment. Read-only; never executes repo code.
  */
 export function analyzeRepo(repoPath) {

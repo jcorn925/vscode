@@ -256,6 +256,43 @@ suite('cardRailLayout', () => {
 		const label = layout.rail.querySelector('.custom-mode-card-rail-group-label');
 		assert.ok(label);
 		assert.strictEqual(label?.textContent, 'New Surface');
+		assert.ok(!(label instanceof HTMLButtonElement));
+		layout.dispose();
+	});
+
+	test('groupLabelAction renders a chevron button and fires onGroupLabelAction', () => {
+		const anchors: HTMLElement[] = [];
+		const layout = createCardRailLayout({
+			activeId: 'console',
+			cards: [
+				{
+					id: 'console',
+					key: 'Console',
+					value: '',
+					groupLabel: 'Cadre AI Support Bot',
+					groupLabelAction: true,
+					groupLabelActionAriaLabel: 'Switch workspace, current: Cadre AI Support Bot',
+				},
+				{ id: 'code', key: 'Code', value: '' },
+			],
+			onSelect: () => { },
+			onGroupLabelAction: anchor => anchors.push(anchor),
+		});
+		const label = layout.rail.querySelector('button.custom-mode-card-rail-group-label.is-action') as HTMLButtonElement | null;
+		assert.ok(label);
+		assert.strictEqual(label?.getAttribute('aria-haspopup'), 'menu');
+		assert.strictEqual(label?.getAttribute('aria-expanded'), 'false');
+		assert.strictEqual(label?.getAttribute('aria-label'), 'Switch workspace, current: Cadre AI Support Bot');
+		assert.ok(label?.querySelector('.custom-mode-card-rail-group-label-text'));
+		assert.ok(label?.querySelector('.custom-mode-card-rail-group-label-chevron.codicon-chevron-down'));
+		assert.ok(label?.textContent?.includes('Cadre AI Support Bot'));
+		label?.click();
+		assert.strictEqual(anchors.length, 1);
+		assert.strictEqual(anchors[0], label);
+		assert.ok(!cardRailItemsEqual(
+			[{ id: 'console', key: 'Console', value: '', groupLabel: 'Cadre', groupLabelAction: true }],
+			[{ id: 'console', key: 'Console', value: '', groupLabel: 'Cadre' }],
+		));
 		layout.dispose();
 	});
 
